@@ -1,0 +1,53 @@
+{
+  "version": 3,
+  "cliVersion": "0.2.17",
+  "scaffoldedAt": "2026-08-21T08:54:14.553Z",
+  "name": "tracktime",
+  "description": "A simple time tracker application",
+  "domain": "tracktime.trebeljahr.com",
+  "features": [
+    "websocket",
+    "s3",
+    "analytics",
+    "desktop",
+    "mobile"
+  ],
+  "mlServices": [],
+  "s3Provider": "r2",
+  "deployTarget": "existing",
+  "deploymentMode": "coolify",
+  "surfaces": "fullstack",
+  "publicService": "client",
+  "ports": {
+    "server": 5159,
+    "client": 6477,
+    "nativeHmr": 7130
+  },
+  "localDev": {
+    "slug": "tracktime",
+    "domain": "local.trebeljahr.com"
+  },
+  "email": {
+    "transactional": "listmonk-ses",
+    "mailingList": "listmonk-ses"
+  },
+  "ses": {
+    "identity": "mail.tracktime.trebeljahr.com",
+    "mailFromDomain": "bounce.mail.tracktime.trebeljahr.com",
+    "mailFromLabel": "bounce",
+    "mailFromBehaviorOnMxFailure": "UseDefaultValue",
+    "mailFromManagedDnsRecords": [
+      {
+        "type": "MX",
+        "name": "bounce.mail.tracktime.trebeljahr.com",
+        "value": "feedback-smtp.eu-west-1.amazonses.com",
+        "priority": 10
+      },
+      {
+        "type": "TXT",
+        "name": "bounce.mail.tracktime.trebeljahr.com",
+        "value": "v=spf1 include:amazonses.com ~all"
+      }
+    ]
+  }
+}
