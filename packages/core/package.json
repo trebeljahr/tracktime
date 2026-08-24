@@ -1,0 +1,30 @@
+{
+  "name": "@starter/core",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./*": {
+      "import": "./dist/*.js",
+      "types": "./dist/*.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@starter/shared": "workspace:*",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

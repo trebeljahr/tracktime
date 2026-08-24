@@ -1,0 +1,16 @@
+let counter = 0;
+
+/**
+ * UUID-ish identifier that works in every host we target. Prefers
+ * `crypto.randomUUID`, falls back to a time+counter+random string so
+ * older WebViews and Node without webcrypto still get unique ids.
+ */
+export const createId = (): string => {
+  const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
+  if (cryptoObj && typeof cryptoObj.randomUUID === "function") {
+    return cryptoObj.randomUUID();
+  }
+  counter += 1;
+  const random = Math.random().toString(36).slice(2, 10);
+  return `id-${Date.now().toString(36)}-${counter.toString(36)}-${random}`;
+};
