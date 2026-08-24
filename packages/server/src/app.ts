@@ -7,7 +7,6 @@ import { toNodeHandler } from "better-auth/node";
 import { getAuth } from "./auth/auth.js";
 import { appRouter } from "./trpc/router.js";
 import { createContext } from "./trpc/context.js";
-import { handleStripeWebhook } from "./services/stripe.js";
 import { registerNewsletterRoutes } from "./services/newsletter/routes.js";
 import { isDatabaseReady } from "./db/connection.js";
 import { notFoundHandler, errorHandler } from "./middleware/error-handler.js";
@@ -39,12 +38,11 @@ export function createApp() {
     }
   });
 
-  // ── 2. Stripe webhook — needs raw body for signature verification ──
-  app.post(
-    "/api/stripe/webhook",
-    express.raw({ type: "application/json" }),
-    handleStripeWebhook,
-  );
+  // ── 2. (Stripe webhook slot) ───────────────────────────────────────
+  // This project was scaffolded without the Stripe feature, so there is no
+  // services/stripe.ts. If Stripe is added later, its webhook must be
+  // mounted HERE — before express.json() — because signature verification
+  // needs the raw body.
 
   // ── 3. Body parsing (for everything else) ──────────────────────────
   app.use(express.json({ limit: "100kb" }));
@@ -55,10 +53,14 @@ export function createApp() {
   app.use(morgan(env.isProduction ? "combined" : "dev"));
 
   // ── 5. tRPC ────────────────────────────────────────────────────────
+  // @trpc/server v11's express adapter is typed against @types/express v4
+  // while this server runs express v5, so the two RequestHandler shapes do
+  // not structurally overlap. The runtime contract is identical — only the
+  // type packages differ — hence the double cast.
   const trpcMiddleware = createExpressMiddleware({
     router: appRouter,
     createContext,
-  }) as RequestHandler;
+  }) as unknown as RequestHandler;
   app.use("/api/trpc", trpcMiddleware);
 
   // ── 5b. Newsletter (Listmonk + SES double-opt-in subscribe + confirm)

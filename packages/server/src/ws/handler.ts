@@ -1,6 +1,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Server } from "http";
 import type { ClientToServerMessage } from "@starter/shared";
+import { userRoomId } from "@starter/shared";
 import { authenticateUpgrade } from "./auth.js";
 import { RoomManager } from "./rooms.js";
 import { env, getTrustedOrigins } from "../config/env.js";
@@ -53,6 +54,15 @@ export function setupWebSocket(server: Server): WebSocketServer {
     // Auto-join room if roomId provided
     if (roomId && ws.userId) {
       roomManager.join(roomId, ws.userId, ws.displayName ?? "Anonymous", ws);
+    } else if (ws.userId) {
+      // No explicit room: join the user's own sync room so every device of
+      // this user receives that user's realtime sync events.
+      roomManager.join(
+        userRoomId(ws.userId),
+        ws.userId,
+        ws.displayName ?? "Anonymous",
+        ws,
+      );
     }
 
     // Ping/pong heartbeat

@@ -15,7 +15,7 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
     "plugins": [
       {
@@ -26,20 +26,8 @@
       "@/*": [
         "./src/*"
       ],
-      "@starter/shared": [
-        "../shared/src/index.ts"
-      ],
-      "@starter/shared/*": [
-        "../shared/src/*"
-      ],
       "@starter/server/trpc": [
         "../server/src/trpc/router.ts"
-      ],
-      "@starter/core": [
-        "../core/src/index.ts"
-      ],
-      "@starter/core/*": [
-        "../core/src/*"
       ]
     }
   },
@@ -47,7 +35,8 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    ".next/types/**/*.ts"
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

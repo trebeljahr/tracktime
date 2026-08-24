@@ -1,0 +1,67 @@
+import mongoose, { Schema, type Document } from "mongoose";
+import type { Project as ProjectWire } from "@starter/shared";
+
+export const DEFAULT_PROJECT_COLOR = "#4f46e5";
+
+export interface IProject extends Document {
+  ownerId: string;
+  name: string;
+  color: string;
+  clientId: string | null;
+  billableDefault: boolean;
+  hourlyRate: number | null;
+  archived: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Structural shape accepted by {@link toClientProject} — satisfied by both a
+ * `.lean()` result and a hydrated document.
+ */
+export type ProjectDocLike = {
+  _id?: unknown;
+  ownerId: string;
+  name: string;
+  color: string;
+  clientId: string | null;
+  billableDefault: boolean;
+  hourlyRate: number | null;
+  archived: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+const projectSchema = new Schema<IProject>(
+  {
+    ownerId: { type: String, required: true, index: true },
+    name: { type: String, required: true, maxlength: 120, trim: true },
+    color: { type: String, required: true, default: DEFAULT_PROJECT_COLOR },
+    clientId: { type: String, default: null },
+    billableDefault: { type: Boolean, required: true, default: true },
+    hourlyRate: { type: Number, default: null },
+    archived: { type: Boolean, required: true, default: false },
+  },
+  { timestamps: true },
+);
+
+projectSchema.index({ ownerId: 1, clientId: 1 });
+projectSchema.index({ ownerId: 1, archived: 1 });
+
+export const Project = mongoose.model<IProject>("Project", projectSchema);
+
+/** Convert a Project document into the exact wire shape. */
+export function toClientProject(doc: ProjectDocLike): ProjectWire {
+  return {
+    id: String(doc._id),
+    ownerId: doc.ownerId,
+    name: doc.name,
+    color: doc.color,
+    clientId: doc.clientId ?? null,
+    billableDefault: doc.billableDefault,
+    hourlyRate: doc.hourlyRate ?? null,
+    archived: doc.archived,
+    createdAt: doc.createdAt.toISOString(),
+    updatedAt: doc.updatedAt.toISOString(),
+  };
+}

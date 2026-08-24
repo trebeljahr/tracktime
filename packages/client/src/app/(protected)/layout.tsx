@@ -1,9 +1,9 @@
 "use client";
 
+import * as React from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
-import { signOut } from "@/lib/auth-client";
+import { AppShell } from "@/components/app-shell";
 
 export default function ProtectedLayout({
   children,
@@ -11,7 +11,11 @@ export default function ProtectedLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+
+  React.useEffect(() => {
+    if (!isLoading && !isAuthenticated) router.replace("/login");
+  }, [isAuthenticated, isLoading, router]);
 
   if (isLoading) {
     return (
@@ -21,58 +25,7 @@ export default function ProtectedLayout({
     );
   }
 
-  if (!isAuthenticated) {
-    router.push("/login");
-    return null;
-  }
+  if (!isAuthenticated) return null;
 
-  async function handleSignOut() {
-    await signOut();
-    router.push("/login");
-  }
-
-  return (
-    <div className="min-h-screen">
-      <header className="border-b">
-        <div className="container flex h-14 items-center justify-between">
-          <nav className="flex items-center gap-6 text-sm">
-            <Link href="/dashboard" className="font-semibold">
-              My App
-            </Link>
-            <Link
-              href="/dashboard"
-              className="text-muted-foreground hover:text-foreground"
-            >
-              Dashboard
-            </Link>
-            <Link
-              href="/profile"
-              className="text-muted-foreground hover:text-foreground"
-            >
-              Profile
-            </Link>
-            <Link
-              href="/settings"
-              className="text-muted-foreground hover:text-foreground"
-            >
-              Settings
-            </Link>
-          </nav>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">
-              {user?.name ?? user?.email}
-            </span>
-            <button
-              onClick={handleSignOut}
-              className="text-sm text-muted-foreground hover:text-foreground"
-              data-testid="sign-out"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-      <main className="container py-8">{children}</main>
-    </div>
-  );
+  return <AppShell>{children}</AppShell>;
 }

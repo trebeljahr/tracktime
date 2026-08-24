@@ -2,15 +2,24 @@ import type { Metadata } from "next";
 import { TRPCProvider } from "@/providers/trpc-provider";
 import { AuthProvider } from "@/providers/auth-provider";
 import { MobileBridgeLoader } from "@/mobile/MobileBridgeLoader";
+import { Toaster } from "@/components/ui/sonner";
 import "@/styles/globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "My App",
-    template: "%s | My App",
+    default: "tracktime",
+    template: "%s | tracktime",
   },
-  description: "A full-stack web application",
+  description: "Time tracking with reporting that actually answers questions",
 };
+
+/**
+ * Runs before first paint so the theme class is on <html> ahead of any
+ * styled content — without it, a dark-mode user sees a white flash on
+ * every hard navigation. Keep the storage key in sync with
+ * `THEME_STORAGE_KEY` in components/theme-toggle.tsx.
+ */
+const THEME_SCRIPT = `(function(){try{var c=localStorage.getItem("tracktime.theme");if(c!=="light"&&c!=="dark")c=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";var r=document.documentElement;r.classList.remove("light","dark");r.classList.add(c);r.style.colorScheme=c;}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -18,8 +27,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         {/* OpenPanel analytics — replace with your client ID */}
         {process.env.NEXT_PUBLIC_OPENPANEL_CLIENT_ID && (
           <script
@@ -46,6 +56,7 @@ export default function RootLayout({
         <TRPCProvider>
           <AuthProvider>{children}</AuthProvider>
         </TRPCProvider>
+        <Toaster />
       </body>
     </html>
   );
