@@ -91,7 +91,11 @@ export const parseDurationInput = (raw: string): number | null => {
   const shorthand = input.replace(/^(\d+(?:[.,]\d+)?\s*h)\s*(\d{1,2})$/, "$1$2m");
 
   // unit form: 1h30m, 1.5h, 90m, 45s (units may repeat but must be known)
-  const unitPattern = /(\d+(?:[.,]\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds)/g;
+  // Alternation MUST be ordered longest-first: regex alternation is
+  // first-match-wins, so listing "h" before "hrs" would match the "h" of
+  // "2hrs", leave "rs" unconsumed and reject the whole input.
+  const unitPattern =
+    /(\d+(?:[.,]\d+)?)\s*(hours|hour|hrs|hr|h|minutes|minute|mins|min|m|seconds|second|secs|sec|s)/g;
   let matched = "";
   let seconds = 0;
   for (const match of shorthand.matchAll(unitPattern)) {
