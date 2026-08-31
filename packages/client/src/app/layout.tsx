@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { TRPCProvider } from "@/providers/trpc-provider";
 import { AuthProvider } from "@/providers/auth-provider";
 import { MobileBridgeLoader } from "@/mobile/MobileBridgeLoader";
@@ -11,6 +11,11 @@ export const metadata: Metadata = {
     template: "%s | tracktime",
   },
   description: "Time tracking with reporting that actually answers questions",
+  manifest: "/manifest.json",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#4F46E5",
 };
 
 /**

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 196 40" width="196" height="40" role="img" aria-label="tracktime">
+  <!-- Wordmark inherits `currentColor`, so the lockup follows the app's own
+       light/dark class instead of the OS-level media query. Only the mark's
+       neutral track ring needs the media query (it has no text context). -->
+  <style>
+    .track { stroke: #D4D4D8 }
+    @media (prefers-color-scheme: dark) { .track { stroke: #3F3F46 } }
+  </style>
+  <g transform="translate(4 4)">
+    <circle class="track" cx="16" cy="16" r="11" fill="none" stroke-width="4"/>
+    <path d="M16 5A11 11 0 1 1 6.474 21.5" fill="none" stroke="#4F46E5" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="16" cy="16" r="2.6" fill="#4F46E5"/>
+  </g>
+  <text x="44" y="27" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Inter, Helvetica, Arial, sans-serif"
+        font-size="22" font-weight="600" letter-spacing="-0.6">
+    <tspan fill="currentColor">track</tspan><tspan fill="#4F46E5">time</tspan>
+  </text>
+</svg>
