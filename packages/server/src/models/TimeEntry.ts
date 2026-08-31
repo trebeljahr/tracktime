@@ -44,7 +44,10 @@ export type TimeEntryDocLike = {
 
 const timeEntrySchema = new Schema<ITimeEntry>(
   {
-    ownerId: { type: String, required: true, index: true },
+    // No `index: true` here — the compound and partial-unique indexes declared
+    // below already cover ownerId, and declaring both makes mongoose warn about
+    // a duplicate index on {"ownerId":1}.
+    ownerId: { type: String, required: true },
     description: { type: String, required: true, default: "", maxlength: 500 },
     projectId: { type: String, default: null },
     taskId: { type: String, default: null },

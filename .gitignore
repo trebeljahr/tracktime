@@ -4,6 +4,8 @@ node_modules/
 # Build output
 dist/
 .next/
+# Per-instance Next build dirs (scripts/dev.mjs)
+.next-*/
 .turbo/
 
 # Electron compiled output (source is electron/*.ts; compiled JS is generated)
