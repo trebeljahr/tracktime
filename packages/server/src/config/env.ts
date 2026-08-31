@@ -111,6 +111,33 @@ export const env = {
   isTest: getOptional("NODE_ENV") === "test",
 } as const;
 
+/**
+ * In development the same dev server is reachable as both http://localhost:PORT
+ * and http://127.0.0.1:PORT, and the browser treats those as different origins.
+ * Whichever one FRONTEND_URL names, requests from the other are rejected by CORS
+ * with "No 'Access-Control-Allow-Origin' header is present". Trust both spellings
+ * so it does not matter which one the developer happens to open.
+ *
+ * NOTE: this only fixes CORS. localhost and 127.0.0.1 are also cross-SITE, so a
+ * SameSite=Lax session cookie set on one is not sent to the other — the client
+ * and the API must still agree on one host for auth to work. scripts/dev.mjs
+ * points both at localhost.
+ *
+ * Not applied in production, where the trusted origin list must stay exact.
+ */
+function withLocalhostAliases(origins: string[]): string[] {
+  const aliased = origins.flatMap((origin) => {
+    if (origin.includes("//localhost")) {
+      return [origin, origin.replace("//localhost", "//127.0.0.1")];
+    }
+    if (origin.includes("//127.0.0.1")) {
+      return [origin, origin.replace("//127.0.0.1", "//localhost")];
+    }
+    return [origin];
+  });
+  return [...new Set(aliased)];
+}
+
 /** All origins trusted for CORS + better-auth. Merges FRONTEND_URL with
  *  the optional TRUSTED_ORIGINS CSV so native shells (Capacitor, custom
  *  Electron protocols) can authenticate against the same API. */
@@ -118,5 +145,6 @@ export function getTrustedOrigins(): string[] {
   const extras = env.TRUSTED_ORIGINS
     ? env.TRUSTED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
-  return env.FRONTEND_URL ? [env.FRONTEND_URL, ...extras] : extras;
+  const origins = env.FRONTEND_URL ? [env.FRONTEND_URL, ...extras] : extras;
+  return env.isProduction ? origins : withLocalhostAliases(origins);
 }

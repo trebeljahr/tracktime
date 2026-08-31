@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { signUp } from "@/lib/auth-client";
+import { signUp, getSession, POST_AUTH_REDIRECT } from "@/lib/auth-client";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -30,7 +30,10 @@ export default function SignupPage() {
       if (result.error) {
         setError(result.error.message ?? "Signup failed");
       } else {
-        router.push("/dashboard");
+        // Populate the session store before navigating, or the protected
+        // layout reads an empty session and redirects back to /login.
+        await getSession();
+        router.replace(POST_AUTH_REDIRECT);
       }
     } catch {
       setError("An unexpected error occurred");

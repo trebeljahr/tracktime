@@ -33,5 +33,13 @@ export const authClient = createAuthClient({
   baseURL: resolveAuthBaseUrl(),
 });
 
-// Re-export commonly used methods
-export const { signIn, signUp, signOut, useSession } = authClient;
+// Re-export commonly used methods.
+//
+// `getSession` matters after sign-in and sign-up: it refreshes better-auth's
+// session store before the app navigates. Without it the protected layout can
+// read a still-empty session, decide the user is not authenticated, and bounce
+// them straight back to /login even though the cookie was set correctly.
+export const { signIn, signUp, signOut, useSession, getSession } = authClient;
+
+/** Where a freshly authenticated user lands. */
+export const POST_AUTH_REDIRECT = "/track";

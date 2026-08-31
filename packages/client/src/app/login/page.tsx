@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { signIn } from "@/lib/auth-client";
+import { signIn, getSession, POST_AUTH_REDIRECT } from "@/lib/auth-client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,7 +22,9 @@ export default function LoginPage() {
       if (result.error) {
         setError(result.error.message ?? "Login failed");
       } else {
-        router.push("/dashboard");
+        // See the note in signup: refresh the session before navigating.
+        await getSession();
+        router.replace(POST_AUTH_REDIRECT);
       }
     } catch {
       setError("An unexpected error occurred");

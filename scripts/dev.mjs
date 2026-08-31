@@ -9,8 +9,8 @@
 //   * ports          — random high ports, never the conventional 3000/5000/8080
 //   * MongoDB        — a per-instance database, so two checkouts never share or
 //                      clobber each other's time entries
-//   * Next.js build  — a per-instance distDir, so the `.next` cache and the
-//                      dev-server lock are not shared between checkouts
+//   * host           — one canonical browser host, so CORS and session cookies
+//                      work no matter which instance you open
 //
 // Everything is overridable from the environment when you want two checkouts to
 // share (or want a stable setup):
@@ -20,6 +20,7 @@
 //   MONGODB_URI                 use one exact database, ignoring the per-instance name
 //   MONGO_HOST, MONGO_PORT      point at a MongoDB somewhere other than 127.0.0.1:27017
 //   NEXT_DIST_DIR               override the Next.js build directory
+//   WEB_HOST                    browser-facing host (default localhost)
 //
 // Usage:
 //   pnpm run dev                Random high ports (client + server)
@@ -37,6 +38,13 @@ const fixedMode = process.argv.includes("--fixed");
 const includeDocs = process.argv.includes("--docs");
 
 const repoRoot = process.cwd();
+
+// The one host the browser talks to. localhost and 127.0.0.1 are different
+// origins AND different sites, so mixing them breaks CORS and stops SameSite=Lax
+// session cookies from being sent to the API. Everything browser-facing — the
+// printed URLs, the client's API/WS URLs, FRONTEND_URL and BETTER_AUTH_URL —
+// therefore uses this single value. Override with WEB_HOST if needed.
+const WEB_HOST = process.env.WEB_HOST ?? "localhost";
 
 // ── Instance identity ────────────────────────────────────────────────
 //
@@ -157,11 +165,11 @@ if (existsSync(lockDir)) {
 
 console.log(`\n  Instance: ${instanceId}`);
 console.log(`  Mode:     ${fixedMode ? "fixed" : "random high ports"}`);
-console.log(`  Client:   http://127.0.0.1:${clientPort}`);
+console.log(`  Client:   http://${WEB_HOST}:${clientPort}`);
 if (includeDocs) {
-  console.log(`  Docs:     http://127.0.0.1:${docsPort}`);
+  console.log(`  Docs:     http://${WEB_HOST}:${docsPort}`);
 }
-console.log(`  Server:   http://127.0.0.1:${apiPort}`);
+console.log(`  Server:   http://${WEB_HOST}:${apiPort}`);
 console.log(`  Database: ${mongoUri}`);
 console.log(`  Next dir: packages/client/${nextDistDir}\n`);
 
@@ -179,16 +187,16 @@ try {
 
 const clientEnv = [
   `PORT=${clientPort}`,
-  `NEXT_PUBLIC_API_URL=http://127.0.0.1:${apiPort}`,
-  `NEXT_PUBLIC_WS_URL=ws://127.0.0.1:${apiPort}`,
+  `NEXT_PUBLIC_API_URL=http://${WEB_HOST}:${apiPort}`,
+  `NEXT_PUBLIC_WS_URL=ws://${WEB_HOST}:${apiPort}`,
   `NEXT_DIST_DIR=${nextDistDir}`,
 ].join(" ");
 
 const serverEnv = [
   `PORT=${apiPort}`,
-  `FRONTEND_URL=http://127.0.0.1:${clientPort}`,
+  `FRONTEND_URL=http://${WEB_HOST}:${clientPort}`,
   `MONGODB_URI=${mongoUri}`,
-  `BETTER_AUTH_URL=http://127.0.0.1:${apiPort}`,
+  `BETTER_AUTH_URL=http://${WEB_HOST}:${apiPort}`,
 ].join(" ");
 
 const processes = [

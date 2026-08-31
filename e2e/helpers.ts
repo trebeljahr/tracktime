@@ -10,8 +10,8 @@ export async function signUpViaUI(
   await page.getByTestId("signup-password").fill(opts.password);
   await page.getByTestId("signup-confirm-password").fill(opts.password);
   await page.getByTestId("signup-submit").click();
-  // Wait for navigation to dashboard
-  await page.waitForURL("/dashboard", { timeout: 10_000 });
+  // Wait for navigation to the tracker
+  await page.waitForURL("/track", { timeout: 10_000 });
 }
 
 export async function signInViaUI(
@@ -22,7 +22,7 @@ export async function signInViaUI(
   await page.getByTestId("login-email").fill(opts.email);
   await page.getByTestId("login-password").fill(opts.password);
   await page.getByTestId("login-submit").click();
-  await page.waitForURL("/dashboard", { timeout: 10_000 });
+  await page.waitForURL("/track", { timeout: 10_000 });
 }
 
 export async function signOutViaUI(page: Page) {
