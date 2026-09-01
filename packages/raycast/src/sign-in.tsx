@@ -1,10 +1,12 @@
 import {
   Action,
   ActionPanel,
+  Color,
   Detail,
   Icon,
   Toast,
   open,
+  openExtensionPreferences,
   showToast,
 } from "@raycast/api";
 import {
@@ -19,8 +21,8 @@ import {
   signOut,
   storeSession,
 } from "./lib/auth.js";
-import { apiUrl, webLink } from "./lib/preferences.js";
-import { refreshMenuBar } from "./lib/ui.js";
+import { apiUrl, webLink, webUrl } from "./lib/preferences.js";
+import { describeFailure, refreshMenuBar } from "./lib/ui.js";
 
 /**
  * RFC 8628 device flow.
@@ -88,10 +90,7 @@ export default function SignIn(): React.JSX.Element {
         });
       } catch (error) {
         if (cancelled) return;
-        setPhase({
-          kind: "failed",
-          message: error instanceof Error ? error.message : String(error),
-        });
+        setPhase({ kind: "failed", message: describeFailure(error) });
       }
     };
 
@@ -110,22 +109,43 @@ export default function SignIn(): React.JSX.Element {
   };
 
   if (phase.kind === "checking") {
-    return <Detail isLoading markdown="# Connecting to tracktime…" />;
+    return (
+      <Detail
+        isLoading
+        navigationTitle="tracktime"
+        markdown="Connecting to tracktime…"
+      />
+    );
   }
 
   if (phase.kind === "signedIn") {
     return (
       <Detail
+        navigationTitle="tracktime"
         markdown={[
-          "# Signed in",
+          "# Paired",
           "",
-          phase.email
-            ? `Raycast is paired with **${phase.email}**.`
-            : "Raycast is paired with your tracktime account.",
+          "Raycast can start, stop and edit your timers.",
           "",
-          "It shows up as **Raycast** under Settings → Devices in the web app,",
-          "where you can sign it out at any time.",
+          "Run **Timer** once to put the clock in the menu bar, and give",
+          "**Toggle Timer** a hotkey in Raycast Settings → Extensions.",
         ].join("\n")}
+        metadata={
+          <Detail.Metadata>
+            <Detail.Metadata.Label
+              title="Account"
+              text={phase.email ?? "Signed in"}
+              icon={Icon.Person}
+            />
+            <Detail.Metadata.Label title="Server" text={apiUrl()} />
+            <Detail.Metadata.Separator />
+            <Detail.Metadata.Label
+              title="Revoke"
+              text="Settings → Devices, in the web app"
+              icon={Icon.Lock}
+            />
+          </Detail.Metadata>
+        }
         actions={
           <ActionPanel>
             <Action.OpenInBrowser
@@ -133,7 +153,7 @@ export default function SignIn(): React.JSX.Element {
               url={webLink("/track")}
             />
             <Action
-              title="Sign out"
+              title="Sign Out"
               icon={Icon.Logout}
               style={Action.Style.Destructive}
               onAction={async () => {
@@ -156,27 +176,46 @@ export default function SignIn(): React.JSX.Element {
   if (phase.kind === "pairing") {
     const { userCode, verificationUri, verificationUriComplete } =
       phase.authorization;
+    const approvalUrl =
+      verificationUriComplete || verificationUri || webLink("/device");
+
     return (
       <Detail
         isLoading
+        navigationTitle="Pair with tracktime"
         markdown={[
-          "# Approve this Mac",
+          `# ${userCode}`,
           "",
-          `## \`${userCode}\``,
-          "",
-          `Confirm it at ${verificationUri || webLink("/device")} — that page`,
-          "should already be open in your browser.",
-          "",
-          "Waiting for approval…",
+          "Approve this code in your browser to finish pairing. The page should",
+          "already be open — you need to be signed in to the web app there.",
         ].join("\n")}
+        metadata={
+          <Detail.Metadata>
+            <Detail.Metadata.TagList title="Code">
+              <Detail.Metadata.TagList.Item
+                text={userCode}
+                color={Color.Blue}
+              />
+            </Detail.Metadata.TagList>
+            <Detail.Metadata.Label
+              title="Status"
+              text="Waiting for approval…"
+              icon={Icon.Clock}
+            />
+            <Detail.Metadata.Separator />
+            <Detail.Metadata.Link
+              title="Approval Page"
+              target={approvalUrl}
+              text={verificationUri || webLink("/device")}
+            />
+            <Detail.Metadata.Label title="Server" text={apiUrl()} />
+          </Detail.Metadata>
+        }
         actions={
           <ActionPanel>
-            <Action.OpenInBrowser
-              title="Open Approval Page"
-              url={verificationUriComplete || verificationUri || webLink("/device")}
-            />
+            <Action.OpenInBrowser title="Open Approval Page" url={approvalUrl} />
             <Action.CopyToClipboard title="Copy Code" content={userCode} />
-            <Action title="Start over" icon={Icon.Repeat} onAction={retry} />
+            <Action title="Start Over" icon={Icon.Repeat} onAction={retry} />
           </ActionPanel>
         }
       />
@@ -185,15 +224,35 @@ export default function SignIn(): React.JSX.Element {
 
   return (
     <Detail
+      navigationTitle="tracktime"
       markdown={[
         "# Could not pair",
         "",
         phase.message,
-        "",
-        `Check the **API URL** extension preference — currently \`${apiUrl()}\`.`,
       ].join("\n")}
+      metadata={
+        <Detail.Metadata>
+          <Detail.Metadata.Label
+            title="API URL"
+            text={apiUrl()}
+            icon={Icon.Globe}
+          />
+          <Detail.Metadata.Label title="Web App URL" text={webUrl()} />
+          <Detail.Metadata.Separator />
+          <Detail.Metadata.Label
+            title="Running locally?"
+            text="Point API URL at the port `pnpm dev` prints"
+            icon={Icon.Terminal}
+          />
+        </Detail.Metadata>
+      }
       actions={
         <ActionPanel>
+          <Action
+            title="Open Extension Preferences"
+            icon={Icon.Gear}
+            onAction={openExtensionPreferences}
+          />
           <Action title="Try Again" icon={Icon.Repeat} onAction={retry} />
           <Action.OpenInBrowser title="Open Web App" url={webLink("/track")} />
         </ActionPanel>

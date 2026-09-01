@@ -44,6 +44,43 @@ const byDay = (entries: DetailedEntry[]): [string, DetailedEntry[]][] => {
 const dayTotal = (entries: DetailedEntry[], nowMs: number): number =>
   entries.reduce((total, entry) => total + entryDurationSec(entry, nowMs), 0);
 
+/**
+ * Row accessories, right to left: duration tag, clock range, billable mark.
+ *
+ * Built conditionally rather than with placeholder objects — an empty
+ * accessory still reserves a slot, which is what makes a Raycast list look
+ * ragged instead of aligned.
+ */
+const accessoriesFor = (
+  entry: DetailedEntry,
+  nowMs: number,
+): List.Item.Accessory[] => {
+  const running = entry.end === null;
+  const accessories: List.Item.Accessory[] = [];
+
+  if (entry.billable) {
+    accessories.push({
+      icon: { source: Icon.BankNote, tintColor: Color.Green },
+      tooltip: "Billable",
+    });
+  }
+
+  accessories.push({
+    text: running
+      ? "running"
+      : `${formatClock(entry.start)}–${formatClock(entry.end ?? entry.start)}`,
+  });
+
+  accessories.push({
+    tag: {
+      value: formatDurationShort(entryDurationSec(entry, nowMs)),
+      color: running ? Color.Green : Color.SecondaryText,
+    },
+  });
+
+  return accessories;
+};
+
 export default function Entries(): React.JSX.Element {
   const now = Date.now();
   const { data, isLoading, signedOut, revalidate } = useApi(
@@ -121,7 +158,6 @@ export default function Entries(): React.JSX.Element {
         >
           {group.map((entry) => {
             const running = entry.end === null;
-            const duration = entryDurationSec(entry, now);
 
             return (
               <List.Item
@@ -133,28 +169,7 @@ export default function Entries(): React.JSX.Element {
                     .filter(Boolean)
                     .join(" › ") || undefined
                 }
-                accessories={[
-                  entry.billable
-                    ? {
-                        icon: {
-                          source: Icon.BankNote,
-                          tintColor: Color.Green,
-                        },
-                        tooltip: "Billable",
-                      }
-                    : {},
-                  {
-                    text: running
-                      ? `${formatDurationShort(duration)} · running`
-                      : `${formatClock(entry.start)}–${formatClock(entry.end ?? entry.start)}`,
-                  },
-                  {
-                    tag: {
-                      value: formatDurationShort(duration),
-                      color: running ? Color.Green : Color.SecondaryText,
-                    },
-                  },
-                ]}
+                accessories={accessoriesFor(entry, now)}
                 actions={
                   <ActionPanel>
                     <ActionPanel.Section>

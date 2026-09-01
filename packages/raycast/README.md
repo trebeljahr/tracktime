@@ -56,3 +56,24 @@ Raycast only re-runs a menu bar command on its interval (1 minute here) and when
 its dropdown opens, so the clock shows `h:mm` rather than a second-by-second
 count that would be wrong most of the time. Commands that change the timer call
 `refreshMenuBar()` so the menu bar does not sit on a stale value after a hotkey.
+
+## Troubleshooting
+
+**"Could not pair — fetch failed"** — the extension is talking to a server that
+is not there. The pairing screen shows which URL it tried; ⏎ on **Open
+Extension Preferences** and fix **API URL**. The defaults point at the deployed
+hosts, so a local-only setup has to be pointed at the dev ports.
+
+**Nothing in the menu bar** — a Raycast menu bar command only appears after it
+has been run once. Open Raycast, run **Timer**, and the item shows up; it then
+refreshes on its own every minute.
+
+**Seeing what went wrong** — the terminal running `pnpm dev:raycast` is the
+extension's console: `console.log` and stack traces print there. View commands
+also render errors inline, and Raycast Settings → Extensions → tracktime lists
+every command with its hotkey and preferences.
+
+**Local dev URLs** — `pnpm dev` prints the API and client ports it picked (pin
+them with `API_PORT=5159 pnpm dev`). API URL is the server port, Web App URL is
+the client port; the device flow bounces through the web app, so you must be
+signed in there in a browser before approving the code.
