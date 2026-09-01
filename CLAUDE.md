@@ -68,9 +68,28 @@ such as `hatchkit destroy <project> --recipe`, `hatchkit gh-pages --undo
 pnpm install                          # install all dependencies
 pnpm run dev:infra                    # start MongoDB, Redis, local S3 (Docker, one-time)
 pnpm run seed:assets                  # populate local S3 from seed/assets/ (idempotent)
-pnpm run dev                          # start server + client (random ports)
-pnpm run dev:fixed                    # start on fixed ports (client=3000, server=5000)
+pnpm run dev                          # start server + client
+pnpm run dev:fixed                    # start on fixed ports (client=6477, server=5159)
+pnpm run dev:ports                    # show the stable ports assigned on this machine
 ```
+
+`pnpm run dev` picks ports by checkout:
+
+- **Main checkout** — stable ports in the 3000-3999 range, reserved once in a
+  machine-wide registry (`~/.config/dev-ports.json`, override with
+  `DEV_PORT_REGISTRY`) and reused forever. The origin never moves, so password
+  managers, saved logins and bookmarks keep working. The registry guarantees no
+  two projects on the machine get the same port, and it prunes entries whose
+  checkout has been deleted.
+- **Git worktrees** — random ephemeral ports (49152-65535), so any number of
+  agents can run side by side without colliding with each other or with you.
+
+Force either strategy with `DEV_PORTS=stable` / `DEV_PORTS=random`. `PORT`,
+`API_PORT` and `DOCS_PORT` still pin individual ports, and `--fixed` still wins
+over both. A reserved port that happens to be busy does not block startup — dev
+falls back to an ephemeral port for that run and keeps the reservation.
+`node scripts/dev.mjs --dry-run` resolves and prints ports without starting
+anything.
 
 Drop fixtures into `seed/assets/` to have them auto-populate the
 local bucket — see `seed/README.md`. To copy a real-prod bucket into
