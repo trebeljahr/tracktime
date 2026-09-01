@@ -6,9 +6,9 @@
 // ran at once — a person in their terminal plus any number of agents in their
 // own worktrees:
 //
-//   * ports          — the checkout you develop in keeps ONE stable port
-//                      forever (so password managers and bookmarks work);
-//                      every worktree gets random high ports instead, so
+//   * ports          — `pnpm dev` always serves the client on one hardcoded
+//                      port (so password managers and bookmarks work);
+//                      `pnpm dev:auto` picks random high ports instead, so
 //                      agents never collide with you or with each other
 //   * MongoDB        — a per-instance database, so two checkouts never share or
 //                      clobber each other's time entries
@@ -19,8 +19,6 @@
 // share (or want a stable setup):
 //
 //   PORT, API_PORT, DOCS_PORT   pin individual ports
-//   DEV_PORTS=stable|random     force the port strategy for this checkout
-//   DEV_PORT_REGISTRY           path to the machine-wide stable-port registry
 //   INSTANCE_ID                 override the derived id (also names the database)
 //   MONGODB_URI                 use one exact database, ignoring the per-instance name
 //   MONGO_HOST, MONGO_PORT      point at a MongoDB somewhere other than 127.0.0.1:27017
@@ -28,23 +26,22 @@
 //   WEB_HOST                    browser-facing host (default localhost)
 //
 // Usage:
-//   pnpm run dev                Stable ports in the main checkout, random high
-//                               ports in a worktree (client + server)
+//   pnpm run dev                Client on DEV_CLIENT_PORT, rest auto-picked
+//   pnpm run dev:auto           Everything auto-picked (agents, worktrees)
 //   pnpm run dev:fixed          Fixed ports (client 6477, docs 4000, server 5159)
 //   pnpm run dev:docs           Same as dev, plus the docs site
 //   pnpm run dev:docs:fixed     Fixed ports with docs
-//   pnpm run dev:ports          Print the stable ports assigned on this machine
 //   node scripts/dev.mjs --dry-run   Resolve and print ports, start nothing
 
 import { execSync } from "child_process";
 import { createHash } from "crypto";
 import { existsSync, readFileSync } from "fs";
+import { createServer } from "net";
 import { basename, resolve } from "path";
-
-import { isPortFree, reserveStablePorts } from "./dev-port-registry.mjs";
 
 const fixedMode = process.argv.includes("--fixed");
 const includeDocs = process.argv.includes("--docs");
+const autoMode = process.argv.includes("--auto");
 // Resolve ports and print the plan without building or starting anything.
 const dryRun = process.argv.includes("--dry-run");
 
@@ -81,19 +78,19 @@ const instanceId = deriveInstanceId();
 
 // ── Ports ────────────────────────────────────────────────────────────
 //
-// Two strategies, chosen by which checkout you are in:
+// The client port is HARDCODED for `pnpm dev`. Password managers, saved
+// logins, bookmarks and OAuth redirect allowlists all key off the origin, so
+// the URL a human opens must be the same one every single time. That is the
+// whole reason this constant exists — do not make it dynamic.
 //
-//   main checkout  → STABLE ports, reserved once in a machine-wide registry
-//                    (~/.config/dev-ports.json) and reused forever. Password
-//                    managers, saved logins, bookmarks and OAuth redirect
-//                    allowlists all key off the origin, so the URL a human
-//                    opens must not move between runs.
-//   git worktree   → RANDOM ports in the ephemeral range. Worktrees are where
-//                    agents run, often several at once; they need collision-free
-//                    isolation far more than they need a memorable URL.
-//
-// Force either one with DEV_PORTS=stable|random.
+// 3392 is picked to sit inside the browser-friendly 3000-3999 range while
+// avoiding the defaults everything else grabs (3000/3001/3100/3333/...). If it
+// ever collides with another of your projects, change it here — one number,
+// one place.
+const DEV_CLIENT_PORT = 3392;
 
+// Everything else — the API, the docs site, and every port in `pnpm dev:auto`
+// — comes out of the ephemeral range, which no conventional dev server uses.
 const HIGH_PORT_MIN = 49152;
 const HIGH_PORT_MAX = 65535;
 
@@ -101,6 +98,10 @@ const HIGH_PORT_MAX = 65535;
  * True in a linked worktree. Git points `--git-dir` at
  * `<main>/.git/worktrees/<name>` there while `--git-common-dir` still points at
  * the main `.git`, so the two differ only in a worktree.
+ *
+ * Worktrees are where agents run, often several at once. They must never fight
+ * over the one hardcoded port, so `pnpm dev` behaves like `pnpm dev:auto`
+ * there even if someone forgets the longer command.
  */
 function isLinkedWorktree() {
   try {
@@ -111,83 +112,80 @@ function isLinkedWorktree() {
       })
         .toString()
         .trim();
-    return resolve(repoRoot, read("--git-dir")) !== resolve(repoRoot, read("--git-common-dir"));
+    return (
+      resolve(repoRoot, read("--git-dir")) !==
+      resolve(repoRoot, read("--git-common-dir"))
+    );
   } catch {
     return false; // not a git checkout at all — treat it as the main one
   }
 }
 
-const portStrategyOverride = process.env.DEV_PORTS;
-if (portStrategyOverride && !["stable", "random"].includes(portStrategyOverride)) {
-  console.error(`\n  DEV_PORTS must be "stable" or "random", got "${portStrategyOverride}"\n`);
-  process.exit(1);
-}
-const useStablePorts =
-  !fixedMode && (portStrategyOverride ?? (isLinkedWorktree() ? "random" : "stable")) === "stable";
+const inWorktree = isLinkedWorktree();
+const autoPorts = autoMode || inWorktree;
 
 function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-async function findRandomFreePort(maxAttempts = 30) {
+function isPortFree(port) {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.listen(port, "127.0.0.1", () => {
+      server.close(() => resolve(true));
+    });
+    server.on("error", () => resolve(false));
+  });
+}
+
+const claimed = new Set();
+
+async function findRandomFreePort(maxAttempts = 50) {
   for (let i = 0; i < maxAttempts; i++) {
     const port = randomInt(HIGH_PORT_MIN, HIGH_PORT_MAX);
-    if (await isPortFree(port)) return port;
+    if (claimed.has(port)) continue;
+    if (await isPortFree(port)) {
+      claimed.add(port);
+      return port;
+    }
   }
   throw new Error(
     `Could not find a free port in ${HIGH_PORT_MIN}-${HIGH_PORT_MAX} after ${maxAttempts} attempts`,
   );
 }
 
-// Roles are reserved lazily, so a project that never runs the docs site never
-// burns a port on it.
-const roles = includeDocs ? ["client", "api", "docs"] : ["client", "api"];
-
-let stablePorts = {};
-let stableRegistryFile = null;
-if (useStablePorts) {
-  const reservation = await reserveStablePorts({
-    key: repoRoot,
-    roles,
-    name: basename(repoRoot),
-  });
-  stablePorts = reservation.ports;
-  stableRegistryFile = reservation.file;
-  if (reservation.allocated.length > 0) {
-    console.log(
-      `\n  Reserved stable ${reservation.allocated.join(", ")} port(s) for this checkout` +
-        `\n  in ${reservation.file} — they will not change again.`,
-    );
-  }
+/** An explicit env var always wins, then --fixed, then the mode above. */
+async function pickPort(envValue, fixedValue) {
+  if (envValue) return parseInt(envValue, 10);
+  if (fixedMode) return fixedValue;
+  return findRandomFreePort();
 }
 
 /**
- * An explicit env var always wins, then --fixed, then the strategy above.
- *
- * A reserved port that is busy right now does not block dev: we say who to look
- * for and fall back to an ephemeral port for this run only, keeping the
- * reservation intact.
+ * The client is the only port a human types. A busy hardcoded port does not
+ * block dev: say who to look for and fall back to a random one for this run.
  */
-async function pickPort(role, envValue, fixedValue) {
-  if (envValue) return parseInt(envValue, 10);
-  if (fixedMode) return fixedValue;
-
-  const stable = stablePorts[role];
-  if (stable === undefined) return findRandomFreePort();
-  if (await isPortFree(stable)) return stable;
+async function pickClientPort() {
+  if (process.env.PORT) return parseInt(process.env.PORT, 10);
+  if (fixedMode) return 6477;
+  if (autoPorts) return findRandomFreePort();
+  if (await isPortFree(DEV_CLIENT_PORT)) {
+    claimed.add(DEV_CLIENT_PORT);
+    return DEV_CLIENT_PORT;
+  }
 
   const fallback = await findRandomFreePort();
   console.warn(
-    `\n  Stable ${role} port ${stable} is already in use — something else is` +
-      `\n  listening on it (lsof -nP -iTCP:${stable} -sTCP:LISTEN).` +
-      `\n  Using ${fallback} for this run; the reservation is unchanged.\n`,
+    `\n  Port ${DEV_CLIENT_PORT} is already in use — something else is listening` +
+      `\n  on it (lsof -nP -iTCP:${DEV_CLIENT_PORT} -sTCP:LISTEN).` +
+      `\n  Using ${fallback} for this run.\n`,
   );
   return fallback;
 }
 
-const clientPort = await pickPort("client", process.env.PORT, 6477);
-const docsPort = await pickPort("docs", process.env.DOCS_PORT, 4000);
-const apiPort = await pickPort("api", process.env.API_PORT, 5159);
+const clientPort = await pickClientPort();
+const docsPort = await pickPort(process.env.DOCS_PORT, 4000);
+const apiPort = await pickPort(process.env.API_PORT, 5159);
 
 // ── Per-instance database ────────────────────────────────────────────
 //
@@ -255,14 +253,11 @@ if (existsSync(lockFile)) {
 }
 
 console.log(`\n  Instance: ${instanceId}`);
-const portReason = portStrategyOverride
-  ? `DEV_PORTS=${portStrategyOverride}`
-  : isLinkedWorktree()
-    ? "worktree"
-    : "main checkout";
 const portMode = fixedMode
   ? "fixed ports"
-  : `${useStablePorts ? "stable" : "random high"} ports (${portReason})`;
+  : autoPorts
+    ? `auto ports (${autoMode ? "--auto" : "worktree"})`
+    : `client on ${DEV_CLIENT_PORT}, rest auto`;
 console.log(`  Mode:     ${portMode}`);
 console.log(`  Client:   http://${WEB_HOST}:${clientPort}`);
 if (includeDocs) {
@@ -270,11 +265,7 @@ if (includeDocs) {
 }
 console.log(`  Server:   http://${WEB_HOST}:${apiPort}`);
 console.log(`  Database: ${mongoUri}`);
-console.log(`  Next dir: packages/client/${nextDistDir}`);
-if (stableRegistryFile) {
-  console.log(`  Ports in: ${stableRegistryFile}`);
-}
-console.log();
+console.log(`  Next dir: packages/client/${nextDistDir}\n`);
 
 if (dryRun) process.exit(0);
 
