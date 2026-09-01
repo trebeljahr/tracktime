@@ -75,6 +75,9 @@ const invalidateFor = (utils: Utils, event: SyncEvent): void => {
       void utils.projects.invalidate();
       void utils.tasks.invalidate();
       void utils.reports.invalidate();
+      // A cascading delete rewrites the entries it detached, and publishes no
+      // entry event of its own.
+      if (event.entriesTouched) void utils.entries.invalidate();
       return;
     case "settings.changed":
       void utils.settings.invalidate();

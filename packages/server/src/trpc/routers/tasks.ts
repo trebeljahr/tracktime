@@ -12,19 +12,25 @@ import {
 } from "@starter/shared";
 import { Project } from "../../models/Project.js";
 import { Task, toClientTask, type TaskDocLike } from "../../models/Task.js";
-import { TimeEntry } from "../../models/TimeEntry.js";
 import { publishSync } from "../../ws/sync.js";
 import { protectedProcedure, router } from "../trpc.js";
+import {
+  cascadeDeleteTask,
+  type CatalogRemoveResult,
+} from "./catalog-cascade.js";
 import { archiveInputSchema, assertObjectId, exactNameRegExp } from "./clients.js";
 
-/** A task plus its rolled-up tracked time. */
+/** A task plus its owning project and rolled-up tracked time. */
 export type TaskWithStats = TaskWire & {
+  projectName: string | null;
+  projectColor: string | null;
   /** Sum of `durationSec` across entries booked on this task. */
   totalSec: number;
 };
 
 /** Raw shape produced by the `list` aggregation. */
 type TaskAggregateRow = TaskDocLike & {
+  projectDoc: { name: string; color: string }[];
   stats: { totalSec: number }[];
 };
 
@@ -75,14 +81,26 @@ export const tasksRouter = router({
     .input(taskListSchema)
     .query(async ({ ctx, input }): Promise<TaskWithStats[]> => {
       const ownerId = ctx.user.id;
-      assertObjectId(input.projectId);
+      if (typeof input.projectId === "string") assertObjectId(input.projectId);
 
       const rows = await Task.aggregate<TaskAggregateRow>([
         {
           $match: {
             ownerId,
-            projectId: input.projectId,
+            ...(input.projectId ? { projectId: input.projectId } : {}),
             ...(input.includeArchived ? {} : { archived: false }),
+          },
+        },
+        {
+          // Archived projects must still resolve, so this joins by id only.
+          $lookup: {
+            from: "projects",
+            let: { pid: "$projectId" },
+            pipeline: [
+              { $match: { $expr: { $eq: [{ $toString: "$_id" }, "$$pid"] } } },
+              { $project: { _id: 0, name: 1, color: 1 } },
+            ],
+            as: "projectDoc",
           },
         },
         {
@@ -106,14 +124,30 @@ export const tasksRouter = router({
             as: "stats",
           },
         },
-        { $addFields: { sortName: { $toLower: "$name" } } },
-        { $sort: { sortName: 1 } },
+        {
+          $addFields: {
+            sortName: { $toLower: "$name" },
+            // Unscoped listings group by project first; within one project the
+            // extra key is constant, so the same sort serves both callers.
+            sortProject: {
+              $toLower: {
+                $ifNull: [{ $first: "$projectDoc.name" }, ""],
+              },
+            },
+          },
+        },
+        { $sort: { sortProject: 1, sortName: 1 } },
       ]);
 
-      return rows.map((row) => ({
-        ...toClientTask(row),
-        totalSec: row.stats[0]?.totalSec ?? 0,
-      }));
+      return rows.map((row) => {
+        const project = row.projectDoc[0];
+        return {
+          ...toClientTask(row),
+          projectName: project?.name ?? null,
+          projectColor: project?.color ?? null,
+          totalSec: row.stats[0]?.totalSec ?? 0,
+        };
+      });
     }),
 
   create: protectedProcedure
@@ -201,51 +235,26 @@ export const tasksRouter = router({
       return toClientTask(updated);
     }),
 
-  /** Hard-deletes only when nothing references the task; archives otherwise. */
+  /**
+   * Always deletes. Entries booked on the task keep their tracked time and
+   * their project, and simply fall back to "no task".
+   */
   remove: protectedProcedure
     .input(idInputSchema)
-    .mutation(
-      async ({
-        ctx,
-        input,
-      }): Promise<{
-        deleted: boolean;
-        archived: boolean;
-        message: string | null;
-      }> => {
-        await findOwnedTask(ctx.user.id, input.id);
+    .mutation(async ({ ctx, input }): Promise<CatalogRemoveResult> => {
+      await findOwnedTask(ctx.user.id, input.id);
 
-        const referenced = await TimeEntry.exists({
-          ownerId: ctx.user.id,
-          taskId: input.id,
-        });
+      const result = await cascadeDeleteTask(ctx.user.id, input.id);
 
-        if (referenced) {
-          await Task.updateOne(
-            { _id: input.id, ownerId: ctx.user.id },
-            { $set: { archived: true } },
-          );
-          publishSync(
-            ctx.user.id,
-            { kind: "catalog.changed", scope: "task" },
-            input.originId,
-          );
-          return {
-            deleted: false,
-            archived: true,
-            message:
-              "This task has tracked time, so it was archived instead of deleted.",
-          };
-        }
-
-        await Task.deleteOne({ _id: input.id, ownerId: ctx.user.id });
-
-        publishSync(
-          ctx.user.id,
-          { kind: "catalog.changed", scope: "task" },
-          input.originId,
-        );
-        return { deleted: true, archived: false, message: null };
-      },
-    ),
+      publishSync(
+        ctx.user.id,
+        {
+          kind: "catalog.changed",
+          scope: "task",
+          entriesTouched: result.entriesDetached > 0,
+        },
+        input.originId,
+      );
+      return result;
+    }),
 });

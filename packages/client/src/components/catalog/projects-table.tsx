@@ -306,16 +306,12 @@ export function ProjectsTable({
         title={`Delete "${pendingDelete?.name ?? ""}"?`}
         description={
           pendingDelete && pendingDelete.entryCount > 0
-            ? `${pendingDelete.entryCount} time ${
+            ? `Its tasks are deleted with it. ${pendingDelete.entryCount} time ${
                 pendingDelete.entryCount === 1 ? "entry" : "entries"
-              } reference this project, so it will be archived instead of deleted.`
-            : "This project has no tracked time, so it will be deleted along with its tasks."
+              } keep their tracked time and become project-less. Archive instead if you want to keep the project.`
+            : "This project has no tracked time. It is deleted along with its tasks."
         }
-        confirmLabel={
-          pendingDelete && pendingDelete.entryCount > 0
-            ? "Archive project"
-            : "Delete project"
-        }
+        confirmLabel="Delete project"
         onConfirm={() => {
           if (pendingDelete) removeProject(pendingDelete.id);
           setPendingDelete(null);

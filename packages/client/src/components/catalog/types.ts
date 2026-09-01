@@ -28,14 +28,21 @@ export type ProjectRow = Project & {
 /** A bare client, as returned by `clients.list`. */
 export type ClientRow = Client;
 
-/** A task plus its tracked seconds. */
-export type TaskRow = Task & { totalSec: number };
+/** A task joined with its project, plus its tracked seconds. */
+export type TaskRow = Task & {
+  projectName: string | null;
+  projectColor: string | null;
+  totalSec: number;
+};
 
-/** What every catalog `remove` resolves to — deletion is never guaranteed. */
+/**
+ * What every catalog `remove` resolves to. Deletion always happens — the
+ * counts describe what the cascade detached on the way.
+ */
 export type RemoveResult = {
-  deleted: boolean;
-  archived: boolean;
-  message: string | null;
+  entriesDetached: number;
+  tasksDeleted: number;
+  projectsDetached: number;
 };
 
 // Mutation results are the bare documents — no joins, no rolled-up totals.
@@ -48,7 +55,10 @@ export type CreateProjectVars = Omit<CreateProjectInput, "originId">;
 export type UpdateProjectVars = Omit<UpdateProjectInput, "originId">;
 export type CreateClientVars = Omit<CreateClientInput, "originId">;
 export type UpdateClientVars = Omit<UpdateClientInput, "originId">;
-export type CreateTaskVars = Omit<CreateTaskInput, "originId" | "projectId">;
+export type CreateTaskVars = Omit<CreateTaskInput, "originId" | "projectId"> & {
+  /** Required only when the mutation hook is unscoped (`projectId: null`). */
+  projectId?: string;
+};
 export type UpdateTaskVars = Omit<UpdateTaskInput, "originId">;
 
 /**
@@ -65,12 +75,23 @@ export const CLIENT_LIST_INPUT: { includeArchived: boolean } = {
   includeArchived: true,
 };
 
+/**
+ * `null` asks for every task the owner has — the Tasks screen's key. A
+ * project id scopes it to one project row's inline panel. The two are
+ * distinct cache entries, so a mutation settles both.
+ */
 export const taskListInput = (
-  projectId: string,
-): { projectId: string; includeArchived: boolean } => ({
+  projectId: string | null,
+): { projectId: string | null; includeArchived: boolean } => ({
   projectId,
   includeArchived: true,
 });
+
+/** Canonical key for the "every task" listing. */
+export const TASK_LIST_INPUT: {
+  projectId: string | null;
+  includeArchived: boolean;
+} = taskListInput(null);
 
 /** Mirrors the server's case-insensitive name sort. */
 export function sortByName<T extends { name: string }>(rows: T[]): T[] {

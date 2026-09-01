@@ -120,8 +120,12 @@ export const updateProjectSchema = z.object({
 
 // ── tasks ────────────────────────────────────────────────────────────
 
+/**
+ * `projectId` is optional so the Tasks screen can list every task the owner
+ * has; the project row's inline panel still scopes itself to one project.
+ */
 export const taskListSchema = z.object({
-  projectId: idString,
+  projectId: idString.nullish(),
   includeArchived: z.boolean().optional(),
 });
 

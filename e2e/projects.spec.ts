@@ -81,7 +81,8 @@ test.describe("Projects catalog", () => {
     page,
   }) => {
     // ── client ──────────────────────────────────────────────────────
-    await page.getByTestId("tab-clients").click();
+    await page.goto("/clients");
+    await expect(page.getByTestId("clients-page")).toBeVisible();
     await expect(page.getByTestId("clients-empty")).toBeVisible();
 
     await page.getByTestId("new-client").click();
@@ -96,7 +97,8 @@ test.describe("Projects catalog", () => {
     await expect(clientRow).toHaveCount(1);
 
     // ── project, attached to that client, coloured and billed ───────
-    await page.getByTestId("tab-projects").click();
+    await page.goto("/projects");
+    await expect(page.getByTestId("projects-page")).toBeVisible();
     await expect(page.getByTestId("projects-empty")).toBeVisible();
 
     await page.getByTestId("new-project").click();
@@ -206,13 +208,15 @@ test.describe("Projects catalog", () => {
   });
 
   test("filters the catalog by search and by client", async ({ page }) => {
-    await page.getByTestId("tab-clients").click();
+    await page.goto("/clients");
+    await expect(page.getByTestId("clients-page")).toBeVisible();
     await page.getByTestId("new-client").click();
     await page.getByTestId("client-name-input").fill(CLIENT_NAME);
     await page.getByTestId("client-submit").click();
     await expect(page.getByTestId("client-dialog")).toBeHidden();
 
-    await page.getByTestId("tab-projects").click();
+    await page.goto("/projects");
+    await expect(page.getByTestId("projects-page")).toBeVisible();
 
     for (const name of [PROJECT_NAME, "Internal tooling"]) {
       await page.getByTestId("new-project").click();
@@ -239,6 +243,74 @@ test.describe("Projects catalog", () => {
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText(PROJECT_NAME);
   });
+  /**
+   * Deleting a catalog row is a real delete, not an archive — and it never
+   * takes tracked time with it. The entry survives, minus its references.
+   */
+  test("deleting a project keeps its time entries and drops its tasks", async ({
+    page,
+  }) => {
+    await page.getByTestId("new-project").click();
+    await page.getByTestId("project-name-input").fill(PROJECT_NAME);
+    await page.getByTestId("project-submit").click();
+    await expect(page.getByTestId("project-dialog")).toBeHidden();
+
+    const projectRow = page
+      .locator('[data-testid^="project-row-"]')
+      .filter({ hasText: PROJECT_NAME });
+    const projectId = await idFromTestId(projectRow, "project-row-");
+
+    await page.getByTestId(`project-expand-${projectId}`).click();
+    await page.getByTestId(`task-new-input-${projectId}`).fill(TASK_NAME);
+    await page.getByTestId(`task-add-${projectId}`).click();
+    await expect(
+      page.locator('[data-testid^="task-row-"]').filter({ hasText: TASK_NAME }),
+    ).toHaveCount(1);
+
+    // Track a minute against the project so it has entries to cascade over.
+    await page.goto("/track");
+    await page.getByTestId("tracker-description").fill("Doomed project work");
+    await pickComboboxOption(page, "tracker-project", PROJECT_NAME);
+    await page.getByTestId("tracker-toggle").click();
+    await expect(page.getByTestId("tracker-toggle")).toHaveAttribute(
+      "data-state",
+      "running",
+    );
+    await page.getByTestId("tracker-toggle").click();
+    await expect(page.getByTestId("tracker-toggle")).toHaveAttribute(
+      "data-state",
+      "idle",
+    );
+
+    await page.goto("/projects");
+    await expect(page.getByTestId(`project-entries-${projectId}`)).toHaveText(
+      "1",
+    );
+
+    await page.getByTestId(`project-menu-${projectId}`).click();
+    await page.getByTestId(`project-delete-${projectId}`).click();
+    await expect(page.getByTestId("confirm-project-delete")).toBeVisible();
+    await page.getByTestId("confirm-accept").click();
+
+    // Gone for good — not archived. It stays gone with archived rows shown.
+    await expect(projectRow).toHaveCount(0);
+    await page.getByTestId("catalog-show-archived").click();
+    await expect(projectRow).toHaveCount(0);
+
+    // Its task went with it.
+    await page.goto("/tasks");
+    await expect(page.getByTestId("tasks-page")).toBeVisible();
+    await expect(page.getByTestId("tasks-empty")).toBeVisible();
+
+    // The entry survived, and simply has no project any more.
+    await page.goto("/track");
+    const entry = page
+      .locator('[data-testid="entry-row"]')
+      .filter({ hasText: "Doomed project work" });
+    await expect(entry).toHaveCount(1);
+    await expect(entry.getByTestId("entry-project")).toContainText("No project");
+  });
+
   /**
    * The whole chain — client, project, task — reachable from the project
    * dialog. A client is a property OF a project and a task belongs TO one, so

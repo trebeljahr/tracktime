@@ -260,21 +260,19 @@ export function ClientsTable({
         }}
         title={`Delete "${pendingDelete?.name ?? ""}"?`}
         description={
-          pendingStats.entryCount > 0
-            ? `${pendingStats.entryCount} time ${
-                pendingStats.entryCount === 1 ? "entry" : "entries"
-              } across ${pendingStats.projectCount} ${
+          pendingStats.projectCount > 0
+            ? `Its ${pendingStats.projectCount} ${
                 pendingStats.projectCount === 1 ? "project" : "projects"
-              } reference this client, so it will be archived instead of deleted.`
-            : "This client has no tracked time. Its projects will be kept and detached from it."
+              } are kept — they lose the client and keep every one of their ${
+                pendingStats.entryCount
+              } time ${
+                pendingStats.entryCount === 1 ? "entry" : "entries"
+              }. Archive instead if you want to keep the client.`
+            : "This client has no projects. Nothing else is affected."
         }
-        confirmLabel={
-          pendingStats.entryCount > 0 ? "Archive client" : "Delete client"
-        }
+        confirmLabel="Delete client"
         onConfirm={() => {
-          if (pendingDelete) {
-            removeClient(pendingDelete.id, pendingStats.entryCount);
-          }
+          if (pendingDelete) removeClient(pendingDelete.id);
           setPendingDelete(null);
         }}
         testId="confirm-client-delete"

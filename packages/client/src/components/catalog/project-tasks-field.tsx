@@ -42,7 +42,7 @@ export function ProjectTasksField({
     { projectId: projectId ?? "" },
     { enabled: projectId !== null },
   );
-  const { createTask, removeTask } = useTaskMutations(projectId ?? "");
+  const { createTask, removeTask } = useTaskMutations(projectId);
 
   const existing = tasks.data ?? [];
 

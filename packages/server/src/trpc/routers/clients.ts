@@ -18,10 +18,12 @@ import {
   type Client as ClientWire,
 } from "@starter/shared";
 import { Client, toClientClient } from "../../models/Client.js";
-import { Project } from "../../models/Project.js";
-import { TimeEntry } from "../../models/TimeEntry.js";
 import { publishSync } from "../../ws/sync.js";
 import { protectedProcedure, router } from "../trpc.js";
+import {
+  cascadeDeleteClient,
+  type CatalogRemoveResult,
+} from "./catalog-cascade.js";
 
 /**
  * Fixed palette assigned to new clients / projects that ship no explicit
@@ -194,80 +196,33 @@ export const clientsRouter = router({
       return toClientClient(updated);
     }),
 
-  /** Hard-deletes only when nothing references the client; archives otherwise. */
+  /**
+   * Always deletes. Its projects survive as client-less projects, so no
+   * tracked time is lost. Use `archive` to keep the client around instead.
+   */
   remove: protectedProcedure
     .input(idInputSchema)
-    .mutation(
-      async ({
-        ctx,
-        input,
-      }): Promise<{
-        deleted: boolean;
-        archived: boolean;
-        message: string | null;
-      }> => {
-        assertObjectId(input.id);
+    .mutation(async ({ ctx, input }): Promise<CatalogRemoveResult> => {
+      assertObjectId(input.id);
 
-        const client = await Client.findOne({
-          _id: input.id,
-          ownerId: ctx.user.id,
-        }).lean();
-        if (!client) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Client not found",
-          });
-        }
+      const client = await Client.findOne({
+        _id: input.id,
+        ownerId: ctx.user.id,
+      }).lean();
+      if (!client) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Client not found",
+        });
+      }
 
-        const projects = await Project.find({
-          ownerId: ctx.user.id,
-          clientId: input.id,
-        })
-          .select({ _id: 1 })
-          .lean();
-        const projectIds = projects.map((project) => String(project._id));
+      const result = await cascadeDeleteClient(ctx.user.id, input.id);
 
-        const referenced =
-          projectIds.length > 0 &&
-          (await TimeEntry.exists({
-            ownerId: ctx.user.id,
-            projectId: { $in: projectIds },
-          })) !== null;
-
-        if (referenced) {
-          await Client.updateOne(
-            { _id: input.id, ownerId: ctx.user.id },
-            { $set: { archived: true } },
-          );
-          publishSync(
-            ctx.user.id,
-            { kind: "catalog.changed", scope: "client" },
-            input.originId,
-          );
-          return {
-            deleted: false,
-            archived: true,
-            message:
-              "This client has projects with tracked time, so it was archived instead of deleted.",
-          };
-        }
-
-        // No time references anywhere below it — detach the (empty) projects
-        // so they do not point at a client that no longer exists.
-        if (projectIds.length > 0) {
-          await Project.updateMany(
-            { ownerId: ctx.user.id, clientId: input.id },
-            { $set: { clientId: null } },
-          );
-        }
-        await Client.deleteOne({ _id: input.id, ownerId: ctx.user.id });
-
-        publishSync(
-          ctx.user.id,
-          { kind: "catalog.changed", scope: "client" },
-          input.originId,
-        );
-        return { deleted: true, archived: false, message: null };
-      },
-    ),
+      publishSync(
+        ctx.user.id,
+        { kind: "catalog.changed", scope: "client" },
+        input.originId,
+      );
+      return result;
+    }),
 });

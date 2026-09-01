@@ -30,7 +30,16 @@ export type SyncEvent =
   | { kind: "entry.deleted"; id: string }
   | { kind: "timer.started"; entry: TimeEntry }
   | { kind: "timer.stopped"; entry: TimeEntry }
-  | { kind: "catalog.changed"; scope: "client" | "project" | "task" }
+  | {
+      kind: "catalog.changed";
+      scope: "client" | "project" | "task";
+      /**
+       * Set when the change rewrote time entries too — a cascading delete
+       * detaches every entry that pointed at the removed project or task, so
+       * the entry caches are stale even though no entry event was published.
+       */
+      entriesTouched?: boolean;
+    }
   | { kind: "settings.changed" };
 
 /** Room name every sync event for a given owner is published to. */

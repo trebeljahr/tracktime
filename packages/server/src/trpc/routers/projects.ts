@@ -16,10 +16,12 @@ import {
   toClientProject,
   type ProjectDocLike,
 } from "../../models/Project.js";
-import { Task } from "../../models/Task.js";
-import { TimeEntry } from "../../models/TimeEntry.js";
 import { publishSync } from "../../ws/sync.js";
 import { protectedProcedure, router } from "../trpc.js";
+import {
+  cascadeDeleteProject,
+  type CatalogRemoveResult,
+} from "./catalog-cascade.js";
 import {
   PROJECT_COLOR_OFFSET,
   archiveInputSchema,
@@ -244,64 +246,38 @@ export const projectsRouter = router({
       return toClientProject(updated);
     }),
 
-  /** Hard-deletes only when nothing references the project; archives otherwise. */
+  /**
+   * Always deletes. Tasks go with the project; entries booked on either keep
+   * their tracked time and become project-less. Use `archive` to keep the
+   * project around instead.
+   */
   remove: protectedProcedure
     .input(idInputSchema)
-    .mutation(
-      async ({
-        ctx,
-        input,
-      }): Promise<{
-        deleted: boolean;
-        archived: boolean;
-        message: string | null;
-      }> => {
-        assertObjectId(input.id);
+    .mutation(async ({ ctx, input }): Promise<CatalogRemoveResult> => {
+      assertObjectId(input.id);
 
-        const project = await Project.findOne({
-          _id: input.id,
-          ownerId: ctx.user.id,
-        }).lean();
-        if (!project) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Project not found",
-          });
-        }
-
-        const referenced = await TimeEntry.exists({
-          ownerId: ctx.user.id,
-          projectId: input.id,
+      const project = await Project.findOne({
+        _id: input.id,
+        ownerId: ctx.user.id,
+      }).lean();
+      if (!project) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Project not found",
         });
+      }
 
-        if (referenced) {
-          await Project.updateOne(
-            { _id: input.id, ownerId: ctx.user.id },
-            { $set: { archived: true } },
-          );
-          publishSync(
-            ctx.user.id,
-            { kind: "catalog.changed", scope: "project" },
-            input.originId,
-          );
-          return {
-            deleted: false,
-            archived: true,
-            message:
-              "This project has tracked time, so it was archived instead of deleted.",
-          };
-        }
+      const result = await cascadeDeleteProject(ctx.user.id, input.id);
 
-        // Nothing references it — its tasks are safe to drop with it.
-        await Task.deleteMany({ ownerId: ctx.user.id, projectId: input.id });
-        await Project.deleteOne({ _id: input.id, ownerId: ctx.user.id });
-
-        publishSync(
-          ctx.user.id,
-          { kind: "catalog.changed", scope: "project" },
-          input.originId,
-        );
-        return { deleted: true, archived: false, message: null };
-      },
-    ),
+      publishSync(
+        ctx.user.id,
+        {
+          kind: "catalog.changed",
+          scope: "project",
+          entriesTouched: result.entriesDetached > 0,
+        },
+        input.originId,
+      );
+      return result;
+    }),
 });

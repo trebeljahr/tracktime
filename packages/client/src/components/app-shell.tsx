@@ -9,12 +9,14 @@ import {
   ChevronRight,
   Clock,
   FolderKanban,
+  ListChecks,
   LogOut,
   Menu,
   Settings as SettingsIcon,
   Table2,
   Timer,
   User as UserIcon,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -77,7 +79,9 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     heading: "Manage",
     items: [
+      { href: "/clients", label: "Clients", icon: Users },
       { href: "/projects", label: "Projects", icon: FolderKanban },
+      { href: "/tasks", label: "Tasks", icon: ListChecks },
       { href: "/settings", label: "Settings", icon: SettingsIcon },
     ],
   },

@@ -235,7 +235,11 @@ export function TaskPanel({
           if (!next) setPendingDelete(null);
         }}
         title={`Delete "${pendingDelete?.name ?? ""}"?`}
-        description="If time has been tracked against this task it is archived instead of deleted, so your reports stay intact."
+        description={
+          pendingDelete && pendingDelete.totalSec > 0
+            ? "Entries booked on this task keep their tracked time and their project — they simply lose the task."
+            : "No time is tracked against this task."
+        }
         confirmLabel="Delete task"
         onConfirm={() => {
           if (pendingDelete) rows.removeTask(pendingDelete.id);

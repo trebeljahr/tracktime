@@ -50,34 +50,36 @@ function reportError(
   toast.error(message);
 }
 
-/** "42 time entries reference this project" — honest, never "deleted". */
-function archivedInsteadMessage(
-  noun: string,
-  entryCount: number,
-  serverMessage: string | null,
-): string {
-  if (entryCount > 0) {
-    const plural = entryCount === 1 ? "entry" : "entries";
-    return `Archived instead — ${entryCount} time ${plural} reference this ${noun}.`;
-  }
-  return (
-    serverMessage ??
-    `Archived instead — tracked time still references this ${noun}.`
-  );
-}
+const plural = (count: number, one: string, many: string): string =>
+  `${count} ${count === 1 ? one : many}`;
 
-function announceRemoval(
-  result: RemoveResult,
-  noun: string,
-  entryCount: number,
-): void {
-  if (result.deleted) {
-    toast.success(
-      `${noun.charAt(0).toUpperCase()}${noun.slice(1)} deleted.`,
-    );
-    return;
+/**
+ * Deletion always succeeds now, so the toast reports the collateral rather
+ * than the outcome: what was deleted alongside it, and what merely lost a
+ * reference. Tracked time is never among the casualties.
+ */
+function announceRemoval(result: RemoveResult, noun: string): void {
+  const detail: string[] = [];
+  if (result.tasksDeleted > 0) {
+    detail.push(`${plural(result.tasksDeleted, "task", "tasks")} deleted`);
   }
-  toast.warning(archivedInsteadMessage(noun, entryCount, result.message));
+  if (result.projectsDetached > 0) {
+    detail.push(
+      `${plural(result.projectsDetached, "project", "projects")} kept without a client`,
+    );
+  }
+  if (result.entriesDetached > 0) {
+    detail.push(
+      `${plural(result.entriesDetached, "time entry", "time entries")} kept without a ${noun}`,
+    );
+  }
+
+  const name = `${noun.charAt(0).toUpperCase()}${noun.slice(1)}`;
+  toast.success(
+    detail.length === 0
+      ? `${name} deleted.`
+      : `${name} deleted — ${detail.join(", ")}.`,
+  );
 }
 
 // ── projects ─────────────────────────────────────────────────────────
@@ -225,21 +227,23 @@ export function useProjectMutations(
   const remove = trpc.projects.remove.useMutation({
     onMutate: async (vars) => {
       const context = await beginProjectWrite();
-      const entryCount =
-        context.previous?.find((row) => row.id === vars.id)?.entryCount ?? 0;
       writeProjects((rows) => rows.filter((row) => row.id !== vars.id));
-      return { ...context, entryCount };
+      return context;
     },
-    onSuccess: (result, _vars, context) => {
-      announceRemoval(result, "project", context?.entryCount ?? 0);
+    onSuccess: (result) => {
+      announceRemoval(result, "project");
     },
     onError: (error, _vars, context) => {
       rollbackProjects(context?.previous);
       reportError(error, "Could not delete the project.", handlers);
     },
+    // The cascade drops the project's tasks and detaches its entries, so the
+    // entry-backed caches are stale too.
     onSettled: () => {
       settleProjects();
       void utils.tasks.list.invalidate();
+      void utils.entries.invalidate();
+      void utils.reports.invalidate();
     },
   });
 
@@ -264,8 +268,7 @@ export type ClientMutations = {
   createClient: (vars: CreateClientVars) => Promise<CreatedClient | null>;
   updateClient: (vars: UpdateClientVars) => Promise<CreatedClient | null>;
   setClientArchived: (id: string, archived: boolean) => void;
-  /** `entryCount` only feeds the "archived instead" toast copy. */
-  removeClient: (id: string, entryCount: number) => void;
+  removeClient: (id: string) => void;
   isSaving: boolean;
 };
 
@@ -375,6 +378,9 @@ export function useClientMutations(
       writeClients((rows) => rows.filter((row) => row.id !== vars.id));
       return context;
     },
+    onSuccess: (result) => {
+      announceRemoval(result, "client");
+    },
     onError: (error, _vars, context) => {
       rollbackClients(context?.previous);
       reportError(error, "Could not delete the client.", handlers);
@@ -390,15 +396,8 @@ export function useClientMutations(
     setClientArchived: (id, archived) => {
       archive.mutate({ id, archived, originId: ORIGIN_ID });
     },
-    removeClient: (id, entryCount) => {
-      remove.mutate(
-        { id, originId: ORIGIN_ID },
-        {
-          onSuccess: (result) => {
-            announceRemoval(result, "client", entryCount);
-          },
-        },
-      );
+    removeClient: (id) => {
+      remove.mutate({ id, originId: ORIGIN_ID });
     },
     isSaving: create.isPending || update.isPending,
   };
@@ -414,12 +413,22 @@ export type TaskMutations = {
   isSaving: boolean;
 };
 
+/**
+ * `projectId` selects which task cache is written optimistically: a project id
+ * for a project row's inline panel, `null` for the Tasks screen's "every task"
+ * listing. Both are invalidated on settle, so the two views never disagree.
+ */
 export function useTaskMutations(
-  projectId: string,
+  projectId: string | null,
   handlers: CatalogErrorHandlers = {},
 ): TaskMutations {
   const utils = trpc.useUtils();
   const input = taskListInput(projectId);
+
+  const findProject = (id: string): ProjectRow | null => {
+    const projects = utils.projects.list.getData(PROJECT_LIST_INPUT) ?? [];
+    return projects.find((project) => project.id === id) ?? null;
+  };
 
   const writeTasks = (update: (rows: TaskRow[]) => TaskRow[]): void => {
     utils.tasks.list.setData(input, (old) =>
@@ -438,14 +447,17 @@ export function useTaskMutations(
     if (previous !== undefined) utils.tasks.list.setData(input, previous);
   };
 
+  // Both the scoped and the unscoped listing hold the same rows, so neither
+  // can be left behind — `invalidate()` with no key covers both.
   const settleTasks = (): void => {
-    void utils.tasks.list.invalidate(input);
+    void utils.tasks.list.invalidate();
   };
 
   const create = trpc.tasks.create.useMutation({
     onMutate: async (vars) => {
       const context = await beginTaskWrite();
       const now = new Date().toISOString();
+      const project = findProject(vars.projectId);
       const optimistic: TaskRow = {
         id: `optimistic-${createId()}`,
         ownerId: "",
@@ -455,6 +467,8 @@ export function useTaskMutations(
         archived: false,
         createdAt: now,
         updatedAt: now,
+        projectName: project?.name ?? null,
+        projectColor: project?.color ?? null,
         totalSec: 0,
       };
       writeTasks((rows) => sortByName([...rows, optimistic]));
@@ -521,27 +535,31 @@ export function useTaskMutations(
       return context;
     },
     onSuccess: (result) => {
-      if (result.deleted) {
-        toast.success("Task deleted.");
-        return;
-      }
-      toast.warning(
-        result.message ??
-          "Archived instead — tracked time still references this task.",
-      );
+      announceRemoval(result, "task");
     },
     onError: (error, _vars, context) => {
       rollbackTasks(context?.previous);
       reportError(error, "Could not delete the task.", handlers);
     },
-    onSettled: settleTasks,
+    // Deleting a task detaches the entries booked on it.
+    onSettled: () => {
+      settleTasks();
+      void utils.entries.invalidate();
+      void utils.reports.invalidate();
+    },
   });
 
   return {
-    createTask: (vars) =>
-      create
-        .mutateAsync({ ...vars, projectId, originId: ORIGIN_ID })
-        .catch(() => null),
+    createTask: (vars) => {
+      const target = vars.projectId ?? projectId;
+      if (!target) {
+        toast.error("Pick a project for the task first.");
+        return Promise.resolve(null);
+      }
+      return create
+        .mutateAsync({ ...vars, projectId: target, originId: ORIGIN_ID })
+        .catch(() => null);
+    },
     updateTask: (vars) =>
       update.mutateAsync({ ...vars, originId: ORIGIN_ID }).catch(() => null),
     setTaskArchived: (id, archived) => {
