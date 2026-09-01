@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { DurationInput } from "@/components/duration-input";
 import { ProjectPicker } from "@/components/project-picker";
+import { TaskPicker } from "@/components/task-picker";
 import { TimeField } from "@/components/tracker/time-field";
 import {
   requestPomodoroPermission,
@@ -55,6 +56,7 @@ export function TrackerBar(): React.JSX.Element {
   const [mode, setMode] = React.useState<TrackerMode>("timer");
   const [description, setDescription] = React.useState("");
   const [projectId, setProjectId] = React.useState<string | null>(null);
+  const [taskId, setTaskId] = React.useState<string | null>(null);
   const [billable, setBillable] = React.useState(false);
   const [manual, setManual] = React.useState(defaultManualRange);
 
@@ -70,6 +72,7 @@ export function TrackerBar(): React.JSX.Element {
     setLastRunningId(runningId);
     setDescription(running?.description ?? "");
     setProjectId(running?.projectId ?? null);
+    setTaskId(running?.taskId ?? null);
     setBillable(running?.billable ?? false);
   }
 
@@ -104,14 +107,31 @@ export function TrackerBar(): React.JSX.Element {
 
   const handleProjectChange = React.useCallback(
     (nextProjectId: string | null): void => {
+      const projectChanged = nextProjectId !== projectId;
       setProjectId(nextProjectId);
+      // A task belongs to one project, so it cannot survive a project change.
+      if (projectChanged) setTaskId(null);
       if (isRunning && running) {
-        mutations.updateEntry({ id: running.id, projectId: nextProjectId });
+        mutations.updateEntry({
+          id: running.id,
+          projectId: nextProjectId,
+          ...(projectChanged ? { taskId: null } : {}),
+        });
         return;
       }
       setBillable(projectBillableDefault(nextProjectId));
     },
-    [isRunning, mutations, projectBillableDefault, running]
+    [isRunning, mutations, projectBillableDefault, projectId, running]
+  );
+
+  const handleTaskChange = React.useCallback(
+    (nextTaskId: string | null): void => {
+      setTaskId(nextTaskId);
+      if (isRunning && running) {
+        mutations.updateEntry({ id: running.id, taskId: nextTaskId });
+      }
+    },
+    [isRunning, mutations, running]
   );
 
   const handleBillableToggle = React.useCallback((): void => {
@@ -130,8 +150,8 @@ export function TrackerBar(): React.JSX.Element {
 
   const start = React.useCallback((): void => {
     requestPomodoroPermission(format.settings.pomodoro);
-    mutations.startTimer({ description, projectId, billable });
-  }, [billable, description, mutations, projectId]);
+    mutations.startTimer({ description, projectId, taskId, billable });
+  }, [billable, description, mutations, projectId, taskId]);
 
   const stop = React.useCallback((): void => {
     mutations.stopTimer();
@@ -147,13 +167,14 @@ export function TrackerBar(): React.JSX.Element {
     mutations.createManualEntry({
       description,
       projectId,
+      taskId,
       billable,
       start: manual.start,
       end,
     });
     setDescription("");
     setManual(defaultManualRange());
-  }, [billable, description, manual, mutations, projectId]);
+  }, [billable, description, manual, mutations, projectId, taskId]);
 
   const submit = React.useCallback((): void => {
     if (mode === "manual") addManual();
@@ -221,6 +242,14 @@ export function TrackerBar(): React.JSX.Element {
           onChange={handleProjectChange}
           className="h-10 border-0 shadow-none"
           testId="tracker-project"
+        />
+
+        <TaskPicker
+          projectId={projectId}
+          value={taskId}
+          onChange={handleTaskChange}
+          className="h-10 border-0 shadow-none"
+          testId="tracker-task"
         />
 
         <Button

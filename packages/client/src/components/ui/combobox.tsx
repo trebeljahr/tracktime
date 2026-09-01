@@ -49,6 +49,8 @@ export interface ComboboxProps
   onCreate?: (name: string) => void;
   /** Label for the create row. Defaults to `Create "<query>"`. */
   createLabel?: (query: string) => string;
+  /** Muted hint under the create row, for a shorthand worth advertising. */
+  createHint?: string;
   searchPlaceholder?: string;
   /** Adds a row that resets the selection to `null`. */
   allowClear?: boolean;
@@ -111,6 +113,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
       emptyText = "No results.",
       onCreate,
       createLabel,
+      createHint,
       searchPlaceholder = "Search...",
       allowClear = false,
       clearLabel = "Clear selection",
@@ -219,7 +222,10 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
               {showCreate ? null : <CommandEmpty>{emptyText}</CommandEmpty>}
 
               {allowClear && (
-                <CommandGroup>
+                // forceMount on the GROUP, not just the item: cmdk hides a
+                // whole group when none of its items match the query, and a
+                // forceMount on the child does not override that.
+                <CommandGroup forceMount>
                   <CommandItem
                     value="\u0000clear"
                     keywords={[clearLabel]}
@@ -271,7 +277,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
               {showCreate && onCreate && (
                 <>
                   <CommandSeparator />
-                  <CommandGroup>
+                  <CommandGroup forceMount>
                     <CommandItem
                       forceMount
                       value="\u0000create"
@@ -289,6 +295,17 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
                       </span>
                     </CommandItem>
                   </CommandGroup>
+                  {/* Outside the group: cmdk hoists a group's non-item
+                      children above its item list, which would put the hint
+                      above the row it describes. */}
+                  {createHint && (
+                    <p
+                      className="px-3 pb-2 text-xs text-muted-foreground"
+                      data-testid="combobox-create-hint"
+                    >
+                      {createHint}
+                    </p>
+                  )}
                 </>
               )}
             </CommandList>

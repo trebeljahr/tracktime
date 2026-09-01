@@ -18,6 +18,28 @@ export type PickableProject = {
 
 const UNGROUPED = "No client";
 
+/**
+ * Split a create query written as "Client / Project".
+ *
+ * Lets a whole client-and-project pair be created from the dropdown itself,
+ * without a detour to the Projects screen. A query with no separator (or an
+ * empty half) is just a project name.
+ */
+export const splitClientAndProject = (
+  query: string
+): { clientName: string | null; projectName: string } => {
+  const separator = query.indexOf("/");
+  if (separator === -1) return { clientName: null, projectName: query.trim() };
+
+  const clientName = query.slice(0, separator).trim();
+  const projectName = query.slice(separator + 1).trim();
+
+  if (clientName === "" || projectName === "") {
+    return { clientName: null, projectName: query.replace("/", " ").trim() };
+  }
+  return { clientName, projectName };
+};
+
 /** Group by client so the list reads the way the sidebar does. */
 export const toProjectOptions = (
   projects: PickableProject[]
@@ -59,6 +81,7 @@ export function ProjectPicker({
 }: ProjectPickerProps): React.JSX.Element {
   const utils = trpc.useUtils();
   const projects = trpc.projects.list.useQuery({});
+  const clients = trpc.clients.list.useQuery({});
 
   const createProject = trpc.projects.create.useMutation({
     onSuccess: async (project) => {
@@ -71,16 +94,60 @@ export function ProjectPicker({
     },
   });
 
+  const createClient = trpc.clients.create.useMutation({
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
   const options = React.useMemo(
     () => toProjectOptions(projects.data ?? []),
     [projects.data]
   );
 
+  /**
+   * Create a project, and its client too when the query is written as
+   * "Client / Project". An existing client of that name is reused rather than
+   * duplicated (the server rejects duplicate names anyway), so typing the same
+   * client repeatedly keeps filing projects under the one client.
+   */
   const handleCreate = React.useCallback(
-    (name: string): void => {
-      createProject.mutate({ name, originId: ORIGIN_ID });
+    (query: string): void => {
+      const { clientName, projectName } = splitClientAndProject(query);
+
+      if (clientName === null) {
+        createProject.mutate({ name: projectName, originId: ORIGIN_ID });
+        return;
+      }
+
+      const existing = (clients.data ?? []).find(
+        (client) => client.name.toLowerCase() === clientName.toLowerCase()
+      );
+
+      if (existing) {
+        createProject.mutate({
+          name: projectName,
+          clientId: existing.id,
+          originId: ORIGIN_ID,
+        });
+        return;
+      }
+
+      createClient.mutate(
+        { name: clientName, originId: ORIGIN_ID },
+        {
+          onSuccess: async (client) => {
+            await utils.clients.invalidate();
+            createProject.mutate({
+              name: projectName,
+              clientId: client.id,
+              originId: ORIGIN_ID,
+            });
+          },
+        }
+      );
     },
-    [createProject]
+    [clients.data, createClient, createProject, utils]
   );
 
   return (
@@ -94,8 +161,14 @@ export function ProjectPicker({
       allowClear
       clearLabel="No project"
       onCreate={allowCreate ? handleCreate : undefined}
-      createLabel={(query) => `Create project "${query}"`}
-      disabled={disabled || createProject.isPending}
+      createLabel={(query) => {
+        const { clientName, projectName } = splitClientAndProject(query);
+        return clientName
+          ? `Create project "${projectName}" for client "${clientName}"`
+          : `Create project "${projectName}"`;
+      }}
+      createHint={'Tip: type "Client / Project" to create both at once'}
+      disabled={disabled || createProject.isPending || createClient.isPending}
       size={size}
       className={cn("min-w-48", className)}
       data-testid={testId}
