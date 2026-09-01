@@ -1,0 +1,233 @@
+import {
+  Action,
+  ActionPanel,
+  Alert,
+  Color,
+  Icon,
+  List,
+  Toast,
+  confirmAlert,
+  showToast,
+} from "@raycast/api";
+import { entryDurationSec, type DetailedEntry } from "@starter/core";
+import { getTracktime } from "./lib/api.js";
+import {
+  formatClock,
+  formatDayHeading,
+  formatDurationShort,
+  isoDaysAgo,
+  projectIcon,
+} from "./lib/format.js";
+import { useApi } from "./lib/hooks.js";
+import { webLink } from "./lib/preferences.js";
+import { SignedOutView, refreshMenuBar, showFailureToast } from "./lib/ui.js";
+import { EditEntry } from "./components/edit-entry.js";
+
+/** Window the list covers. Anything older belongs in the web app's reports. */
+const HISTORY_DAYS = 14;
+
+const label = (entry: DetailedEntry): string =>
+  entry.description.trim() || entry.projectName || "No description";
+
+/** Day heading → its entries, newest day first (the API already sorts). */
+const byDay = (entries: DetailedEntry[]): [string, DetailedEntry[]][] => {
+  const groups = new Map<string, DetailedEntry[]>();
+  for (const entry of entries) {
+    const heading = formatDayHeading(entry.start);
+    const bucket = groups.get(heading);
+    if (bucket) bucket.push(entry);
+    else groups.set(heading, [entry]);
+  }
+  return [...groups.entries()];
+};
+
+const dayTotal = (entries: DetailedEntry[], nowMs: number): number =>
+  entries.reduce((total, entry) => total + entryDurationSec(entry, nowMs), 0);
+
+export default function Entries(): React.JSX.Element {
+  const now = Date.now();
+  const { data, isLoading, signedOut, revalidate } = useApi(
+    "entries",
+    async (api) => {
+      const { entries } = await api.list({
+        from: isoDaysAgo(HISTORY_DAYS),
+        to: new Date(Date.now() + 60_000).toISOString(),
+        limit: 200,
+      });
+      return entries;
+    },
+  );
+
+  if (signedOut) return <SignedOutView />;
+
+  const entries = data ?? [];
+
+  const run = async (
+    action: () => Promise<string>,
+    failureTitle: string,
+  ): Promise<void> => {
+    try {
+      const message = await action();
+      await refreshMenuBar();
+      revalidate();
+      await showToast({ style: Toast.Style.Success, title: message });
+    } catch (error) {
+      await showFailureToast(error, failureTitle);
+    }
+  };
+
+  const remove = async (entry: DetailedEntry): Promise<void> => {
+    const confirmed = await confirmAlert({
+      title: "Delete this entry?",
+      message: `${label(entry)} — ${formatDurationShort(
+        entryDurationSec(entry, Date.now()),
+      )}`,
+      icon: Icon.Trash,
+      primaryAction: {
+        title: "Delete",
+        style: Alert.ActionStyle.Destructive,
+      },
+    });
+    if (!confirmed) return;
+
+    await run(async () => {
+      const api = await getTracktime();
+      await api.remove(entry.id);
+      return "Entry deleted";
+    }, "Could not delete the entry");
+  };
+
+  return (
+    <List
+      isLoading={isLoading}
+      searchBarPlaceholder="Search recent entries…"
+      actions={
+        <ActionPanel>
+          <Action.OpenInBrowser title="Open Web App" url={webLink("/track")} />
+        </ActionPanel>
+      }
+    >
+      <List.EmptyView
+        icon={Icon.Clock}
+        title="No entries yet"
+        description={`Nothing tracked in the last ${HISTORY_DAYS} days.`}
+      />
+
+      {byDay(entries).map(([heading, group]) => (
+        <List.Section
+          key={heading}
+          title={heading}
+          subtitle={formatDurationShort(dayTotal(group, now))}
+        >
+          {group.map((entry) => {
+            const running = entry.end === null;
+            const duration = entryDurationSec(entry, now);
+
+            return (
+              <List.Item
+                key={entry.id}
+                icon={projectIcon(entry.projectColor)}
+                title={label(entry)}
+                subtitle={
+                  [entry.projectName, entry.taskName]
+                    .filter(Boolean)
+                    .join(" › ") || undefined
+                }
+                accessories={[
+                  entry.billable
+                    ? {
+                        icon: {
+                          source: Icon.BankNote,
+                          tintColor: Color.Green,
+                        },
+                        tooltip: "Billable",
+                      }
+                    : {},
+                  {
+                    text: running
+                      ? `${formatDurationShort(duration)} · running`
+                      : `${formatClock(entry.start)}–${formatClock(entry.end ?? entry.start)}`,
+                  },
+                  {
+                    tag: {
+                      value: formatDurationShort(duration),
+                      color: running ? Color.Green : Color.SecondaryText,
+                    },
+                  },
+                ]}
+                actions={
+                  <ActionPanel>
+                    <ActionPanel.Section>
+                      {running ? (
+                        <Action
+                          title="Stop Timer"
+                          icon={Icon.Stop}
+                          onAction={() =>
+                            run(async () => {
+                              const api = await getTracktime();
+                              await api.stop(entry.id);
+                              return "Timer stopped";
+                            }, "Could not stop the timer")
+                          }
+                        />
+                      ) : (
+                        <Action
+                          title="Continue Entry"
+                          icon={Icon.Play}
+                          onAction={() =>
+                            run(async () => {
+                              const api = await getTracktime();
+                              await api.continue(entry.id);
+                              return "Timer started";
+                            }, "Could not start the timer")
+                          }
+                        />
+                      )}
+                      <Action.Push
+                        title="Edit Entry"
+                        icon={Icon.Pencil}
+                        shortcut={{ modifiers: ["cmd"], key: "e" }}
+                        target={
+                          <EditEntry entry={entry} onSaved={revalidate} />
+                        }
+                      />
+                    </ActionPanel.Section>
+
+                    <ActionPanel.Section>
+                      <Action.CopyToClipboard
+                        title="Copy Description"
+                        content={label(entry)}
+                        shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
+                      />
+                      <Action.OpenInBrowser
+                        title="Open Web App"
+                        url={webLink("/track")}
+                        shortcut={{ modifiers: ["cmd"], key: "o" }}
+                      />
+                      <Action
+                        title="Refresh"
+                        icon={Icon.ArrowClockwise}
+                        shortcut={{ modifiers: ["cmd"], key: "r" }}
+                        onAction={revalidate}
+                      />
+                    </ActionPanel.Section>
+
+                    <ActionPanel.Section>
+                      <Action
+                        title="Delete Entry"
+                        icon={Icon.Trash}
+                        style={Action.Style.Destructive}
+                        shortcut={{ modifiers: ["ctrl"], key: "x" }}
+                        onAction={() => remove(entry)}
+                      />
+                    </ActionPanel.Section>
+                  </ActionPanel>
+                }
+              />
+            );
+          })}
+        </List.Section>
+      ))}
+    </List>
+  );
+}

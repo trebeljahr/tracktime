@@ -211,6 +211,30 @@ the Raycast password store), never a plain config file. Clients send
 any of them can be signed out; revocation kills the HTTP and WebSocket paths
 at once. Device-flow client ids are allowlisted in `auth/client-label.ts`.
 
+### Raycast extension
+
+`packages/raycast` is a Raycast extension: a macOS menu bar timer plus
+commands to start, stop, toggle, browse and edit entries.
+
+```bash
+pnpm dev:raycast                      # builds @starter/core, then `ray develop`
+pnpm build:raycast                    # `ray build -e dist`
+```
+
+It is a thin shell over `@starter/core` — `createApiClient` for the tRPC
+HTTP endpoints, `session-auth.ts` for the device flow, the shared
+`formatDuration` helpers for display. Domain logic belongs in `core` so
+the browser extension and CLI inherit it; only Raycast UI belongs here.
+
+- Auth: device flow, token in Raycast's encrypted `LocalStorage`, sent as
+  `Authorization: Bearer <token>` with `x-tracktime-client: tracktime-raycast`.
+- `raycast-env.d.ts` is generated from `package.json` by `ray build` and is
+  committed, so `pnpm typecheck` works without Raycast installed.
+- Menu bar commands only re-run on their interval (1 min) and when opened, so
+  the clock is `h:mm`; mutations call `refreshMenuBar()` to avoid a stale value.
+- Server origin and web origin come from extension preferences, defaulting to
+  the deployed hosts. Point **API URL** at the dev API port for local work.
+
 ### Static export caveats
 
 - `NEXT_PUBLIC_API_URL` is baked at build time — desktop/mobile binaries

@@ -1,0 +1,124 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "tracktime-raycast",
+  "title": "tracktime",
+  "description": "Start, stop and edit tracktime timers from Raycast, with a live menu bar clock.",
+  "icon": "icon.png",
+  "author": "trebeljahr",
+  "categories": ["Productivity"],
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "commands": [
+    {
+      "name": "menu-bar",
+      "title": "Timer",
+      "subtitle": "tracktime",
+      "description": "Show the running timer in the macOS menu bar.",
+      "mode": "menu-bar",
+      "interval": "1m",
+      "preferences": [
+        {
+          "name": "titleMode",
+          "title": "Menu Bar Title",
+          "description": "What the menu bar shows while a timer runs.",
+          "type": "dropdown",
+          "required": false,
+          "default": "duration",
+          "data": [
+            { "title": "Duration only", "value": "duration" },
+            { "title": "Description only", "value": "description" },
+            { "title": "Duration and description", "value": "both" },
+            { "title": "Icon only", "value": "icon" }
+          ]
+        },
+        {
+          "name": "hideWhenIdle",
+          "title": "Idle",
+          "label": "Hide the menu bar item when no timer runs",
+          "description": "Keeps the menu bar clean; the item reappears on the next start.",
+          "type": "checkbox",
+          "required": false,
+          "default": false
+        }
+      ]
+    },
+    {
+      "name": "start-timer",
+      "title": "Start Timer",
+      "subtitle": "tracktime",
+      "description": "Start a new timer, optionally on a project and task.",
+      "mode": "view",
+      "arguments": [
+        {
+          "name": "description",
+          "placeholder": "What are you working on?",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "stop-timer",
+      "title": "Stop Timer",
+      "subtitle": "tracktime",
+      "description": "Stop the running timer and keep the entry.",
+      "mode": "no-view"
+    },
+    {
+      "name": "toggle-timer",
+      "title": "Toggle Timer",
+      "subtitle": "tracktime",
+      "description": "Stop the running timer, or resume the most recent entry.",
+      "mode": "no-view"
+    },
+    {
+      "name": "entries",
+      "title": "Time Entries",
+      "subtitle": "tracktime",
+      "description": "Browse, continue, edit and delete recent time entries.",
+      "mode": "view"
+    },
+    {
+      "name": "sign-in",
+      "title": "Sign in to tracktime",
+      "subtitle": "tracktime",
+      "description": "Pair Raycast with your tracktime account using a device code.",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "apiUrl",
+      "title": "API URL",
+      "description": "Origin of the tracktime server, e.g. https://api.tracktime.example.",
+      "type": "textfield",
+      "required": false,
+      "default": "https://api.tracktime.trebeljahr.com"
+    },
+    {
+      "name": "webUrl",
+      "title": "Web App URL",
+      "description": "Origin of the tracktime web app, used for the device-pairing page and Open in Browser.",
+      "type": "textfield",
+      "required": false,
+      "default": "https://tracktime.trebeljahr.com"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^2.1.2",
+    "@raycast/utils": "^2.3.0",
+    "@starter/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.17",
+    "@types/react": "19.0.10",
+    "typescript": "^6.0.3"
+  },
+  "scripts": {
+    "dev": "ray develop",
+    "build": "ray build -e dist",
+    "publish": "npx @raycast/api@latest publish",
+    "typecheck": "tsc --noEmit"
+  }
+}
