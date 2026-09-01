@@ -1,0 +1,27 @@
+# Production compose for the CLIENT Coolify app (the bare <domain>).
+#
+# One service, named `client` — the name is load-bearing for the same reason
+# as in docker-compose.server.yml: `hatchkit sync` writes the
+# `docker_compose_domains` key `client` for the split topology, and a key that
+# doesn't match a service here yields a 200 from Coolify, no Traefik labels,
+# and 503 from the site.
+#
+# Separate from the server app on purpose. The server holds the WebSocket sync
+# connections, so a client deploy that restarted it would drop every connected
+# device's socket for a change that never touched the server.
+#
+# Do NOT expose ports here — Coolify's Traefik handles external routing.
+
+services:
+  client:
+    image: ${CLIENT_IMAGE:-ghcr.io/trebeljahr/tracktime-client:main}
+    environment:
+      # Pin the client port — Coolify's app-level PORT would otherwise
+      # bleed in from the server app's settings.
+      PORT: "6477"
+      # Deliberately NO NEXT_PUBLIC_* here: Next.js inlines those into the
+      # browser bundle when the image is BUILT, so runtime env on this
+      # prebuilt container cannot affect them. They are passed as Docker
+      # build args in .github/workflows/build-and-deploy.yml, which is also
+      # where the split's api.<domain> value is set.
+    restart: unless-stopped

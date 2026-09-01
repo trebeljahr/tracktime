@@ -1,0 +1,56 @@
+# Production compose for the SERVER Coolify app (api.<domain>).
+#
+# One service, named `server` — the name is load-bearing. Coolify routes a
+# dockercompose app through `docker_compose_domains`, which is keyed by
+# service name, and `hatchkit sync` writes the key `server` for the split
+# topology. A name that isn't in this file makes Coolify accept the PATCH,
+# emit no Traefik labels, and serve 503 for everything.
+#
+# Mongo and Redis are NOT here. Under the split they are Coolify-managed
+# databases shared with nothing else, reached over the Coolify network via
+# MONGODB_URI / REDIS_URL — so a client-only deploy cannot restart the
+# database, and a server restart cannot drop the volume.
+#
+# Do NOT expose ports here — Coolify's Traefik handles external routing.
+
+services:
+  server:
+    image: ${SERVER_IMAGE:-ghcr.io/trebeljahr/tracktime-server:main}
+    environment:
+      PORT: "5159"
+      # Supplied by Coolify from the managed database resources.
+      MONGODB_URI: ${MONGODB_URI}
+      REDIS_URL: ${REDIS_URL:-}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      # The API's own origin — https://api.<domain> under the split.
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL}
+      # The web app's origin. Also the CORS allow-list entry that lets the
+      # client, on a different host now, call this API with credentials.
+      FRONTEND_URL: ${FRONTEND_URL}
+      # Extra origins allowed to sign in — the browser extension's
+      # chrome-extension://<id> lives here. Without it better-auth answers
+      # sign-in with 403 INVALID_ORIGIN before checking the password.
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      LISTMONK_URL: ${LISTMONK_URL:-}
+      LISTMONK_API_USER: ${LISTMONK_API_USER:-}
+      LISTMONK_API_TOKEN: ${LISTMONK_API_TOKEN:-}
+      LISTMONK_FROM_EMAIL: ${LISTMONK_FROM_EMAIL:-}
+      LISTMONK_FROM: ${LISTMONK_FROM:-}
+      LISTMONK_LIVE_LIST_ID: ${LISTMONK_LIVE_LIST_ID:-}
+      LISTMONK_TEST_LIST_ID: ${LISTMONK_TEST_LIST_ID:-}
+      LISTMONK_TX_TEMPLATE_ID: ${LISTMONK_TX_TEMPLATE_ID:-}
+      LISTMONK_CAMPAIGN_TEMPLATE_ID: ${LISTMONK_CAMPAIGN_TEMPLATE_ID:-}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-assets}
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      DOTENV_PRIVATE_KEY_PRODUCTION: ${DOTENV_PRIVATE_KEY_PRODUCTION}
+    restart: unless-stopped

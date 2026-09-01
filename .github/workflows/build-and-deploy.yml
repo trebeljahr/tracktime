@@ -122,14 +122,19 @@ jobs:
           push: true
           # NEXT_PUBLIC_* are inlined into the browser bundle at image
           # BUILD time — setting them as runtime env on the deployed
-          # container does nothing. The URL values below are written by
-          # hatchkit at scaffold time (and kept in sync by
-          # `hatchkit regen-infra` / `hatchkit rename-domain`). The
+          # container does nothing.
+          #
+          # The API/WS defaults below are the split topology's api.<domain>,
+          # literal rather than only `vars.*`: these were repo VARIABLES with
+          # nothing set, so every client image was being built with an empty
+          # API URL, which makes the browser fall back to its own origin and
+          # talk to the client container instead of the API. A repo variable
+          # still wins when set, for a staging or preview host. The
           # analytics values are optional GitHub Actions repo VARIABLES
           # (not secrets): gh variable set NEXT_PUBLIC_OPENPANEL_CLIENT_ID ...
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
-            NEXT_PUBLIC_WS_URL=${{ vars.NEXT_PUBLIC_WS_URL }}
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'https://api.tracktime.trebeljahr.com' }}
+            NEXT_PUBLIC_WS_URL=${{ vars.NEXT_PUBLIC_WS_URL || 'wss://api.tracktime.trebeljahr.com' }}
             NEXT_PUBLIC_OPENPANEL_CLIENT_ID=${{ vars.NEXT_PUBLIC_OPENPANEL_CLIENT_ID }}
             NEXT_PUBLIC_PLAUSIBLE_DOMAIN=${{ vars.NEXT_PUBLIC_PLAUSIBLE_DOMAIN }}
             NEXT_PUBLIC_PLAUSIBLE_SCRIPT_URL=${{ vars.NEXT_PUBLIC_PLAUSIBLE_SCRIPT_URL }}
@@ -138,25 +143,53 @@ jobs:
             ghcr.io/${{ github.repository }}-client:main
             ghcr.io/${{ github.repository }}-client:${{ github.sha }}
 
-  # Single deploy job — Hatchkit registers ONE Coolify app per project
-  # (a single dockercompose pulling both ghcr.io/<owner>/<repo>-server
-  # and -client images), so there is exactly ONE deploy trigger to fire
-  # once both image builds succeed. Earlier revisions of this workflow
-  # had per-build deploy steps reading per-surface secret names
-  # (COOLIFY_SERVER_RESOURCE_UUID, COOLIFY_CLIENT_RESOURCE_UUID) that
-  # Hatchkit never sets — both steps silently no-opped and Coolify
-  # never got told to redeploy. The secret names below match what
-  # `hatchkit adopt` and `setCoolifyDeploySecrets` push.
+  # Deploy job — the split topology is TWO Coolify apps, so there are two
+  # UUIDs to trigger: the server app on api.<domain> and the client app on
+  # the bare domain. Each is optional and skipped when its secret is unset,
+  # so a project still on the single-app layout keeps working by setting
+  # only COOLIFY_RESOURCE_UUID.
+  #
+  # Deploying them separately is the point of the split: the server holds
+  # the WebSocket sync connections, and a client-only change must not
+  # restart it and drop every connected device's socket.
   deploy:
     runs-on: ubuntu-latest
     needs: [build-server, build-client]
     steps:
-      - name: Deploy via Coolify API
+      - name: Deploy server app via Coolify API
+        env:
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+          COOLIFY_SERVER_RESOURCE_UUID: ${{ secrets.COOLIFY_SERVER_RESOURCE_UUID }}
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+        if: env.COOLIFY_BASE_URL != '' && env.COOLIFY_SERVER_RESOURCE_UUID != ''
+        run: |
+          curl -fsSL -X POST \
+            "$COOLIFY_BASE_URL/api/v1/deploy?uuid=$COOLIFY_SERVER_RESOURCE_UUID&force=true" \
+            -H "Authorization: Bearer $COOLIFY_API_TOKEN"
+
+      - name: Deploy client app via Coolify API
+        env:
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+          COOLIFY_CLIENT_RESOURCE_UUID: ${{ secrets.COOLIFY_CLIENT_RESOURCE_UUID }}
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+        if: env.COOLIFY_BASE_URL != '' && env.COOLIFY_CLIENT_RESOURCE_UUID != ''
+        run: |
+          curl -fsSL -X POST \
+            "$COOLIFY_BASE_URL/api/v1/deploy?uuid=$COOLIFY_CLIENT_RESOURCE_UUID&force=true" \
+            -H "Authorization: Bearer $COOLIFY_API_TOKEN"
+
+      # Single-app fallback, for a project that has not been split.
+      - name: Deploy single app via Coolify API
         env:
           COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
           COOLIFY_RESOURCE_UUID: ${{ secrets.COOLIFY_RESOURCE_UUID }}
+          COOLIFY_SERVER_RESOURCE_UUID: ${{ secrets.COOLIFY_SERVER_RESOURCE_UUID }}
+          COOLIFY_CLIENT_RESOURCE_UUID: ${{ secrets.COOLIFY_CLIENT_RESOURCE_UUID }}
           COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
-        if: env.COOLIFY_BASE_URL != '' && env.COOLIFY_RESOURCE_UUID != ''
+        if: >-
+          env.COOLIFY_BASE_URL != '' && env.COOLIFY_RESOURCE_UUID != ''
+          && env.COOLIFY_SERVER_RESOURCE_UUID == ''
+          && env.COOLIFY_CLIENT_RESOURCE_UUID == ''
         run: |
           curl -fsSL -X POST \
             "$COOLIFY_BASE_URL/api/v1/deploy?uuid=$COOLIFY_RESOURCE_UUID&force=true" \

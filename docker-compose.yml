@@ -1,4 +1,13 @@
-# Production Docker Compose — deploy as a Coolify Service Stack.
+# LEGACY single-app layout — one Coolify app running all four services.
+#
+# Superseded by docker-compose.server.yml + docker-compose.client.yml, which
+# are what the deployment actually uses. This layout is kept for reference and
+# because a project that has not been split can still deploy from it, but note
+# that nothing routes /api to the `server` service under it: Coolify routes a
+# dockercompose app by service name, and there is no single service here that
+# serves both the web app and the API. That is why the sibling `streaks`
+# deployment, which uses this exact file, answers 503.
+#
 # Coolify auto-detects ${VAR_NAME} syntax and creates UI fields for each.
 # Do NOT expose ports here — Coolify's Traefik handles external routing.
 

@@ -242,6 +242,20 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
 - Server origin and web origin come from extension preferences, defaulting to
   the deployed hosts. Point **API URL** at the dev API port for local work.
 
+### Deployment (two Coolify apps)
+
+Production is a **split**: `tracktime-client` on `https://tracktime.trebeljahr.com`
+and `tracktime-server` on `https://api.tracktime.trebeljahr.com`, from
+`docker-compose.client.yml` and `docker-compose.server.yml`. The service name
+inside each file (`client` / `server`) is load-bearing — Coolify keys
+`docker_compose_domains` by it, and a mismatch yields 503 with a 200 from the
+API. `docker-compose.yml` is the legacy single-app layout, kept for reference.
+
+Four places must agree on the API host: `.env.production`
+(`BETTER_AUTH_URL`), the client image's `NEXT_PUBLIC_API_URL` build arg in
+`.github/workflows/build-and-deploy.yml`, `packages/extension/manifest.config.ts`,
+and Raycast's preference defaults. See `docs/deploy.md`.
+
 ### Browser extension build modes
 
 `packages/extension` bakes its API URL in at build time, so a build is a
