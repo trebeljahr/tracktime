@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { EntryEditDialog } from "@/components/tracker/entry-edit-dialog";
-import { EntryGroup } from "@/components/tracker/entry-group";
+import { EntryRow } from "@/components/tracker/entry-row";
 import {
   dayHeadingLabel,
   groupEntriesByDay,
@@ -168,10 +168,10 @@ export function EntryList(): React.JSX.Element {
           data-date={day.date}
         >
           <DayHeader group={day} />
-          {day.clusters.map((cluster, index) => (
-            <EntryGroup
-              key={`${cluster.key}-${cluster.entries[0]?.id ?? index}`}
-              cluster={cluster}
+          {day.entries.map((entry) => (
+            <EntryRow
+              key={entry.id}
+              entry={entry}
               mutations={mutations}
               onEdit={handleEdit}
             />

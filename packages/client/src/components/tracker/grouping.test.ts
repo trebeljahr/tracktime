@@ -1,5 +1,5 @@
 /**
- * Tests for the tracker's day/cluster grouping — the pure helper behind the
+ * Tests for the tracker's day grouping — the pure helper behind the
  * day-grouped entry list on /track.
  */
 import { describe, expect, it } from "vitest";
@@ -71,65 +71,55 @@ describe("groupEntriesByDay", () => {
     expect(days.map((day) => day.date)).toEqual(["2026-08-21"]);
   });
 
-  it("collapses consecutive look-alikes into one cluster", () => {
+  it("keeps every entry as its own row, including look-alikes", () => {
+    // Consecutive look-alikes used to collapse into an expandable cluster.
+    // They no longer do: a row hidden behind a disclosure is a row the user
+    // cannot see, edit or delete without first finding it.
     const days = groupEntriesByDay([
       entry({ description: "Wrote tests", projectId: "p1", durationSec: 600 }),
       entry({ description: "Wrote tests", projectId: "p1", durationSec: 900 }),
     ]);
 
-    expect(days[0].clusters).toHaveLength(1);
-    expect(days[0].clusters[0].entries).toHaveLength(2);
-    expect(days[0].clusters[0].totalSec).toBe(1500);
+    expect(days).toHaveLength(1);
+    expect(days[0].entries).toHaveLength(2);
+    expect(days[0].entryCount).toBe(2);
+    expect(days[0].totalSec).toBe(1500);
   });
 
-  it("ignores case and surrounding whitespace when clustering", () => {
-    const days = groupEntriesByDay([
-      entry({ description: "Wrote tests" }),
-      entry({ description: "  wrote TESTS " }),
-    ]);
-    expect(days[0].clusters).toHaveLength(1);
-  });
-
-  it("does not cluster across projects or descriptions", () => {
-    const days = groupEntriesByDay([
-      entry({ description: "Wrote tests", projectId: "p1" }),
-      entry({ description: "Wrote tests", projectId: "p2" }),
-      entry({ description: "Reviewed PR", projectId: "p2" }),
-    ]);
-    expect(days[0].clusters).toHaveLength(3);
-  });
-
-  it("keeps non-consecutive look-alikes in separate clusters", () => {
+  it("preserves the order it was given", () => {
     const days = groupEntriesByDay([
       entry({ description: "Wrote tests" }),
       entry({ description: "Stood up" }),
       entry({ description: "Wrote tests" }),
     ]);
-    expect(days[0].clusters.map((cluster) => cluster.entries.length)).toEqual([
-      1, 1, 1,
+
+    expect(days[0].entries.map((e) => e.description)).toEqual([
+      "Wrote tests",
+      "Stood up",
+      "Wrote tests",
     ]);
   });
 
-  it("never clusters entries across a day boundary", () => {
+  it("splits look-alikes across a day boundary into their own days", () => {
     const days = groupEntriesByDay([
       entry({ description: "Wrote tests", start: localIso(2026, 7, 21, 9, 0) }),
       entry({ description: "Wrote tests", start: localIso(2026, 7, 20, 9, 0) }),
     ]);
     expect(days).toHaveLength(2);
-    expect(days[0].clusters).toHaveLength(1);
-    expect(days[1].clusters).toHaveLength(1);
+    expect(days[0].entries).toHaveLength(1);
+    expect(days[1].entries).toHaveLength(1);
   });
 
-  it("keeps a running entry individually addressable", () => {
+  it("keeps a running entry as its own row", () => {
     const days = groupEntriesByDay([
       entry({ description: "Wrote tests", end: null, durationSec: 0 }),
       entry({ description: "Wrote tests", durationSec: 600 }),
     ]);
 
-    expect(days[0].clusters).toHaveLength(2);
-    expect(days[0].clusters[0].entries[0].end).toBeNull();
-    // The finished look-alike must not be folded into the running one either.
-    expect(days[0].clusters[1].entries).toHaveLength(1);
+    expect(days[0].entries).toHaveLength(2);
+    expect(days[0].entries[0].end).toBeNull();
+    // A running entry contributes no finished seconds to the day total.
+    expect(days[0].totalSec).toBe(600);
   });
 
   it("totals finished seconds, billable seconds and money per day", () => {
@@ -151,12 +141,11 @@ describe("groupEntriesByDay", () => {
     expect(days[0].amount).toBe(60);
   });
 
-  it("sums cluster money without float drift", () => {
+  it("sums the day's money without float drift", () => {
     const days = groupEntriesByDay([
       entry({ description: "a", amount: 0.1 }),
       entry({ description: "a", amount: 0.2 }),
     ]);
-    expect(days[0].clusters[0].amount).toBe(0.3);
     expect(days[0].amount).toBe(0.3);
   });
 });

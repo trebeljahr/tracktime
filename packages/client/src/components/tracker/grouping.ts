@@ -1,21 +1,10 @@
 import { sumAmounts, toLocalDateKey, type DetailedEntry } from "@starter/shared";
 
-/**
- * Consecutive entries sharing a description and a project. time tracker collapses
- * these because a day of pomodoro-sized blocks on one task is otherwise a wall
- * of near-identical rows.
- */
-export type EntryCluster = {
-  key: string;
-  entries: DetailedEntry[];
-  totalSec: number;
-  amount: number;
-};
-
 export type DayGroup = {
   /** Local "YYYY-MM-DD". */
   date: string;
-  clusters: EntryCluster[];
+  /** Every entry of the day, newest first. */
+  entries: DetailedEntry[];
   entryCount: number;
   /** Finished seconds only — the running entry is added live by the header. */
   totalSec: number;
@@ -23,20 +12,18 @@ export type DayGroup = {
   amount: number;
 };
 
-const clusterKey = (entry: DetailedEntry): string =>
-  `${entry.description.trim().toLowerCase()}::${entry.projectId ?? ""}`;
-
 /**
- * Bucket entries (already sorted newest first) into days, then collapse
- * consecutive look-alikes inside each day.
+ * Bucket entries (already sorted newest first) into days.
  *
- * A running entry never joins a cluster: it has to stay individually
- * addressable so its row can tick and be stopped.
+ * Look-alike entries used to be collapsed into an expandable cluster, the way
+ * some trackers do it. That hid rows behind a disclosure the user never asked for:
+ * a new entry could vanish into an existing group instead of appearing at the
+ * top, and deleting one member re-collapsed the whole group. Every entry now
+ * gets its own row.
  */
 export const groupEntriesByDay = (entries: DetailedEntry[]): DayGroup[] => {
   const days: DayGroup[] = [];
   let currentDay: DayGroup | null = null;
-  let currentCluster: EntryCluster | null = null;
 
   for (const entry of entries) {
     const date = toLocalDateKey(new Date(entry.start));
@@ -44,41 +31,23 @@ export const groupEntriesByDay = (entries: DetailedEntry[]): DayGroup[] => {
     if (currentDay === null || currentDay.date !== date) {
       currentDay = {
         date,
-        clusters: [],
+        entries: [],
         entryCount: 0,
         totalSec: 0,
         billableSec: 0,
         amount: 0,
       };
       days.push(currentDay);
-      currentCluster = null;
     }
 
-    const running = entry.end === null;
-    const key = clusterKey(entry);
-
-    if (
-      currentCluster === null ||
-      running ||
-      currentCluster.key !== key ||
-      currentCluster.entries.some((member) => member.end === null)
-    ) {
-      currentCluster = { key, entries: [], totalSec: 0, amount: 0 };
-      currentDay.clusters.push(currentCluster);
-    }
-
-    currentCluster.entries.push(entry);
-    currentCluster.totalSec += entry.durationSec;
+    currentDay.entries.push(entry);
     currentDay.entryCount += 1;
     currentDay.totalSec += entry.durationSec;
     if (entry.billable) currentDay.billableSec += entry.durationSec;
   }
 
   for (const day of days) {
-    for (const cluster of day.clusters) {
-      cluster.amount = sumAmounts(cluster.entries.map((entry) => entry.amount));
-    }
-    day.amount = sumAmounts(day.clusters.map((cluster) => cluster.amount));
+    day.amount = sumAmounts(day.entries.map((entry) => entry.amount));
   }
 
   return days;
