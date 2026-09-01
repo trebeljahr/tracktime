@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CircleDollarSign, Clock, ListChecks, Loader2, Table2 } from "lucide-react";
+import { Clock, ListChecks, Loader2, Table2 } from "lucide-react";
 import {
   entryAmount,
   resolveHourlyRate,
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
 import { ORIGIN_ID } from "@/hooks/use-sync";
+import { CURRENCY_FALLBACK_ICON, currencyIcon } from "@/lib/currency";
 import { formatDayLabel, useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { BulkActionBar } from "@/components/reports/bulk-action-bar";
@@ -358,7 +359,9 @@ function DetailedReport(): React.JSX.Element {
         label: "Amount earned",
         value: fmt.money(totals?.totalAmount ?? 0),
         hint: totals?.currency ?? fmt.currency,
-        icon: CircleDollarSign,
+        icon:
+          currencyIcon(totals?.currency ?? fmt.currency) ??
+          CURRENCY_FALLBACK_ICON,
         testId: "kpi-amount",
       },
       {

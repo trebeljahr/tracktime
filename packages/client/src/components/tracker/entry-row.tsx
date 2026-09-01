@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Copy, Ellipsis, Euro, Pencil, Play, Square, Trash2 } from "lucide-react";
+import { Copy, Ellipsis, Pencil, Play, Square, Trash2 } from "lucide-react";
 import {
   rollEndAfterStart,
   spansLocalDayBoundary,
@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { DurationInput } from "@/components/duration-input";
 import { ProjectPicker } from "@/components/project-picker";
+import { BillableGlyph } from "@/components/tracker/billable-glyph";
 import { LiveDuration } from "@/components/tracker/live-duration";
 import { TimeField } from "@/components/tracker/time-field";
 import type { EntryMutations } from "@/components/tracker/use-entry-mutations";
@@ -34,23 +35,6 @@ export type EntryRowProps = {
   /** Rendered inside an expanded collapse group. */
   nested?: boolean;
 };
-
-/** Billable "€" affordance — a struck-through glyph reads as "not billable". */
-function BillableGlyph({ billable }: { billable: boolean }): React.JSX.Element {
-  return (
-    <span className="relative inline-flex items-center justify-center">
-      <Euro
-        className={billable ? "text-primary" : "text-muted-foreground opacity-60"}
-      />
-      {billable ? null : (
-        <span
-          aria-hidden="true"
-          className="absolute h-px w-5 rotate-45 bg-muted-foreground"
-        />
-      )}
-    </span>
-  );
-}
 
 /**
  * One tracked block. Everything on the row is editable in place — description,

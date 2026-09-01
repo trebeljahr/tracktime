@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CloudOff, Euro, Play, Plus, Square, Timer, WifiOff } from "lucide-react";
+import { CloudOff, Play, Plus, Square, Timer, WifiOff } from "lucide-react";
 import { formatDuration } from "@starter/shared";
 
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { DurationInput } from "@/components/duration-input";
 import { ProjectPicker } from "@/components/project-picker";
 import { TaskPicker } from "@/components/task-picker";
+import { BillableGlyph } from "@/components/tracker/billable-glyph";
 import { TimeField } from "@/components/tracker/time-field";
 import {
   requestPomodoroPermission,
@@ -263,19 +264,7 @@ export function TrackerBar(): React.JSX.Element {
           data-testid="tracker-billable"
           data-billable={billable ? "true" : "false"}
         >
-          <span className="relative inline-flex items-center justify-center">
-            <Euro
-              className={
-                billable ? "text-primary" : "text-muted-foreground opacity-60"
-              }
-            />
-            {billable ? null : (
-              <span
-                aria-hidden="true"
-                className="absolute h-px w-5 rotate-45 bg-muted-foreground"
-              />
-            )}
-          </span>
+          <BillableGlyph billable={billable} />
         </Button>
 
         <Separator orientation="vertical" className="hidden h-8 sm:block" />

@@ -1,13 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { BarChart3, CircleDollarSign, Clock, Receipt } from "lucide-react";
+import { BarChart3, Clock, Receipt } from "lucide-react";
 import type { ReportGroupBy } from "@starter/shared";
 
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
+import { CURRENCY_FALLBACK_ICON, currencyIcon } from "@/lib/currency";
 import { useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
@@ -97,7 +98,9 @@ function SummaryReport(): React.JSX.Element {
         label: "Amount earned",
         value: fmt.money(result?.totalAmount ?? 0),
         hint: result?.currency ?? fmt.currency,
-        icon: CircleDollarSign,
+        icon:
+          currencyIcon(result?.currency ?? fmt.currency) ??
+          CURRENCY_FALLBACK_ICON,
         testId: "kpi-amount",
       },
     ];
