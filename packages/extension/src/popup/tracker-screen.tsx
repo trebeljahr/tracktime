@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type JSX } from "react";
 import {
   createId,
+  deviceTimeZone,
   formatDuration,
   type Project,
   type SyncStatus,
@@ -66,6 +67,7 @@ const provisionalEntry = (
     hourlyRate: null,
     currency: "",
     source: "extension",
+    timeZone: deviceTimeZone(),
     createdAt: now,
     updatedAt: now,
   };

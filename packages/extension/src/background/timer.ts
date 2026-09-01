@@ -9,6 +9,7 @@
  */
 import {
   createTempId,
+  deviceTimeZone,
   type OfflineStartInput,
   type OfflineStopInput,
   type TimeEntry,
@@ -64,6 +65,7 @@ const optimisticEntry = (
   hourlyRate: null,
   currency: "EUR",
   source: input.source,
+  timeZone: input.timeZone,
   createdAt: input.start,
   updatedAt: input.start,
 });
@@ -84,6 +86,9 @@ export async function startTimer(
     // Its own source, not "api": an entry made from the toolbar stays
     // traceable back to the toolbar.
     source: "extension",
+    // Recorded here rather than server-side so a mutation queued offline keeps
+    // the zone it was started in, not the one it happens to sync from.
+    timeZone: deviceTimeZone(),
     originId: ORIGIN_ID,
   };
 

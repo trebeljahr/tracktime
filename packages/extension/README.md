@@ -5,6 +5,34 @@ popup that shows the running entry, starts and stops the timer, and reports
 today's total. There are no content scripts and nothing is injected into any
 page.
 
+## The server has to trust this extension's origin
+
+Sign-in answers `403 {"code":"INVALID_ORIGIN"}` until it does, before the
+password is even looked at. better-auth force-validates the `Origin` header on
+any request carrying `Sec-Fetch-*` headers — which every real browser fetch
+does — so the extension's origin has to be in the server's `TRUSTED_ORIGINS`.
+
+An unpacked extension has no signing key, so Chrome derives its id from the
+absolute path it was loaded from. That makes the id stable for a directory and
+different for every checkout, which is why it is computed rather than
+hardcoded:
+
+```bash
+pnpm run extension:id
+```
+
+Put the printed `chrome-extension://<id>` into `TRUSTED_ORIGINS` in
+`packages/server/.env.development` and **restart the server** — the env file is
+read at boot, and `tsx watch` only watches `src/`.
+
+`chrome-extension://*` also works as a pattern and survives the directory
+moving, but it trusts every extension installed in the browser, so it is a
+local-dev shortcut rather than something to ship.
+
+For a shipped build, pin a `key` in `manifest.json` (or publish to the Web
+Store) so the id stops depending on a path, and list that one origin.
+
+
 ## Architecture
 
 The **service worker** (`src/background/`) owns everything stateful: the

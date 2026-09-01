@@ -205,6 +205,13 @@ const { token } = await pollForDeviceSession(
 );
 ```
 
+Every such client's **origin must be in `TRUSTED_ORIGINS`**, or sign-in
+answers `403 INVALID_ORIGIN` before the password is checked: better-auth force-
+validates `Origin` whenever a request carries `Sec-Fetch-*` headers, which every
+real browser fetch does (curl does not — which makes curl a misleading way to
+test this). An unpacked extension's id comes from the absolute path it was
+loaded from; `pnpm run extension:id` prints the origin to add.
+
 Store that token in real secret storage (Keychain, `chrome.storage.session`,
 the Raycast password store), never a plain config file. Clients send
 `x-tracktime-client` so their session is named in Settings → Devices, where
