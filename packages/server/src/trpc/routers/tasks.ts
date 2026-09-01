@@ -163,7 +163,7 @@ export const tasksRouter = router({
               : {}),
           },
         },
-        { new: true },
+        { returnDocument: "after" },
       ).lean();
 
       if (!updated) {
@@ -186,7 +186,7 @@ export const tasksRouter = router({
       const updated = await Task.findOneAndUpdate(
         { _id: input.id, ownerId: ctx.user.id },
         { $set: { archived: input.archived ?? true } },
-        { new: true },
+        { returnDocument: "after" },
       ).lean();
 
       if (!updated) {

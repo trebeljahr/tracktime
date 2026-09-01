@@ -1,7 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
-const E2E_SERVER_PORT = process.env.E2E_SERVER_PORT ?? "5006";
-const E2E_CLIENT_PORT = process.env.E2E_CLIENT_PORT ?? "3001";
+// High ports by default: 3001/5006 collide with whatever else is running on a
+// developer machine, and this suite starts its own servers.
+const E2E_SERVER_PORT = process.env.E2E_SERVER_PORT ?? "49761";
+const E2E_CLIENT_PORT = process.env.E2E_CLIENT_PORT ?? "49762";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -41,12 +43,19 @@ export default defineConfig({
       },
     },
     {
-      command: `pnpm --filter @starter/client run dev`,
+      // Build the static export and serve it, rather than running `next dev`.
+      // Next 16's dev server detaches itself, which fights Playwright's process
+      // management and left the client port dead partway through a run. This
+      // also exercises the artifact that actually ships to web, desktop and
+      // mobile — NEXT_PUBLIC_API_URL is baked in at build time, so it has to be
+      // set for the build command, not just the server.
+      command: `pnpm run build:client && node e2e/serve-static.mjs`,
       url: `http://127.0.0.1:${E2E_CLIENT_PORT}`,
       reuseExistingServer: !process.env.CI,
-      timeout: 30_000,
+      timeout: 300_000,
       env: {
         PORT: E2E_CLIENT_PORT,
+        E2E_CLIENT_PORT,
         NEXT_PUBLIC_API_URL: `http://127.0.0.1:${E2E_SERVER_PORT}`,
         NEXT_PUBLIC_WS_URL: `ws://127.0.0.1:${E2E_SERVER_PORT}`,
       },

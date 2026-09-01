@@ -2,11 +2,15 @@ import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
 import type { NextConfig } from "next";
 
 // Relative asset paths are required by the desktop/mobile shells, which load
-// the exported client from file:// (Electron) or the Capacitor bundle. They
-// must NOT be set for `next dev`: with a relative prefix the browser resolves
-// /signup/ + ./_next/... to /signup/_next/..., every asset 404s, and the app
-// renders with no CSS at all.
+// the exported client from file:// (Electron) or the Capacitor bundle.
+//
+// They are WRONG everywhere else. With `trailingSlash: true` every route is a
+// directory, so a page served at /track/ resolves "./_next/..." to
+// "/track/_next/..." and every asset 404s — the whole web build renders blank
+// on any route but "/". So the prefix is opt-in, set by the native build
+// scripts, and never applied to `next dev` or a web production build.
 const isDev = process.env.NODE_ENV === "development";
+const isNativeBuild = process.env.NATIVE_BUILD === "1";
 
 // Next 16 blocks cross-origin requests to /_next dev resources by default.
 // scripts/dev.mjs prints 127.0.0.1 URLs while Next treats localhost as its own
@@ -16,7 +20,8 @@ const devOrigins = ["127.0.0.1", "localhost", ...(process.env.NEXT_DEV_ORIGINS?.
 
 const baseConfig: NextConfig = {
   output: "export",
-  ...(isDev ? { allowedDevOrigins: devOrigins } : { assetPrefix: "./" }),
+  ...(isDev ? { allowedDevOrigins: devOrigins } : {}),
+  ...(isNativeBuild && !isDev ? { assetPrefix: "./" } : {}),
   trailingSlash: true,
   images: { unoptimized: true },
   transpilePackages: ["@starter/server", "@starter/shared", "@starter/core"],

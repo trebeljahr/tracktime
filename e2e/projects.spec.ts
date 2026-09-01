@@ -37,7 +37,22 @@ async function pickComboboxOption(
 }
 
 /** The id embedded in a `<prefix>-<id>` test id on `row`. */
+/**
+ * Read the entity id out of a row's `data-testid`.
+ *
+ * Rows appear first as an optimistic placeholder whose id is a client-side
+ * "optimistic-<uuid>", then get replaced when the server responds with the real
+ * document. Reading the placeholder id yields locators that stop matching a
+ * moment later, so wait for the real id before returning it.
+ */
 async function idFromTestId(row: Locator, prefix: string): Promise<string> {
+  await expect
+    .poll(
+      async () => (await row.getAttribute("data-testid"))?.slice(prefix.length),
+      { message: `expected a settled ${prefix}<id> test id` },
+    )
+    .not.toMatch(/^optimistic-/);
+
   const testId = await row.getAttribute("data-testid");
   expect(testId, `expected a ${prefix}<id> test id`).not.toBeNull();
   return (testId ?? "").slice(prefix.length);

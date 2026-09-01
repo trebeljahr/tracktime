@@ -5,9 +5,6 @@ export type RoomMember = {
   joinedAt: string;
 };
 
-/** Possible statuses for an Item. */
-export type ItemStatus = "draft" | "published" | "archived";
-
 /** User theme preference. */
 export type ThemePreference = "light" | "dark" | "system";
 
@@ -20,17 +17,6 @@ export type UserProfile = {
     theme: ThemePreference;
     notifications: boolean;
   };
-};
-
-/** Shape of an Item (example CRUD entity). */
-export type Item = {
-  id: string;
-  title: string;
-  description?: string;
-  status: ItemStatus;
-  ownerId: string;
-  createdAt: string;
-  updatedAt: string;
 };
 
 // ── tracktime domain ─────────────────────────────────────────────────

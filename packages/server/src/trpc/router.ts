@@ -1,7 +1,6 @@
 import { router } from "./trpc.js";
 import { healthRouter } from "./routers/health.js";
 import { profileRouter } from "./routers/profile.js";
-import { itemsRouter } from "./routers/items.js";
 import { billingRouter } from "./routers/billing.js";
 import { clientsRouter } from "./routers/clients.js";
 import { projectsRouter } from "./routers/projects.js";
@@ -14,7 +13,6 @@ import { devicesRouter } from "./routers/devices.js";
 export const appRouter = router({
   health: healthRouter,
   profile: profileRouter,
-  items: itemsRouter,
   billing: billingRouter,
   // ── tracktime ──────────────────────────────────────────────────────
   clients: clientsRouter,

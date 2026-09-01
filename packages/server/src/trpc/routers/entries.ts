@@ -177,7 +177,7 @@ const finalizeStop = async (
         currency,
       },
     },
-    { new: true },
+    { returnDocument: "after" },
   ).lean();
 
   return stopped ? toClientTimeEntry(stopped) : null;
@@ -733,7 +733,7 @@ export const entriesRouter = router({
               currency,
             },
           },
-          { new: true },
+          { returnDocument: "after" },
         ).lean();
       } catch (error) {
         if (isDuplicateKeyError(error)) {

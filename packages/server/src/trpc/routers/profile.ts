@@ -37,7 +37,7 @@ export const profileRouter = router({
       const profile = await Profile.findOneAndUpdate(
         { userId: ctx.user.id },
         { $set: update },
-        { new: true, upsert: true },
+        { returnDocument: "after", upsert: true },
       );
 
       return {

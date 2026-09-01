@@ -43,7 +43,7 @@ export const settingsRouter = router({
       const updated = await Settings.findOneAndUpdate(
         { userId: ctx.user.id },
         { $set: next },
-        { new: true, upsert: true },
+        { returnDocument: "after", upsert: true },
       ).lean();
 
       const settings = updated

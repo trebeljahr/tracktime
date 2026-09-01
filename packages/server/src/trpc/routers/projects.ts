@@ -206,7 +206,7 @@ export const projectsRouter = router({
               : {}),
           },
         },
-        { new: true },
+        { returnDocument: "after" },
       ).lean();
 
       if (!updated) {
@@ -229,7 +229,7 @@ export const projectsRouter = router({
       const updated = await Project.findOneAndUpdate(
         { _id: input.id, ownerId: ctx.user.id },
         { $set: { archived: input.archived ?? true } },
-        { new: true },
+        { returnDocument: "after" },
       ).lean();
 
       if (!updated) {

@@ -1,5 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { signUpViaUI, signInViaUI, signOutViaUI } from "./helpers";
+import {
+  signUpViaUI,
+  signInViaUI,
+  signOutViaUI,
+  TRACK_URL,
+  LOGIN_URL,
+} from "./helpers";
 import { cleanDatabase, closeDbConnection } from "./db-utils";
 
 const TEST_USER = {
@@ -19,18 +25,18 @@ test.afterAll(async () => {
 test.describe("Authentication", () => {
   test("can sign up a new account", async ({ page }) => {
     await signUpViaUI(page, TEST_USER);
-    await expect(page).toHaveURL("/track");
+    await expect(page).toHaveURL(TRACK_URL);
   });
 
   test("can sign out", async ({ page }) => {
     await signInViaUI(page, TEST_USER);
     await signOutViaUI(page);
-    await expect(page).toHaveURL("/login");
+    await expect(page).toHaveURL(LOGIN_URL);
   });
 
   test("can sign in with existing account", async ({ page }) => {
     await signInViaUI(page, TEST_USER);
-    await expect(page).toHaveURL("/track");
+    await expect(page).toHaveURL(TRACK_URL);
   });
 
   test("shows error for invalid credentials", async ({ page }) => {
@@ -48,7 +54,7 @@ test.describe("Authentication", () => {
     // Clear cookies to ensure unauthenticated state
     await page.context().clearCookies();
     await page.goto("/track");
-    await expect(page).toHaveURL(/\/login/);
+    await expect(page).toHaveURL(LOGIN_URL);
   });
 
   test("forgot password page shows confirmation", async ({ page }) => {
