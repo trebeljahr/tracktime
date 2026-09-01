@@ -48,7 +48,12 @@ const timeEntrySchema = new Schema<ITimeEntry>(
     // below already cover ownerId, and declaring both makes mongoose warn about
     // a duplicate index on {"ownerId":1}.
     ownerId: { type: String, required: true },
-    description: { type: String, required: true, default: "", maxlength: 500 },
+    // NOT `required` — an entry with no description is completely normal
+    // ("just start the timer, name it later"), and mongoose's String required
+    // validator rejects "" because it tests for a non-empty string. Pairing
+    // required:true with default:"" made every such start fail with
+    // "Path `description` is required".
+    description: { type: String, default: "", maxlength: 500 },
     projectId: { type: String, default: null },
     taskId: { type: String, default: null },
     billable: { type: Boolean, required: true, default: false },

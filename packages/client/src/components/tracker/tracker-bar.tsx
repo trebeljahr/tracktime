@@ -129,7 +129,7 @@ export function TrackerBar(): React.JSX.Element {
   }, [description, isRunning, mutations, running]);
 
   const start = React.useCallback((): void => {
-    requestPomodoroPermission();
+    requestPomodoroPermission(format.settings.pomodoro);
     mutations.startTimer({ description, projectId, billable });
   }, [billable, description, mutations, projectId]);
 

@@ -138,26 +138,38 @@ const nextDistDir =
 
 // ── Preflight: warn about a dev server already up for THIS checkout ───
 
-const lockDir = resolve(repoRoot, "packages/client", nextDistDir, "dev");
-if (existsSync(lockDir)) {
-  const pidFile = resolve(lockDir, "next-development.pid");
-  let running = null;
-  if (existsSync(pidFile)) {
-    const pid = parseInt(readFileSync(pidFile, "utf8").trim(), 10);
-    if (Number.isFinite(pid)) {
-      try {
-        process.kill(pid, 0); // signal 0 = existence check, does not kill
-        running = pid;
-      } catch {
-        running = null; // stale pid file, process is gone
-      }
+// Next 16 writes {pid, port, appUrl} to <distDir>/dev/lock and keeps the dev
+// server alive as a detached process, so one can outlive the terminal that
+// started it — and then the next run dies with "Another next dev server is
+// already running" after tearing everything else down. Detect it up front and
+// say exactly what to do.
+const lockFile = resolve(repoRoot, "packages/client", nextDistDir, "dev", "lock");
+if (existsSync(lockFile)) {
+  let lock = null;
+  try {
+    lock = JSON.parse(readFileSync(lockFile, "utf8"));
+  } catch {
+    lock = null; // unreadable or partially written — treat as stale
+  }
+
+  const pid = Number(lock?.pid);
+  let running = false;
+  if (Number.isFinite(pid)) {
+    try {
+      process.kill(pid, 0); // signal 0 = existence check, does not kill
+      running = true;
+    } catch {
+      running = false; // stale lock, process is gone
     }
   }
+
   if (running) {
     console.error(
-      `\n  A Next dev server for this checkout is already running (PID ${running}).` +
-        `\n  Stop it with:  kill ${running}` +
-        `\n  Or start an independent instance with:  INSTANCE_ID=<name> pnpm run dev\n`,
+      `\n  A Next dev server for this checkout is already running.` +
+        `\n    PID:  ${pid}` +
+        (lock?.appUrl ? `\n    URL:  ${lock.appUrl}` : "") +
+        `\n\n  Reuse it, or stop it with:  kill ${pid}` +
+        `\n  Or run a second, independent instance:  INSTANCE_ID=<name> pnpm run dev\n`,
     );
     process.exit(1);
   }

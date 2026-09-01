@@ -29,8 +29,14 @@ const notificationsSupported = (): boolean =>
 /**
  * Ask for notification permission. Must be called from a user gesture —
  * browsers reject (and Safari permanently denies) a prompt fired on mount.
+ *
+ * Only asks when the pomodoro feature is switched on AND set to notify.
+ * Both are off by default, so someone who just wants a stopwatch is never
+ * prompted; asking anyway trains people to hit "Block", which then breaks
+ * notifications for the users who do want them.
  */
-export const requestPomodoroPermission = (): void => {
+export const requestPomodoroPermission = (config?: PomodoroSettings): void => {
+  if (!config?.enabled || !config.notify) return;
   if (!notificationsSupported()) return;
   if (Notification.permission !== "default") return;
   void Notification.requestPermission().catch(() => undefined);
