@@ -308,3 +308,178 @@ body {
   flex: 1;
   min-height: 0;
 }
+
+/* ── searchable pickers ──────────────────────────────────────────────
+ *
+ * The list is positioned, not in flow: at 360px a list that pushed the Start
+ * button down would move the thing you were aiming at while you aimed at it.
+ */
+
+.combobox {
+  position: relative;
+}
+
+.combobox__list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 190px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.combobox__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.combobox__row--active {
+  background: var(--surface);
+}
+
+.combobox__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combobox__hint {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.combobox__muted {
+  color: var(--muted);
+}
+
+.combobox__create {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.combobox__none,
+.combobox__disabled {
+  margin: 0;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.combobox__disabled {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+/* ── inline creation panel ─────────────────────────────────────────── */
+
+.panel {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.panel__title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.panel__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+/* ── overflow menu ─────────────────────────────────────────────────── */
+
+.menu {
+  position: relative;
+  margin-left: auto;
+}
+
+.menu__trigger {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.menu__trigger:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.menu__list {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + 6px);
+  min-width: 200px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.menu__item {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu__item:hover {
+  background: var(--surface);
+}
+
+.menu__item--danger {
+  color: var(--danger);
+}
+
+.menu__rule {
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.menu__note {
+  margin: 4px 0 2px;
+  padding: 0 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}

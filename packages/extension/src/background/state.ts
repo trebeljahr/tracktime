@@ -11,41 +11,46 @@
  * last knew, because a popup showing a stale running timer is far more useful
  * than one showing an error.
  */
-import type { ApiClient, Project, TimeEntry } from "@starter/core";
+import type { ApiClient, TimeEntry } from "@starter/core";
 import type { BackgroundState } from "../lib/messaging";
+import { fetchClients, fetchProjects, fetchTasks } from "./catalog";
 import {
   ensureReady,
   forgetSession,
+  getCachedClients,
   getCachedProjects,
+  getCachedTasks,
+  getCachedTasksProjectId,
   getCachedTodaySec,
   getSyncStatus,
   isUnauthorized,
   peekRunning,
+  resolveEmail,
   resolveRunning,
-  setCachedProjects,
+  resolveWebUrl,
   setCachedTodaySec,
 } from "./runtime";
 
 /** Today's entries could plausibly run to a few dozen; 500 is the cap. */
 const TODAY_ENTRY_LIMIT = 500;
 
-const signedOutState = (apiUrl: string): BackgroundState => ({
+const signedOutState = (
+  apiUrl: string,
+  webUrl: string | null,
+): BackgroundState => ({
   apiUrl,
+  webUrl,
   signedIn: false,
+  sessionSource: null,
   email: null,
   running: null,
   projects: [],
+  clients: [],
+  tasks: [],
+  tasksProjectId: null,
   todaySec: 0,
   syncStatus: getSyncStatus(),
 });
-
-const fetchProjects = async (api: ApiClient): Promise<Project[]> => {
-  const projects = await api.query<Project[]>("projects.list", {
-    includeArchived: false,
-  });
-  setCachedProjects(projects);
-  return projects;
-};
 
 /**
  * Seconds tracked today in *finished* entries, clamped to the local calendar
@@ -95,7 +100,10 @@ const fetchTodaySec = async (
 
 export async function buildState(): Promise<BackgroundState> {
   const current = await ensureReady();
-  if (!current.session) return signedOutState(current.apiUrl);
+  // Resolved even when signed out: "Open tracktime" is exactly what someone
+  // with no session reaches for, so the menu must work before sign-in.
+  const webUrl = await resolveWebUrl();
+  if (!current.session) return signedOutState(current.apiUrl, webUrl);
 
   // Set by any read that came back 401. Collected rather than thrown so the
   // reads below can settle instead of leaving sibling rejections unhandled.
@@ -110,26 +118,42 @@ export async function buildState(): Promise<BackgroundState> {
     }
   };
 
+  // Whichever project the popup last asked about — carried through so a
+  // rebuild of the snapshot does not silently empty the task picker under it.
+  const tasksProjectId = getCachedTasksProjectId();
+
   const running = await softRead(resolveRunning, peekRunning());
-  const [projects, todaySec] = await Promise.all([
+  const [email, projects, clients, tasks, todaySec] = await Promise.all([
+    softRead(resolveEmail, current.session.email),
     softRead(() => fetchProjects(current.api), getCachedProjects() ?? []),
+    softRead(() => fetchClients(current.api), getCachedClients() ?? []),
+    softRead(
+      () => fetchTasks(current.api, tasksProjectId),
+      getCachedTasks(tasksProjectId) ?? [],
+    ),
     softRead(() => fetchTodaySec(current.api), getCachedTodaySec() ?? 0),
   ]);
 
   if (unauthorized) {
     // The token was revoked from Settings → Devices, or it simply expired.
     // Clearing it locally is what makes the popup offer sign-in again instead
-    // of looping on an error the user cannot act on.
+    // of looping on an error the user cannot act on. The web app's cookie is
+    // left alone: an expired token is not a request to sign the browser out.
     await forgetSession();
-    return signedOutState(current.apiUrl);
+    return signedOutState(current.apiUrl, webUrl);
   }
 
   return {
     apiUrl: current.apiUrl,
+    webUrl,
     signedIn: true,
-    email: current.session.email,
+    sessionSource: current.sessionSource,
+    email,
     running,
     projects,
+    clients,
+    tasks,
+    tasksProjectId,
     todaySec,
     syncStatus: getSyncStatus(),
   };

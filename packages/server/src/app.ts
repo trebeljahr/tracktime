@@ -77,6 +77,11 @@ export function createApp() {
     res.json({
       status: "ok",
       db: isDatabaseReady(),
+      // Where this API's web app lives. The browser extension has only an API
+      // URL configured, and needs somewhere to send "Open tracktime" — asking
+      // the server beats making the user configure a second URL that must
+      // agree with the first. Public, but FRONTEND_URL is a public address.
+      webUrl: env.FRONTEND_URL,
       timestamp: new Date().toISOString(),
     });
   });

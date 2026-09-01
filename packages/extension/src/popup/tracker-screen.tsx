@@ -1,24 +1,36 @@
-import { useState, type FormEvent, type JSX } from "react";
+import { useEffect, useState, type FormEvent, type JSX } from "react";
 import {
   createId,
   deviceTimeZone,
   formatDuration,
+  type Client,
   type Project,
   type SyncStatus,
   type TimeEntry,
 } from "@starter/core";
 import type { BackgroundState } from "../lib/messaging";
 import { ApiUrlEditor } from "./api-url-editor";
+import { Combobox, type ComboboxOption } from "./combobox";
+import { Menu } from "./menu";
 import { useElapsedSec } from "./use-elapsed";
 
 export type TrackerScreenProps = {
   state: BackgroundState;
   /** The last failure, already translated into human terms. */
   error: string | null;
-  onStart: (description: string, projectId: string | null) => Promise<boolean>;
+  onStart: (
+    description: string,
+    projectId: string | null,
+    taskId: string | null,
+  ) => Promise<boolean>;
   onStop: () => Promise<boolean>;
   onSignOut: () => Promise<boolean>;
   onSaveApiUrl: (apiUrl: string) => Promise<boolean>;
+  /** Loads the task list for a project into the worker's snapshot. */
+  onSelectProject: (projectId: string | null) => Promise<boolean>;
+  onCreateClient: (name: string) => Promise<boolean>;
+  onCreateProject: (name: string, clientId: string | null) => Promise<boolean>;
+  onCreateTask: (projectId: string, name: string) => Promise<boolean>;
 };
 
 /**
@@ -52,6 +64,7 @@ const SYNC_LABEL: Record<SyncStatus, string> = {
 const provisionalEntry = (
   description: string,
   projectId: string | null,
+  taskId: string | null,
 ): TimeEntry => {
   const now = new Date().toISOString();
   return {
@@ -59,7 +72,7 @@ const provisionalEntry = (
     ownerId: "",
     description,
     projectId,
-    taskId: null,
+    taskId,
     billable: false,
     start: now,
     end: null,
@@ -72,6 +85,23 @@ const provisionalEntry = (
     updatedAt: now,
   };
 };
+
+const clientName = (
+  clients: Client[],
+  clientId: string | null,
+): string | undefined =>
+  clients.find((candidate) => candidate.id === clientId)?.name;
+
+const projectOptions = (
+  projects: Project[],
+  clients: Client[],
+): ComboboxOption[] =>
+  projects.map((project) => ({
+    id: project.id,
+    label: project.name,
+    color: project.color,
+    hint: clientName(clients, project.clientId),
+  }));
 
 function ProjectLabel({
   projects,
@@ -99,11 +129,20 @@ export function TrackerScreen({
   onStop,
   onSignOut,
   onSaveApiUrl,
+  onSelectProject,
+  onCreateClient,
+  onCreateProject,
+  onCreateTask,
 }: TrackerScreenProps): JSX.Element {
   const [description, setDescription] = useState("");
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showApiUrl, setShowApiUrl] = useState(false);
+
+  /** Set while a new project is being named, holding the client to file it under. */
+  const [pendingProject, setPendingProject] = useState<string | null>(null);
+  const [pendingClientId, setPendingClientId] = useState<string | null>(null);
 
   // While a start/stop is in flight this holds the timer the user just asked
   // for. `null` (the outer one) means "no override" — the inner `running` is
@@ -116,19 +155,58 @@ export function TrackerScreen({
   const running = optimistic === null ? state.running : optimistic.running;
   const elapsedSec = useElapsedSec(running);
 
+  // Tasks belong to a project, so picking one has to go and fetch them. The
+  // worker holds the list; this only asks for it.
+  useEffect(() => {
+    void onSelectProject(projectId);
+  }, [projectId, onSelectProject]);
+
+  const selectProject = (next: string | null): void => {
+    setProjectId(next);
+    // A task from the old project would be silently wrong against the new one.
+    setTaskId(null);
+  };
+
+  const beginProject = async (name: string): Promise<void> => {
+    // Two fields, so it cannot be done from inside the picker: naming it is
+    // step one, filing it under a client is step two.
+    setPendingProject(name);
+    setPendingClientId(null);
+  };
+
+  const confirmProject = async (): Promise<void> => {
+    if (pendingProject === null) return;
+    setBusy(true);
+    const created = await onCreateProject(pendingProject, pendingClientId);
+    setBusy(false);
+    if (!created) return;
+    setPendingProject(null);
+    setPendingClientId(null);
+  };
+
+  const createTask = async (name: string): Promise<void> => {
+    if (projectId === null) return;
+    await onCreateTask(projectId, name);
+  };
+
   const start = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
-    setOptimistic({ running: provisionalEntry(description.trim(), projectId) });
+    setOptimistic({
+      running: provisionalEntry(description.trim(), projectId, taskId),
+    });
 
-    const started = await onStart(description.trim(), projectId);
+    const started = await onStart(description.trim(), projectId, taskId);
 
     // Either way the override goes: on success the worker's snapshot is the
     // better truth, on failure dropping it reverts the UI to what is real.
     setOptimistic(null);
     setBusy(false);
-    if (started) setDescription("");
+    if (started) {
+      setDescription("");
+      setTaskId(null);
+    }
   };
 
   const stop = async (): Promise<void> => {
@@ -153,6 +231,10 @@ export function TrackerScreen({
     running === null ? 0 : Math.min(elapsedSec, secondsSinceMidnight());
   const todaySec = state.todaySec + runningToday;
 
+  // The worker's task list can lag a project change by one round trip; showing
+  // the previous project's tasks would be actively wrong, so show none.
+  const tasks = state.tasksProjectId === projectId ? state.tasks : [];
+
   return (
     <div className="tracker" data-testid="tracker-screen">
       <div className="popup__body">
@@ -175,32 +257,86 @@ export function TrackerScreen({
               />
             </div>
 
-            <div className="field">
-              <label className="field__label" htmlFor="project">
-                Project
-              </label>
-              <select
-                id="project"
-                className="select"
-                value={projectId ?? ""}
-                onChange={(event) =>
-                  setProjectId(event.target.value === "" ? null : event.target.value)
-                }
-                data-testid="tracker-project"
-              >
-                <option value="">No project</option>
-                {state.projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {pendingProject === null ? (
+              <Combobox
+                label="Project"
+                options={projectOptions(state.projects, state.clients)}
+                value={projectId}
+                onChange={selectProject}
+                emptyLabel="No project"
+                placeholder="Search projects…"
+                onCreate={beginProject}
+                createLabel={(name) => `Create project “${name}”`}
+                testId="tracker-project"
+              />
+            ) : (
+              <div className="panel" data-testid="tracker-new-project">
+                <p className="panel__title">New project “{pendingProject}”</p>
+
+                <Combobox
+                  label="Client"
+                  options={state.clients.map((client) => ({
+                    id: client.id,
+                    label: client.name,
+                    color: client.color,
+                  }))}
+                  value={pendingClientId}
+                  onChange={setPendingClientId}
+                  emptyLabel="No client"
+                  placeholder="Search clients…"
+                  onCreate={async (name) => {
+                    await onCreateClient(name);
+                  }}
+                  createLabel={(name) => `Create client “${name}”`}
+                  testId="tracker-new-project-client"
+                />
+
+                <div className="panel__actions">
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => {
+                      setPendingProject(null);
+                      setPendingClientId(null);
+                    }}
+                    disabled={busy}
+                    data-testid="tracker-new-project-cancel"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="button button--primary"
+                    type="button"
+                    onClick={() => {
+                      void confirmProject();
+                    }}
+                    disabled={busy}
+                    data-testid="tracker-new-project-create"
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <Combobox
+              label="Task"
+              options={tasks.map((task) => ({ id: task.id, label: task.name }))}
+              value={taskId}
+              onChange={setTaskId}
+              emptyLabel="No task"
+              placeholder="Search tasks…"
+              disabled={projectId === null}
+              disabledHint="Pick a project first"
+              onCreate={createTask}
+              createLabel={(name) => `Create task “${name}”`}
+              testId="tracker-task"
+            />
 
             <button
               className="button button--primary button--block"
               type="submit"
-              disabled={busy}
+              disabled={busy || pendingProject !== null}
               data-testid="tracker-start"
             >
               Start
@@ -258,30 +394,14 @@ export function TrackerScreen({
             <span className={`status__dot status__dot--${state.syncStatus}`} />
             {SYNC_LABEL[state.syncStatus]}
           </span>
-        </div>
-
-        <div className="footer__row">
-          <button
-            className="button button--link"
-            type="button"
-            aria-expanded={showApiUrl}
-            aria-controls="api-url-panel"
-            onClick={() => setShowApiUrl((open) => !open)}
-            data-testid="tracker-api-url-toggle"
-          >
-            {showApiUrl ? "Hide API URL" : "API URL"}
-          </button>
-          <button
-            className="button button--link"
-            type="button"
-            onClick={() => {
+          <Menu
+            webUrl={state.webUrl}
+            sharedSession={state.sessionSource === "web"}
+            onEditApiUrl={() => setShowApiUrl((open) => !open)}
+            onSignOut={() => {
               void signOut();
             }}
-            disabled={busy}
-            data-testid="tracker-sign-out"
-          >
-            Sign out
-          </button>
+          />
         </div>
 
         {showApiUrl ? (

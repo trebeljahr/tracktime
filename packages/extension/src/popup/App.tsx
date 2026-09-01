@@ -92,6 +92,29 @@ export function App(): JSX.Element {
     [send],
   );
 
+  const selectProject = useCallback(
+    (projectId: string | null): Promise<boolean> =>
+      send({ type: "tasks:for-project", projectId }),
+    [send],
+  );
+
+  const createClient = useCallback(
+    (name: string): Promise<boolean> => send({ type: "client:create", name }),
+    [send],
+  );
+
+  const createProject = useCallback(
+    (name: string, clientId: string | null): Promise<boolean> =>
+      send({ type: "project:create", name, clientId }),
+    [send],
+  );
+
+  const createTask = useCallback(
+    (projectId: string, name: string): Promise<boolean> =>
+      send({ type: "task:create", projectId, name }),
+    [send],
+  );
+
   if (state === null) {
     return (
       <div className="popup">
@@ -128,12 +151,16 @@ export function App(): JSX.Element {
         <TrackerScreen
           state={state}
           error={error}
-          onStart={(description, projectId) =>
-            send({ type: "timer:start", description, projectId })
+          onStart={(description, projectId, taskId) =>
+            send({ type: "timer:start", description, projectId, taskId })
           }
           onStop={() => send({ type: "timer:stop" })}
           onSignOut={() => send({ type: "auth:sign-out" })}
           onSaveApiUrl={saveApiUrl}
+          onSelectProject={selectProject}
+          onCreateClient={createClient}
+          onCreateProject={createProject}
+          onCreateTask={createTask}
         />
       ) : (
         <SignInScreen

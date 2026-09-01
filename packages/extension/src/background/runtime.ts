@@ -19,6 +19,7 @@ import {
   decodeOfflineMutation,
   OFFLINE_QUEUE_STORAGE_KEY,
   type ApiClient,
+  type Client,
   type KeyValueStorage,
   type OfflineOp,
   type OfflinePayloadMap,
@@ -28,9 +29,11 @@ import {
   type SyncClient,
   type SyncEvent,
   type SyncStatus,
+  type Task,
   type TimeEntry,
 } from "@starter/core";
 import { chromeStorage, localStorageArea } from "../lib/chrome-storage";
+import type { SessionSource } from "../lib/messaging";
 import { EXTENSION_CLIENT_ID, loadApiUrl, syncUrlFrom } from "../lib/config";
 import {
   clearSession,
@@ -38,12 +41,19 @@ import {
   saveSession,
   type StoredSession,
 } from "../lib/session";
+import { clearWebSessionCookie, readWebSessionToken } from "../lib/web-session";
 import { renderBadge } from "./badge";
 
 /** The rebuildable half of the worker: config plus whatever it configures. */
 export type Runtime = {
   apiUrl: string;
   session: StoredSession | null;
+  /**
+   * Whether `session` was adopted from the web app's cookie or created by this
+   * extension's own password sign-in. It decides what sign-out has to tear
+   * down, and it is never persisted — it is re-derived on every rebuild.
+   */
+  sessionSource: SessionSource | null;
   api: ApiClient;
 };
 
@@ -73,7 +83,21 @@ let cachedRunning: { entry: TimeEntry | null } | null = null;
 let runningLookup: Promise<TimeEntry | null> | null = null;
 
 let cachedProjects: Project[] | null = null;
+let cachedClients: Client[] | null = null;
 let cachedTodaySec: number | null = null;
+
+/** Tasks are per-project, so the cache has to remember which project's. */
+let cachedTasks: { projectId: string; tasks: Task[] } | null = null;
+
+/** Discovered once per API URL from /api/health; null until then. */
+let cachedWebUrl: string | null = null;
+
+/**
+ * The signed-in address. A password sign-in returns it, but a session adopted
+ * from the web app's cookie carries only the token — so for that path it has
+ * to be asked for, once, rather than left blank in the popup's footer.
+ */
+let cachedEmail: string | null = null;
 
 let queue: OfflineQueue | null = null;
 
@@ -175,11 +199,28 @@ const rehydrateOptimisticRunning = async (): Promise<void> => {
 // ── rebuilding ───────────────────────────────────────────────────────
 
 const buildRuntime = async (): Promise<Runtime> => {
-  const [apiUrl, session] = await Promise.all([loadApiUrl(), loadSession()]);
+  const [apiUrl, stored] = await Promise.all([loadApiUrl(), loadSession()]);
+
+  // The web app's cookie wins when the extension has nothing of its own: that
+  // is what makes signing in on the web sign the toolbar in too, with no form
+  // and no second credential. A password session, once created, is kept —
+  // re-adopting the cookie under it would silently switch which session the
+  // user is on.
+  let session = stored;
+  let sessionSource: SessionSource | null = stored ? "password" : null;
+
+  if (!session) {
+    const webToken = await readWebSessionToken(apiUrl);
+    if (webToken !== null) {
+      session = { token: webToken, userId: null, email: null };
+      sessionSource = "web";
+    }
+  }
 
   const next: Runtime = {
     apiUrl,
     session,
+    sessionSource,
     api: createApiClient({
       baseUrl: apiUrl,
       token: session?.token,
@@ -226,7 +267,11 @@ export async function reload(): Promise<Runtime> {
   cachedRunning = null;
   runningLookup = null;
   cachedProjects = null;
+  cachedClients = null;
+  cachedTasks = null;
   cachedTodaySec = null;
+  cachedWebUrl = null;
+  cachedEmail = null;
   return ensureReady();
 }
 
@@ -246,6 +291,8 @@ const setSyncStatus = (next: SyncStatus): void => {
   cachedRunning = null;
   runningLookup = null;
   cachedProjects = null;
+  cachedClients = null;
+  cachedTasks = null;
   cachedTodaySec = null;
 
   // A socket that just came up is the first reliable sign the network is back.
@@ -290,6 +337,8 @@ const applyEvent = (event: SyncEvent): void => {
       return;
     case "catalog.changed":
       if (event.scope === "project") cachedProjects = null;
+      if (event.scope === "client") cachedClients = null;
+      if (event.scope === "task") cachedTasks = null;
       return;
     case "settings.changed":
       return;
@@ -341,6 +390,87 @@ export const setCachedTodaySec = (seconds: number): void => {
   cachedTodaySec = seconds;
 };
 
+export const getCachedClients = (): Client[] | null => cachedClients;
+
+export const setCachedClients = (clients: Client[]): void => {
+  cachedClients = clients;
+};
+
+export const getCachedTasks = (
+  projectId: string | null,
+): Task[] | null =>
+  projectId !== null && cachedTasks?.projectId === projectId
+    ? cachedTasks.tasks
+    : null;
+
+export const setCachedTasks = (projectId: string, tasks: Task[]): void => {
+  cachedTasks = { projectId, tasks };
+};
+
+export const getCachedTasksProjectId = (): string | null =>
+  cachedTasks?.projectId ?? null;
+
+/**
+ * Where the web app lives, asked of the API rather than configured twice.
+ *
+ * `/api/health` is public, so this works before sign-in — which matters,
+ * because "Open tracktime" is exactly what someone with no session wants. A
+ * failure is cached as `null` and simply hides the menu item.
+ */
+/**
+ * The signed-in address, from better-auth's own session endpoint.
+ *
+ * Only ever needed for a cookie-adopted session; a password sign-in already
+ * knows it. Returns null rather than throwing — a footer with no address is a
+ * cosmetic loss, not a reason to fail the snapshot.
+ */
+export async function resolveEmail(): Promise<string | null> {
+  const current = await ensureReady();
+  if (!current.session) return null;
+  if (current.session.email !== null) return current.session.email;
+  if (cachedEmail !== null) return cachedEmail;
+
+  try {
+    const response = await fetch(
+      `${current.apiUrl.replace(/\/$/, "")}/api/auth/get-session`,
+      { headers: { authorization: `Bearer ${current.session.token}` } },
+    );
+    if (!response.ok) return null;
+    const body: unknown = await response.json();
+    const user =
+      typeof body === "object" && body !== null
+        ? (body as { user?: { email?: unknown } }).user
+        : undefined;
+    const email = user?.email;
+    if (typeof email !== "string" || email === "") return null;
+    cachedEmail = email;
+    return email;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveWebUrl(): Promise<string | null> {
+  if (cachedWebUrl !== null) return cachedWebUrl;
+  const current = await ensureReady();
+  try {
+    const response = await fetch(
+      `${current.apiUrl.replace(/\/$/, "")}/api/health`,
+    );
+    if (!response.ok) return null;
+    const body: unknown = await response.json();
+    const webUrl =
+      typeof body === "object" && body !== null
+        ? (body as { webUrl?: unknown }).webUrl
+        : undefined;
+    if (typeof webUrl !== "string" || webUrl.trim() === "") return null;
+    cachedWebUrl = webUrl.trim();
+    return cachedWebUrl;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The running entry, fetched only when the cache has never been filled.
  *
@@ -378,19 +508,67 @@ export async function adoptSession(session: StoredSession): Promise<void> {
 }
 
 /**
+ * React to the web app's session cookie appearing or disappearing.
+ *
+ * Appearing signs the toolbar in, but only if it has no password session of
+ * its own to displace. Disappearing signs it out — but only when the session
+ * it is holding IS the web one, or signing out of the web app would also kick
+ * an unrelated password session that is still perfectly valid.
+ */
+export async function onWebSessionChanged(token: string | null): Promise<void> {
+  const current = await ensureReady();
+
+  if (token === null) {
+    if (current.sessionSource !== "web") return;
+    await clearSession();
+    await reload();
+    await renderBadge(null);
+    return;
+  }
+
+  if (current.sessionSource === "password") return;
+  if (current.session?.token === token) return;
+
+  await clearSession();
+  await reload();
+  await refreshBadgeFromCache();
+}
+
+/** Repaint the badge from whatever the rebuilt runtime now knows. */
+const refreshBadgeFromCache = async (): Promise<void> => {
+  try {
+    await renderBadge(await resolveRunning());
+  } catch {
+    await renderBadge(peekRunning());
+  }
+};
+
+/**
  * Drop the local token and everything derived from it.
  *
  * Called both on an explicit sign-out and when the server rejects the token.
  * In both cases the token is worthless, and keeping it would only produce more
  * 401s on every subsequent poll.
  */
-export async function forgetSession(): Promise<void> {
+export async function forgetSession(
+  options: { clearWebCookie?: boolean } = {},
+): Promise<void> {
   // The queue is only meaningful under the token that authorized it. Replaying
   // one account's queued start under the next account's token would write that
   // work into the wrong account, and `flushQueue` runs on sign-in, on bootstrap
   // and on every socket reconnect — so the rows must not outlive the token.
   await getOfflineQueue().clear();
   await forgetOptimisticRunning();
+
+  // Deliberate on an explicit sign-out: signing out is synced, so the web app's
+  // cookie goes too. NOT done when the server merely rejected the token — that
+  // is an expired session, and deleting the cookie would sign the web app out
+  // of a session it may still be able to refresh.
+  if (options.clearWebCookie === true) {
+    const current = runtime;
+    if (current) await clearWebSessionCookie(current.apiUrl);
+  }
+
   await clearSession();
   await reload();
   await renderBadge(null);

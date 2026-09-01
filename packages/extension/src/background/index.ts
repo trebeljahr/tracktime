@@ -13,12 +13,19 @@
  * lets near their browser.
  */
 import { signInWithPassword, signOutSession } from "@starter/core";
-import { EXTENSION_CLIENT_ID, saveApiUrl } from "../lib/config";
+import { DEFAULT_API_URL, EXTENSION_CLIENT_ID, saveApiUrl } from "../lib/config";
 import type {
   BackgroundResponse,
   PopupToBackground,
 } from "../lib/messaging";
+import { watchWebSession } from "../lib/web-session";
 import { renderBadge } from "./badge";
+import {
+  createClient,
+  createProject,
+  createTask,
+  selectProjectTasks,
+} from "./catalog";
 import { BackgroundError, toErrorResponse } from "./errors";
 import {
   adoptSession,
@@ -26,6 +33,7 @@ import {
   flushQueue,
   forgetSession,
   isUnauthorized,
+  onWebSessionChanged,
   peekRunning,
   reload,
   resolveRunning,
@@ -34,6 +42,15 @@ import { buildState } from "./state";
 import { startTimer, stopTimer } from "./timer";
 
 const BADGE_ALARM = "tracktime.badge";
+
+/**
+ * Last API URL the worker resolved, for the cookie listener's domain check.
+ *
+ * The listener is registered before any await, so it cannot read the stored
+ * URL itself; every `ensureReady` refreshes this, and until the first one runs
+ * the built-in default is the right guess.
+ */
+let lastKnownApiUrl: string = DEFAULT_API_URL;
 
 /** The floor Chrome enforces on periodic alarms. */
 const BADGE_PERIOD_MINUTES = 0.5;
@@ -58,6 +75,7 @@ const ensureBadgeAlarm = async (): Promise<void> => {
 
 const refreshBadge = async (): Promise<void> => {
   const current = await ensureReady();
+  lastKnownApiUrl = current.apiUrl;
   await ensureBadgeAlarm();
 
   if (!current.session) {
@@ -130,7 +148,9 @@ const signOut = async (): Promise<void> => {
     }
   }
 
-  await forgetSession();
+  // Signing out is synced on purpose: the cookie goes with the session, so the
+  // web app does not keep rendering as signed in against something revoked.
+  await forgetSession({ clearWebCookie: true });
 };
 
 const setApiUrl = async (apiUrl: string): Promise<void> => {
@@ -157,9 +177,20 @@ const apply = async (message: PopupToBackground): Promise<void> => {
     case "auth:sign-out":
       return signOut();
     case "timer:start":
-      return startTimer(message.description, message.projectId);
+      return startTimer(message.description, message.projectId, message.taskId);
     case "timer:stop":
       return stopTimer();
+    case "tasks:for-project":
+      return selectProjectTasks(message.projectId);
+    case "client:create":
+      await createClient(message.name);
+      return;
+    case "project:create":
+      await createProject(message.name, message.clientId);
+      return;
+    case "task:create":
+      await createTask(message.projectId, message.name);
+      return;
     case "config:set-api-url":
       return setApiUrl(message.apiUrl);
     default: {
@@ -184,7 +215,7 @@ const handle = async (message: unknown): Promise<BackgroundResponse> => {
   if (!isPopupMessage(message)) return badMessage;
 
   try {
-    await ensureReady();
+    lastKnownApiUrl = (await ensureReady()).apiUrl;
     await apply(message);
     // Every success carries the full fresh snapshot, built after the mutation
     // landed, so the popup never has to guess what its own action did.
@@ -218,6 +249,23 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   // call hangs until it times out.
   return true;
 });
+
+/**
+ * The web app signing in or out, seen through its session cookie.
+ *
+ * Registered at module scope like the rest: this is the event that makes the
+ * toolbar follow the web app, and it commonly arrives at a worker that is
+ * asleep, so the listener has to exist before any handler starts awaiting.
+ *
+ * The API URL is read lazily through `ensureReady` rather than captured here,
+ * because at registration time the worker has not loaded it yet.
+ */
+watchWebSession(
+  () => lastKnownApiUrl,
+  (token) => {
+    void onWebSessionChanged(token).catch(() => undefined);
+  },
+);
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== BADGE_ALARM) return;

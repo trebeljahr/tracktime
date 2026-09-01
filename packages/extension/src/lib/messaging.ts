@@ -8,22 +8,56 @@
  * That matters because the popup is destroyed every time it closes, and a
  * half-applied patch would be indistinguishable from a stale one.
  */
-import type { Project, SyncStatus, TimeEntry } from "@starter/core";
+import type {
+  Client,
+  Project,
+  SyncStatus,
+  Task,
+  TimeEntry,
+} from "@starter/core";
 
 export type PopupToBackground =
   | { type: "state:get" }
   | { type: "auth:sign-in"; email: string; password: string }
   | { type: "auth:sign-out" }
-  | { type: "timer:start"; description: string; projectId: string | null }
+  | {
+      type: "timer:start";
+      description: string;
+      projectId: string | null;
+      taskId: string | null;
+    }
   | { type: "timer:stop" }
+  /** Tasks are per-project, so they are fetched when a project is picked. */
+  | { type: "tasks:for-project"; projectId: string | null }
+  | { type: "client:create"; name: string }
+  | { type: "project:create"; name: string; clientId: string | null }
+  | { type: "task:create"; projectId: string; name: string }
   | { type: "config:set-api-url"; apiUrl: string };
+
+/**
+ * Where the current session came from.
+ *
+ * `web` means it was adopted from the web app's cookie, which is what makes
+ * signing in on one side sign in on the other. The popup shows this, because
+ * "sign out" means something different depending on it: on a shared session it
+ * signs the web app out too.
+ */
+export type SessionSource = "web" | "password";
 
 export type BackgroundState = {
   apiUrl: string;
+  /** Where "Open tracktime" goes. Discovered from the API's /api/health. */
+  webUrl: string | null;
   signedIn: boolean;
+  sessionSource: SessionSource | null;
   email: string | null;
   running: TimeEntry | null;
   projects: Project[];
+  clients: Client[];
+  /** Tasks for whichever project the popup last asked about. */
+  tasks: Task[];
+  /** Which project `tasks` belongs to, so the popup can spot a stale list. */
+  tasksProjectId: string | null;
   todaySec: number;
   syncStatus: SyncStatus;
 };

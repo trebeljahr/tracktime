@@ -73,6 +73,7 @@ const optimisticEntry = (
 export async function startTimer(
   description: string,
   projectId: string | null,
+  taskId: string | null = null,
 ): Promise<void> {
   const current = await ensureReady();
   if (!current.session) throw notSignedIn();
@@ -80,7 +81,7 @@ export async function startTimer(
   const input: OfflineStartInput = {
     description,
     projectId,
-    taskId: null,
+    taskId,
     billable: billableDefaultFor(projectId),
     start: new Date().toISOString(),
     // Its own source, not "api": an entry made from the toolbar stays
