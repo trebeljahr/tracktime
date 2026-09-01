@@ -70,6 +70,13 @@ export const clientListSchema = z.object({
   includeArchived: z.boolean().optional(),
 });
 
+/**
+ * IANA zone the client recording the entry is in. Optional so older clients and
+ * the extensions keep working; entries without one fall back to the viewer's
+ * zone at display time.
+ */
+const entryTimeZone = z.string().max(64).optional();
+
 export const createClientSchema = z.object({
   name: z.string().min(1, "Name is required").max(120),
   color: hexColorSchema.optional(),
@@ -142,6 +149,7 @@ export const startTimerSchema = z.object({
   /** Defaults to "now" on the server when omitted. */
   start: isoDateTimeSchema.optional(),
   source: entrySourceSchema.optional(),
+  timeZone: entryTimeZone,
   originId,
 });
 
@@ -150,6 +158,16 @@ export const stopTimerSchema = z.object({
   id: idString.optional(),
   /** Defaults to "now" on the server when omitted. */
   end: isoDateTimeSchema.optional(),
+  originId,
+});
+
+/**
+ * Continuing an entry opens a NEW one, recorded wherever the caller is now, so
+ * it carries a zone of its own rather than inheriting the original's.
+ */
+export const continueEntrySchema = z.object({
+  id: idString,
+  timeZone: entryTimeZone,
   originId,
 });
 
@@ -162,6 +180,7 @@ export const createEntrySchema = z
     start: isoDateTimeSchema,
     end: isoDateTimeSchema,
     source: entrySourceSchema.optional(),
+    timeZone: entryTimeZone,
     originId,
   })
   .refine(endAfterStart, endAfterStartIssue);
@@ -287,6 +306,7 @@ export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export type StartTimerInput = z.infer<typeof startTimerSchema>;
 export type StopTimerInput = z.infer<typeof stopTimerSchema>;
+export type ContinueEntryInput = z.infer<typeof continueEntrySchema>;
 export type CreateEntryInput = z.infer<typeof createEntrySchema>;
 export type UpdateEntryInput = z.infer<typeof updateEntrySchema>;
 export type EntryListInput = z.infer<typeof entryListSchema>;

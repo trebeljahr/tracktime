@@ -162,6 +162,8 @@ export const useCalendarActions = (
                 start,
                 end,
                 durationSec,
+                // timeZone is deliberately absent: an edit must not restamp the
+                // zone the entry was recorded in. The spread above preserves it.
                 amount: amountOf(durationSec, entry.hourlyRate),
                 updatedAt: new Date().toISOString(),
               };
@@ -197,6 +199,7 @@ export const useCalendarActions = (
         hourlyRate: null,
         currency,
         source: "web",
+        timeZone: variables.timeZone ?? null,
         createdAt: now,
         updatedAt: now,
         ...projectMeta(projectId),

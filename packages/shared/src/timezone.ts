@@ -109,22 +109,88 @@ const keyParts = (key: DayKey): { y: number; m: number; d: number } | null => {
   return { y: Number(match[1]), m: Number(match[2]), d: Number(match[3]) };
 };
 
+/** A wall-clock reading, as a person would write it on a clock and calendar. */
+export type WallClock = {
+  year: number;
+  month: number;
+  day: number;
+  hour?: number;
+  minute?: number;
+  second?: number;
+};
+
 /**
- * The instant at which that calendar day begins in `timeZone`.
+ * The instant at which a wall-clock reading occurs in `timeZone`.
  *
- * Resolved in two passes: guess using the offset at UTC midnight, then re-read
- * the offset at the guessed instant. The second pass is what makes DST
+ * This is the inverse of reading a clock: given "21 Aug 2026, 23:30 in Berlin",
+ * it returns the absolute millisecond that names.
+ *
+ * Resolved in two passes: guess using the offset at the naive UTC instant, then
+ * re-read the offset at the guessed instant. The second pass is what makes DST
  * transitions come out right, since the offset before and after a shift differ.
- * On a spring-forward day where local midnight does not exist, this lands on
- * the first instant that does.
+ * A wall-clock time skipped by a spring-forward lands on the first instant that
+ * does exist; an ambiguous time in a fall-back hour resolves to one of the two,
+ * which is the ordinary convention.
  */
+export const zonedWallClockToMs = (
+  clock: WallClock,
+  timeZone: string
+): number => {
+  const naiveUtc = Date.UTC(
+    clock.year,
+    clock.month - 1,
+    clock.day,
+    clock.hour ?? 0,
+    clock.minute ?? 0,
+    clock.second ?? 0
+  );
+  const firstGuess = naiveUtc - zoneOffsetMs(naiveUtc, timeZone);
+  return naiveUtc - zoneOffsetMs(firstGuess, timeZone);
+};
+
+/** The instant at which that calendar day begins in `timeZone`. */
 export const zonedDayStartMs = (key: DayKey, timeZone: string): number => {
   const parts = keyParts(key);
   if (!parts) return Number.NaN;
+  return zonedWallClockToMs({ year: parts.y, month: parts.m, day: parts.d }, timeZone);
+};
 
-  const utcMidnight = Date.UTC(parts.y, parts.m - 1, parts.d);
-  const firstGuess = utcMidnight - zoneOffsetMs(utcMidnight, timeZone);
-  return utcMidnight - zoneOffsetMs(firstGuess, timeZone);
+/** The wall-clock reading an instant shows on a clock in `timeZone`. */
+export const wallClockInZone = (ms: number, timeZone: string): Required<WallClock> => {
+  const p = zonedParts(ms, timeZone);
+  return {
+    year: p.year,
+    month: p.month,
+    day: p.day,
+    hour: p.hour,
+    minute: p.minute,
+    second: p.second,
+  };
+};
+
+/**
+ * Short human name for a zone: "Europe/Berlin" -> "Berlin".
+ *
+ * Used to caption a time that was recorded somewhere else, so "23:30 Berlin"
+ * reads the way a person would say it.
+ */
+export const zoneLabel = (timeZone: string): string => {
+  const last = timeZone.split("/").pop() ?? timeZone;
+  return last.replace(/_/g, " ");
+};
+
+/** True when two zone identifiers name the same offset rules right now. */
+export const isSameZone = (
+  a: string | null | undefined,
+  b: string | null | undefined,
+  atMs: number = 0
+): boolean => {
+  const left = resolveTimeZone(a);
+  const right = resolveTimeZone(b);
+  if (left === right) return true;
+  // Different identifiers can still be the same clock (Europe/Berlin vs
+  // Europe/Vienna). What matters for display is whether the reading differs.
+  return zoneOffsetMs(atMs, left) === zoneOffsetMs(atMs, right);
 };
 
 /** Calendar-day arithmetic. Independent of any zone — keys are just dates. */
@@ -197,4 +263,125 @@ export const splitIntervalByZonedDay = (
   }
 
   return slices;
+};
+
+// ── clock reading and writing in an explicit zone ────────────────────
+
+const pad2 = (value: number): string => String(value).padStart(2, "0");
+
+/**
+ * Render an instant as the clock time it showed in `timeZone`.
+ *
+ * An entry recorded at 23:30 in Berlin reads "23:30" here no matter where it is
+ * being viewed from, which is the point: the time you wrote down is the time
+ * you see back.
+ */
+export const formatClockInZone = (
+  iso: string,
+  timeZone: string,
+  format: "12h" | "24h" = "24h"
+): string => {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "";
+
+  const clock = wallClockInZone(ms, resolveTimeZone(timeZone));
+  if (format === "24h") return `${pad2(clock.hour)}:${pad2(clock.minute)}`;
+
+  const suffix = clock.hour < 12 ? "am" : "pm";
+  const hour12 = clock.hour % 12 === 0 ? 12 : clock.hour % 12;
+  return `${hour12}:${pad2(clock.minute)} ${suffix}`;
+};
+
+/**
+ * Parse a clock time typed by a person and anchor it to the calendar day that
+ * `anchorIso` falls on IN `timeZone`.
+ *
+ * This is what stops an entry drifting when it is edited from somewhere else.
+ * Typing "23:30" on an entry recorded in Berlin means 23:30 Berlin, even if the
+ * person editing is in Tokyo — otherwise the same keystrokes would silently
+ * move the entry by the offset between the two zones.
+ *
+ * Returns an ISO instant, or null when the input is not a time.
+ */
+export const parseTimeOfDayInZone = (
+  raw: string,
+  anchorIso: string,
+  timeZone: string
+): string | null => {
+  const anchorMs = Date.parse(anchorIso);
+  if (Number.isNaN(anchorMs)) return null;
+
+  const zone = resolveTimeZone(timeZone);
+  const input = raw.trim().toLowerCase().replace(/\./g, "");
+  if (input === "") return null;
+
+  const match =
+    /^(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(am|pm)?$/.exec(input) ??
+    /^(\d{2})(\d{2})()\s*(am|pm)?$/.exec(input);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = match[2] === undefined || match[2] === "" ? 0 : Number(match[2]);
+  const secs = match[3] === undefined || match[3] === "" ? 0 : Number(match[3]);
+  const meridiem = match[4];
+
+  if (meridiem === "am") {
+    if (hours < 1 || hours > 12) return null;
+    if (hours === 12) hours = 0;
+  } else if (meridiem === "pm") {
+    if (hours < 1 || hours > 12) return null;
+    if (hours !== 12) hours += 12;
+  }
+
+  if (hours > 23 || minutes > 59 || secs > 59) return null;
+
+  const day = wallClockInZone(anchorMs, zone);
+  return new Date(
+    zonedWallClockToMs(
+      { year: day.year, month: day.month, day: day.day, hour: hours, minute: minutes, second: secs },
+      zone
+    )
+  ).toISOString();
+};
+
+/** Re-anchor an instant onto a different calendar day, keeping its clock time in `timeZone`. */
+export const withDayInZone = (
+  iso: string,
+  dayKey: DayKey,
+  timeZone: string
+): string => {
+  const ms = Date.parse(iso);
+  const parts = keyParts(dayKey);
+  if (Number.isNaN(ms) || !parts) return iso;
+
+  const zone = resolveTimeZone(timeZone);
+  const clock = wallClockInZone(ms, zone);
+  return new Date(
+    zonedWallClockToMs(
+      {
+        year: parts.y,
+        month: parts.m,
+        day: parts.d,
+        hour: clock.hour,
+        minute: clock.minute,
+        second: clock.second,
+      },
+      zone
+    )
+  ).toISOString();
+};
+
+/** True when start and end fall on different calendar days in `timeZone`. */
+export const spansDayBoundaryInZone = (
+  startIso: string,
+  endIso: string | null,
+  timeZone: string
+): boolean => {
+  if (endIso === null) return false;
+  const startMs = Date.parse(startIso);
+  const endMs = Date.parse(endIso);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return false;
+
+  const zone = resolveTimeZone(timeZone);
+  return dayKeyInZone(startMs, zone) !== dayKeyInZone(endMs, zone);
 };

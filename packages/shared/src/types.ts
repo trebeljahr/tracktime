@@ -114,6 +114,18 @@ export type TimeEntry = {
   /** Snapshot of the workspace currency at stop/create time. */
   currency: string;
   source: EntrySource;
+  /**
+   * IANA zone the entry was recorded in, e.g. "Europe/Berlin".
+   *
+   * The instants are absolute, so durations never depend on this. It exists so
+   * the clock time reads the same wherever the entry is later viewed or edited
+   * from: an entry written at 23:30 in Berlin still says 23:30 when opened on a
+   * laptop in Tokyo, instead of drifting by the offset between the two.
+   *
+   * Null on entries recorded before the field existed; callers fall back to the
+   * viewer's own zone for those.
+   */
+  timeZone: string | null;
   createdAt: string;
   updatedAt: string;
 };

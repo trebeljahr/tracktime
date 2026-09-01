@@ -33,6 +33,7 @@ const entry = (overrides: Partial<DetailedEntry> = {}): DetailedEntry => {
     hourlyRate: 60,
     currency: "EUR",
     source: "web",
+    timeZone: null,
     createdAt: start,
     updatedAt: start,
     projectName: "tracktime",

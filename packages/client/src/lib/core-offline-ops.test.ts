@@ -21,6 +21,7 @@ const startInput: OfflineStartInput = {
   billable: true,
   start: "2026-08-21T09:00:00.000Z",
   source: "web",
+      timeZone: "Europe/Berlin",
   originId: "tab-1",
 };
 

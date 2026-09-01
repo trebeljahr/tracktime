@@ -17,6 +17,7 @@ import {
   createEntrySchema,
   entryAmount,
   entryListSchema,
+  continueEntrySchema,
   idInputSchema,
   resolveHourlyRate,
   startTimerSchema,
@@ -215,6 +216,8 @@ type StartArgs = {
   billable: boolean | undefined;
   start: Date;
   source: EntrySource;
+  /** IANA zone the caller is in. See TimeEntry.timeZone in @starter/shared. */
+  timeZone?: string | null;
   originId?: string;
 };
 
@@ -246,6 +249,7 @@ const startNewEntry = async (args: StartArgs): Promise<TimeEntryWire> => {
       hourlyRate,
       currency,
       source: args.source,
+      timeZone: args.timeZone ?? null,
     });
     return toClientTimeEntry(created);
   };
@@ -502,6 +506,7 @@ export const entriesRouter = router({
         billable: input.billable,
         start,
         source: input.source ?? "web",
+        timeZone: input.timeZone ?? null,
         originId: input.originId,
       });
 
@@ -576,7 +581,7 @@ export const entriesRouter = router({
 
   /** Start a new timer with the same description/project/task/billable. */
   continue: protectedProcedure
-    .input(idInputSchema)
+    .input(continueEntrySchema)
     .mutation(async ({ ctx, input }): Promise<TimeEntryWire> => {
       const ownerId = ctx.user.id;
       const source = await TimeEntry.findOne({
@@ -593,6 +598,9 @@ export const entriesRouter = router({
         billable: source.billable,
         start: new Date(),
         source: source.source,
+        // A continued entry is being recorded NOW, wherever the person now is,
+        // so it takes the caller's zone rather than inheriting the original's.
+        timeZone: input.timeZone ?? null,
         originId: input.originId,
       });
 
@@ -640,6 +648,7 @@ export const entriesRouter = router({
         hourlyRate,
         currency,
         source: input.source ?? "web",
+        timeZone: input.timeZone ?? null,
       });
 
       const entry = toClientTimeEntry(created);

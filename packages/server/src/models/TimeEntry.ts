@@ -17,6 +17,7 @@ export interface ITimeEntry extends Document {
   /** Snapshot of the workspace currency. */
   currency: string;
   source: EntrySource;
+  timeZone: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,6 +39,7 @@ export type TimeEntryDocLike = {
   hourlyRate: number | null;
   currency: string;
   source: EntrySource;
+  timeZone: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -70,6 +72,8 @@ const timeEntrySchema = new Schema<ITimeEntry>(
       required: true,
       default: "web",
     },
+    // See the note on TimeEntry.timeZone in @starter/shared.
+    timeZone: { type: String, default: null },
   },
   { timestamps: true },
 );
@@ -104,6 +108,7 @@ export function toClientTimeEntry(doc: TimeEntryDocLike): TimeEntryWire {
     hourlyRate: doc.hourlyRate ?? null,
     currency: doc.currency,
     source: doc.source,
+    timeZone: doc.timeZone ?? null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

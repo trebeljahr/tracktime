@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { deviceTimeZone } from "@starter/core";
 import {
   entryAmount,
   formatDurationShort,
@@ -285,6 +286,7 @@ export const useEntryMutations = (): EntryMutations => {
         hourlyRate,
         currency: settings?.currency ?? "EUR",
         source: "web",
+        timeZone: deviceTimeZone(),
         createdAt: stamp,
         updatedAt: stamp,
         projectName: project.projectName,
@@ -606,6 +608,7 @@ export const useEntryMutations = (): EntryMutations => {
         billable: args.billable,
         start: nowIso(),
         source: "web",
+        timeZone: deviceTimeZone(),
         originId: ORIGIN_ID,
       };
       startMutation.mutate(input);
@@ -648,6 +651,7 @@ export const useEntryMutations = (): EntryMutations => {
         start: args.start,
         end: args.end,
         source: "web",
+        timeZone: deviceTimeZone(),
         originId: ORIGIN_ID,
       };
       createMutation.mutate(input);

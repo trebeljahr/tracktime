@@ -3,10 +3,13 @@
 import * as React from "react";
 import { Copy, Ellipsis, Pencil, Play, Square, Trash2 } from "lucide-react";
 import {
+  isSameZone,
   rollEndAfterStart,
-  spansLocalDayBoundary,
+  spansDayBoundaryInZone,
+  zoneLabel,
   type DetailedEntry,
 } from "@starter/shared";
+import { deviceTimeZone } from "@starter/core";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +64,17 @@ export function EntryRow({
     if (draft === entry.description) return;
     mutations.updateEntry({ id: entry.id, description: draft });
   }, [draft, entry.description, entry.id, mutations]);
+
+  // The zone this entry was RECORDED in. Times are read and written in it, so
+  // an entry written at 23:30 in Berlin still reads 23:30 when opened from
+  // another zone, and retyping it does not move the entry. Entries recorded
+  // before the field existed fall back to this device's zone.
+  const entryZone = entry.timeZone ?? deviceTimeZone();
+  const foreignZone = !isSameZone(
+    entryZone,
+    deviceTimeZone(),
+    Date.parse(entry.start)
+  );
 
   const handleStartCommit = React.useCallback(
     (iso: string): void => {
@@ -196,6 +210,7 @@ export function EntryRow({
         <TimeField
           value={entry.start}
           timeFormat={format.timeFormat}
+          timeZone={entryZone}
           disabled={syncing}
           aria-label="Start time"
           testId="entry-start"
@@ -213,6 +228,7 @@ export function EntryRow({
           <TimeField
             value={entry.end}
             timeFormat={format.timeFormat}
+            timeZone={entryZone}
             disabled={syncing}
             aria-label="End time"
             testId="entry-end"
@@ -221,13 +237,24 @@ export function EntryRow({
         )}
         {/* Without this an entry reads "23:30 – 00:30" and looks like it ran
             backwards, with nothing to say the end is on the next day. */}
-        {spansLocalDayBoundary(entry.start, entry.end) ? (
+        {spansDayBoundaryInZone(entry.start, entry.end, entryZone) ? (
           <span
             className="ml-1 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground"
             title="Ends on the next day"
             data-testid="entry-next-day"
           >
             +1d
+          </span>
+        ) : null}
+        {/* Only shown when the entry was recorded somewhere else — otherwise
+            every row would carry a redundant label for the zone you are in. */}
+        {foreignZone ? (
+          <span
+            className="ml-1 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground"
+            title={`Recorded in ${entryZone}`}
+            data-testid="entry-zone"
+          >
+            {zoneLabel(entryZone)}
           </span>
         ) : null}
       </div>

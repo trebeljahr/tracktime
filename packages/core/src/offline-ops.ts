@@ -33,6 +33,9 @@ export type OfflineStartInput = {
   billable: boolean;
   start: string;
   source: EntrySource;
+  /** IANA zone this was recorded in. Replayed unchanged, so a queued entry
+   *  keeps the zone it was created in rather than the zone it syncs from. */
+  timeZone: string;
   originId: string;
 };
 
@@ -51,6 +54,7 @@ export type OfflineCreateInput = {
   start: string;
   end: string;
   source: EntrySource;
+  timeZone: string;
   originId: string;
 };
 

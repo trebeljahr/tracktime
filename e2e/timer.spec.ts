@@ -258,3 +258,59 @@ test.describe("Timer", () => {
     await expect(page.getByTestId("entries-empty")).toBeVisible();
   });
 });
+
+/**
+ * An entry keeps the clock time it was recorded at, wherever it is later opened
+ * from. Rico moves between zones (travel, VPN), and the failure this prevents
+ * is silent: the entry looks fine, it has just quietly moved by the offset.
+ */
+test.describe("Recorded time zone", () => {
+  const API = `http://127.0.0.1:${process.env.E2E_SERVER_PORT ?? "49761"}`;
+
+  test("shows and edits a foreign-zone entry in the zone it was recorded in", async ({
+    page,
+  }) => {
+    await openTracker(page, "entry-zone");
+
+    // 09:00-10:00 in Tokyo on 2026-08-21 — which is 00:00-01:00 UTC, and would
+    // read as some other hour entirely in the browser's own zone.
+    const created = await page.request.post(
+      `${API}/api/trpc/entries.create?batch=1`,
+      {
+        data: {
+          "0": {
+            description: "Standup in Tokyo",
+            start: "2026-08-21T00:00:00.000Z",
+            end: "2026-08-21T01:00:00.000Z",
+            billable: false,
+            timeZone: "Asia/Tokyo",
+          },
+        },
+      },
+    );
+    expect(created.ok()).toBe(true);
+
+    await page.goto("/track");
+    const row = entryRow(page, "Standup in Tokyo");
+    await expect(row).toHaveCount(1);
+
+    // The clock reads as it was written, and says where that was.
+    await expect(row.getByTestId("entry-start")).toHaveValue("09:00");
+    await expect(row.getByTestId("entry-end")).toHaveValue("10:00");
+    await expect(row.getByTestId("entry-zone")).toHaveText("Tokyo");
+
+    // Opening and saving it unchanged must not move the entry. Before the zone
+    // was recorded, this round trip reinterpreted the clock time in the
+    // viewer's zone and shifted the entry by the offset between them.
+    await row.getByTestId("entry-menu").click();
+    await page.getByTestId("entry-menu-edit").click();
+    await expect(page.getByTestId("entry-edit-zone-note")).toContainText(
+      "Asia/Tokyo",
+    );
+    await page.getByTestId("entry-edit-save").click();
+
+    await expect(row.getByTestId("entry-start")).toHaveValue("09:00");
+    await expect(row.getByTestId("entry-end")).toHaveValue("10:00");
+    await expect(row.getByTestId("entry-duration")).toHaveValue("1:00:00");
+  });
+});

@@ -1,7 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { parseTimeOfDay, type TimeFormat } from "@starter/shared";
+import {
+  formatClockInZone,
+  parseTimeOfDay,
+  parseTimeOfDayInZone,
+  type TimeFormat,
+} from "@starter/shared";
 
 import { Input } from "@/components/ui/input";
 import { formatClock } from "@/lib/format";
@@ -10,6 +15,12 @@ import { cn } from "@/lib/utils";
 export type TimeFieldProps = {
   /** ISO datetime. The date part is preserved; only the clock time is edited. */
   value: string;
+  /**
+   * IANA zone to read and write the clock in. Pass the ENTRY's recorded zone so
+   * the time shown is the time it was written at, and retyping it does not move
+   * the entry. Omitted falls back to the device's own zone.
+   */
+  timeZone?: string | null;
   onCommit: (iso: string) => void;
   timeFormat?: TimeFormat;
   disabled?: boolean;
@@ -28,6 +39,7 @@ export type TimeFieldProps = {
 export function TimeField({
   value,
   onCommit,
+  timeZone = null,
   timeFormat = "24h",
   disabled = false,
   className,
@@ -35,8 +47,11 @@ export function TimeField({
   testId = "time-field",
 }: TimeFieldProps): React.JSX.Element {
   const display = React.useMemo(
-    () => formatClock(value, timeFormat),
-    [value, timeFormat]
+    () =>
+      timeZone
+        ? formatClockInZone(value, timeZone, timeFormat)
+        : formatClock(value, timeFormat),
+    [value, timeZone, timeFormat]
   );
 
   const [draft, setDraft] = React.useState(display);
@@ -51,7 +66,9 @@ export function TimeField({
   }
 
   const commit = React.useCallback((): void => {
-    const parsed = parseTimeOfDay(draft, value);
+    const parsed = timeZone
+      ? parseTimeOfDayInZone(draft, value, timeZone)
+      : parseTimeOfDay(draft, value);
     if (parsed === null) {
       setInvalid(true);
       setDraft(display);
@@ -60,7 +77,7 @@ export function TimeField({
     setInvalid(false);
     setDraft(formatClock(parsed, timeFormat));
     if (parsed !== value) onCommit(parsed);
-  }, [draft, display, onCommit, timeFormat, value]);
+  }, [draft, display, onCommit, timeFormat, timeZone, value]);
 
   return (
     <Input

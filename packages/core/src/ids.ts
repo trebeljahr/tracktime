@@ -14,3 +14,18 @@ export const createId = (): string => {
   const random = Math.random().toString(36).slice(2, 10);
   return `id-${Date.now().toString(36)}-${counter.toString(36)}-${random}`;
 };
+
+/**
+ * The device's IANA zone, e.g. "Europe/Berlin".
+ *
+ * Read once per process: it is stable for a session, and every entry recorded
+ * from this device is stamped with it so the clock time reads the same wherever
+ * the entry is later opened. Falls back to UTC where the runtime cannot say.
+ */
+export const deviceTimeZone = (): string => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+};
