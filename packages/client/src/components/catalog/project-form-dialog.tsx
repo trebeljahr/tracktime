@@ -17,11 +17,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/sonner";
+import { ORIGIN_ID } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
+import { trpc } from "@/lib/trpc";
 import {
   useClientMutations,
   useProjectMutations,
 } from "./use-catalog-mutations";
+import { ProjectTasksField } from "./project-tasks-field";
 import type { ClientRow, ProjectRow } from "./types";
 
 export type ProjectFormDialogProps = {
@@ -97,6 +100,7 @@ function ProjectForm({
       ? ""
       : String(project.hourlyRate),
   );
+  const [pendingTasks, setPendingTasks] = React.useState<string[]>([]);
   const [nameError, setNameError] = React.useState<string | null>(null);
   const [rateError, setRateError] = React.useState<string | null>(null);
 
@@ -104,6 +108,8 @@ function ProjectForm({
     onConflict: setNameError,
   });
   const { createClient } = useClientMutations();
+  const utils = trpc.useUtils();
+  const createTaskForNewProject = trpc.tasks.create.useMutation();
 
   const clientOptions = React.useMemo<ComboboxOption[]>(
     () =>
@@ -116,6 +122,17 @@ function ProjectForm({
         })),
     [clients, project?.clientId],
   );
+
+  const [creatingClient, setCreatingClient] = React.useState(false);
+  const [newClientName, setNewClientName] = React.useState("");
+
+  const confirmNewClient = (): void => {
+    const name = newClientName.trim();
+    if (name === "") return;
+    handleCreateClient(name);
+    setNewClientName("");
+    setCreatingClient(false);
+  };
 
   const handleCreateClient = (rawName: string): void => {
     void createClient({ name: rawName.trim() }).then((created) => {
@@ -166,8 +183,29 @@ function ProjectForm({
       clientId,
       billableDefault,
       hourlyRate,
-    }).then((created) => {
+    }).then(async (created) => {
       if (!created) return;
+
+      // Tasks queued while the project had no id yet. Written in order so the
+      // list reads the way it was typed.
+      //
+      // Guarded as a whole: the project itself already exists, so a task that
+      // fails to write must not strand the dialog open with no way out.
+      try {
+        for (const taskName of pendingTasks) {
+          await createTaskForNewProject
+            .mutateAsync({
+              projectId: created.id,
+              name: taskName,
+              originId: ORIGIN_ID,
+            })
+            .catch(() => null);
+        }
+        await utils.tasks.invalidate();
+      } catch {
+        toast.error("The project was created, but its tasks were not.");
+      }
+
       toast.success(`Project "${created.name}" created.`);
       onDone(created);
     });
@@ -227,8 +265,52 @@ function ProjectForm({
           clearLabel="No client"
           onCreate={handleCreateClient}
           data-testid="project-client-combobox"
+          footerActions={[
+            {
+              label: "New client…",
+              onSelect: () => setCreatingClient(true),
+              testId: "project-client-new",
+            },
+          ]}
         />
+        {creatingClient ? (
+          <div className="flex gap-2">
+            <Input
+              autoFocus
+              value={newClientName}
+              placeholder="Client name"
+              onChange={(event) => setNewClientName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  confirmNewClient();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setCreatingClient(false);
+                  setNewClientName("");
+                }
+              }}
+              data-testid="project-client-name-input"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={confirmNewClient}
+              disabled={newClientName.trim() === ""}
+              data-testid="project-client-name-save"
+            >
+              Add
+            </Button>
+          </div>
+        ) : null}
       </div>
+
+      <ProjectTasksField
+        projectId={project?.id ?? null}
+        pending={pendingTasks}
+        onPendingChange={setPendingTasks}
+      />
 
       <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
         <div className="space-y-0.5">

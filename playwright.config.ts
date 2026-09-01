@@ -14,6 +14,7 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${E2E_CLIENT_PORT}`,
     trace: "on-first-retry",
+    screenshot: "only-on-failure",
   },
   webServer: [
     {

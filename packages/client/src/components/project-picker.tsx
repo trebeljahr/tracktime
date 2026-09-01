@@ -2,7 +2,6 @@
 
 import * as React from "react";
 
-import { ClientFormDialog } from "@/components/catalog/client-form-dialog";
 import { ProjectFormDialog } from "@/components/catalog/project-form-dialog";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { toast } from "@/components/ui/sonner";
@@ -105,8 +104,10 @@ export function ProjectPicker({
   // Explicit create surfaces. The "Client / Project" shorthand is quick once
   // you know it, but it only appears after typing a name that matches nothing —
   // so on an empty workspace there was no visible way to make a project at all.
+  // Only "New project…" lives here. A client is a property OF a project, so it
+  // is created inside the project dialog rather than as a sibling action in a
+  // picker that is about choosing a project.
   const [projectDialogOpen, setProjectDialogOpen] = React.useState(false);
-  const [clientDialogOpen, setClientDialogOpen] = React.useState(false);
 
   const options = React.useMemo(
     () => toProjectOptions(projects.data ?? []),
@@ -189,11 +190,6 @@ export function ProjectPicker({
                   onSelect: () => setProjectDialogOpen(true),
                   testId: "project-picker-new-project",
                 },
-                {
-                  label: "New client…",
-                  onSelect: () => setClientDialogOpen(true),
-                  testId: "project-picker-new-client",
-                },
               ]
             : undefined
         }
@@ -204,11 +200,6 @@ export function ProjectPicker({
         onOpenChange={setProjectDialogOpen}
         clients={clients.data ?? []}
         onCreated={(project) => onChange(project.id)}
-      />
-
-      <ClientFormDialog
-        open={clientDialogOpen}
-        onOpenChange={setClientDialogOpen}
       />
     </>
   );

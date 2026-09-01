@@ -239,4 +239,58 @@ test.describe("Projects catalog", () => {
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText(PROJECT_NAME);
   });
+  /**
+   * The whole chain — client, project, task — reachable from the project
+   * dialog. A client is a property OF a project and a task belongs TO one, so
+   * both are made here rather than on separate screens.
+   */
+  test("creates a client and tasks from inside the project dialog", async ({
+    page,
+  }) => {
+    await signUpViaUI(page, {
+      name: "Layers User",
+      email: uniqueEmail("layers"),
+      password: PASSWORD,
+    });
+    await page.goto("/track");
+    await expect(page.getByTestId("tracker-bar")).toBeVisible();
+
+    await page.getByTestId("tracker-project").click();
+    // Creating a client is NOT offered here: this picker chooses a project.
+    await expect(page.getByTestId("project-picker-new-client")).toHaveCount(0);
+    await page.getByTestId("project-picker-new-project").click();
+
+    await expect(page.getByTestId("project-dialog")).toBeVisible();
+    await page.getByTestId("project-name-input").fill("Mobile App");
+
+    // A colour outside the palette must be accepted.
+    await page.getByTestId("project-color").click();
+    await page.getByTestId("project-color-hex").fill("#ff6b9d");
+    await page.getByTestId("project-color-hex").press("Enter");
+    await expect(page.getByTestId("project-color")).toContainText("#ff6b9d");
+
+    // Client, created from within the project being defined.
+    await page.getByTestId("project-client-combobox").click();
+    await page.getByTestId("project-client-new").click();
+    await page.getByTestId("project-client-name-input").fill("Globex");
+    await page.getByTestId("project-client-name-save").click();
+    await expect(page.getByTestId("project-client-combobox")).toContainText(
+      "Globex",
+    );
+
+    // Tasks: one via Enter, one via the button — both paths must work.
+    await page.getByTestId("project-task-input").fill("Design");
+    await page.getByTestId("project-task-input").press("Enter");
+    await page.getByTestId("project-task-input").fill("Implementation");
+    await page.getByTestId("project-task-add").click();
+    await expect(page.getByTestId("project-task-pending")).toHaveCount(2);
+
+    await page.getByTestId("project-submit").click();
+
+    // The project is selected, and the tasks queued alongside it now exist.
+    await expect(page.getByTestId("tracker-project")).toContainText("Mobile App");
+    await page.getByTestId("tracker-task").click();
+    await expect(page.getByText("Design", { exact: true })).toBeVisible();
+    await expect(page.getByText("Implementation", { exact: true })).toBeVisible();
+  });
 });

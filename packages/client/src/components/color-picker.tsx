@@ -54,7 +54,11 @@ export type ColorPickerProps = {
   testId?: string;
 };
 
-/** Swatch grid over the catalog palette, with a hex escape hatch. */
+/**
+ * Colour picker over the catalog palette, plus a full-spectrum native input and
+ * a hex field. The palette is only a set of shortcuts — any `#rrggbb` is valid,
+ * so a brand colour can be pasted or dialled in directly.
+ */
 export function ColorPicker({
   value,
   onChange,
@@ -143,7 +147,23 @@ export function ColorPicker({
           })}
         </div>
 
+        {/* The palette is a shortcut, not the whole range: any colour is
+            allowed. The native picker gives a full spectrum with an eyedropper
+            on the browsers that support one, and the hex field takes a value
+            pasted from a brand guide. */}
         <div className="mt-3 flex items-center gap-2">
+          <input
+            type="color"
+            value={isHexColor(normalize(value)) ? normalize(value) : "#4f46e5"}
+            onChange={(event) => {
+              const next = normalize(event.target.value);
+              setDraft(next);
+              onChange(next);
+            }}
+            aria-label="Custom colour"
+            className="h-8 w-10 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0.5"
+            data-testid={`${testId}-custom`}
+          />
           <Input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
