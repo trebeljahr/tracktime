@@ -3,6 +3,7 @@
 import * as React from "react";
 import {
   entryAmount,
+  formatDurationShort,
   resolveHourlyRate,
   type DetailedEntry,
   type TimeEntry,
@@ -57,6 +58,16 @@ const durationBetween = (start: string, end: string): number =>
 
 const nowIso = (): string => new Date().toISOString();
 
+/**
+ * Below this, a stopped entry is probably a misfire — a stray click on Start,
+ * or continuing the wrong row — rather than real tracked time.
+ *
+ * It is never discarded automatically: silently deleting time someone tracked
+ * is far worse than leaving a short row in the list. The offer is made once, in
+ * the toast, and ignoring it keeps the entry.
+ */
+const SHORT_ENTRY_SEC = 60;
+
 export type StartTimerArgs = {
   description: string;
   projectId: string | null;
@@ -101,6 +112,12 @@ export type EntryMutations = {
  */
 export const useEntryMutations = (): EntryMutations => {
   const utils = trpc.useUtils();
+
+  // `removeEntry` is declared below the mutations that need to call it, so the
+  // toast action reaches it through a ref rather than reordering the file.
+  const removeEntryRef = React.useRef<((entry: DetailedEntry) => void) | null>(
+    null
+  );
 
   // ── cache helpers ──────────────────────────────────────────────────
 
@@ -396,8 +413,24 @@ export const useEntryMutations = (): EntryMutations => {
     },
     onSuccess: (entry, _raw, context) => {
       if (context?.tempId) dropEntry(context.tempId);
-      replaceEntry(entry.id, toDetailed(entry));
+      const detailed = toDetailed(entry);
+      replaceEntry(entry.id, detailed);
       utils.entries.current.setData(undefined, null);
+
+      // Includes a zero-second entry: an immediate start-then-stop is the
+      // most obvious misfire there is, and used to get no offer at all.
+      if (entry.durationSec < SHORT_ENTRY_SEC) {
+        toast.message(
+          `Stopped after ${formatDurationShort(entry.durationSec)}`,
+          {
+            description: "Short entries are kept unless you discard them.",
+            action: {
+              label: "Discard",
+              onClick: () => removeEntryRef.current?.(detailed),
+            },
+          }
+        );
+      }
     },
     onError: (error, raw, context) =>
       handleError(
@@ -666,6 +699,8 @@ export const useEntryMutations = (): EntryMutations => {
     },
     [dropEntry, removeMutation, utils]
   );
+
+  removeEntryRef.current = removeEntry;
 
   return {
     startTimer,

@@ -231,4 +231,30 @@ test.describe("Timer", () => {
       "Dropdown Project",
     );
   });
+
+  /**
+   * A stray click on Start leaves a few-second entry cluttering the day. The
+   * toast offers to discard it — but never does so on its own, because
+   * silently deleting tracked time is the worse failure.
+   */
+  test("a short entry offers to be discarded, and is kept if ignored", async ({
+    page,
+  }) => {
+    await openTracker(page, "short-entry");
+
+    await page.getByTestId("tracker-description").fill("Stray click");
+    await page.getByTestId("tracker-toggle").click();
+    await expect(runningRows(page)).toHaveCount(1);
+    await page.getByTestId("tracker-toggle").click();
+    await expect(runningRows(page)).toHaveCount(0);
+
+    // Ignoring the offer keeps the entry.
+    const discard = page.getByRole("button", { name: "Discard" });
+    await expect(discard).toBeVisible();
+    await expect(entryRow(page, "Stray click")).toHaveCount(1);
+
+    await discard.click();
+    await expect(entryRow(page, "Stray click")).toHaveCount(0);
+    await expect(page.getByTestId("entries-empty")).toBeVisible();
+  });
 });
