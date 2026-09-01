@@ -23,12 +23,16 @@ type Props = {
 
 type FormValues = {
   description: string;
-  projectId: string;
-  taskId: string;
+  /** Undefined when the dropdown was not rendered — nothing to pick. */
+  projectId?: string;
+  taskId?: string;
   billable: boolean;
   start: Date | null;
   end: Date | null;
 };
+
+const orNull = (value: string | undefined): string | null =>
+  value && value !== NONE ? value : null;
 
 /**
  * Edit one entry. A running entry keeps running: its end stays empty, and
@@ -53,6 +57,10 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
     if (projectId === NONE && taskId !== NONE) setTaskId(NONE);
   }, [projectId, taskId]);
 
+  // Dropdowns render only when they have something to offer — see start-timer.
+  const hasProjects = (projects.data ?? []).length > 0;
+  const hasTasks = projectId !== NONE && (tasks.data ?? []).length > 0;
+
   const submit = async (values: FormValues): Promise<void> => {
     if (values.start && values.end && values.end <= values.start) {
       await showToast({
@@ -68,8 +76,8 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
       await api.update({
         id: entry.id,
         description: values.description.trim(),
-        projectId: values.projectId === NONE ? null : values.projectId,
-        taskId: values.taskId === NONE ? null : values.taskId,
+        projectId: orNull(values.projectId),
+        taskId: orNull(values.taskId),
         billable: values.billable,
         start: (values.start ?? new Date(entry.start)).toISOString(),
         end: values.end ? values.end.toISOString() : null,
@@ -104,35 +112,52 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
         placeholder="What did you work on?"
         defaultValue={entry.description}
       />
-      <Form.Dropdown
-        id="projectId"
-        title="Project"
-        value={projectId}
-        onChange={(value) => {
-          setProjectId(value);
-          setTaskId(NONE);
-        }}
-      >
-        <Form.Dropdown.Item value={NONE} title="No project" icon={Icon.Circle} />
-        {(projects.data ?? []).map((project) => (
+      {hasProjects ? (
+        <Form.Dropdown
+          id="projectId"
+          title="Project"
+          value={projectId}
+          onChange={(value) => {
+            setProjectId(value);
+            setTaskId(NONE);
+          }}
+        >
           <Form.Dropdown.Item
-            key={project.id}
-            value={project.id}
-            title={
-              project.clientName
-                ? `${project.name} — ${project.clientName}`
-                : project.name
-            }
-            icon={{ source: Icon.CircleFilled, tintColor: project.color }}
+            value={NONE}
+            title="No project"
+            icon={Icon.Circle}
           />
-        ))}
-      </Form.Dropdown>
-      <Form.Dropdown id="taskId" title="Task" value={taskId} onChange={setTaskId}>
-        <Form.Dropdown.Item value={NONE} title="No task" icon={Icon.Circle} />
-        {(tasks.data ?? []).map((task) => (
-          <Form.Dropdown.Item key={task.id} value={task.id} title={task.name} />
-        ))}
-      </Form.Dropdown>
+          {(projects.data ?? []).map((project) => (
+            <Form.Dropdown.Item
+              key={project.id}
+              value={project.id}
+              title={
+                project.clientName
+                  ? `${project.name} — ${project.clientName}`
+                  : project.name
+              }
+              icon={{ source: Icon.CircleFilled, tintColor: project.color }}
+            />
+          ))}
+        </Form.Dropdown>
+      ) : null}
+      {hasTasks ? (
+        <Form.Dropdown
+          id="taskId"
+          title="Task"
+          value={taskId}
+          onChange={setTaskId}
+        >
+          <Form.Dropdown.Item value={NONE} title="No task" icon={Icon.Circle} />
+          {(tasks.data ?? []).map((task) => (
+            <Form.Dropdown.Item
+              key={task.id}
+              value={task.id}
+              title={task.name}
+            />
+          ))}
+        </Form.Dropdown>
+      ) : null}
       <Form.Checkbox
         id="billable"
         label="Billable"

@@ -3,7 +3,6 @@ import {
   ActionPanel,
   Form,
   Icon,
-  LaunchProps,
   Toast,
   popToRoot,
   showToast,
@@ -20,17 +19,18 @@ const NONE = "";
 
 type FormValues = {
   description: string;
-  projectId: string;
-  taskId: string;
+  /** Undefined when the dropdown was not rendered — no projects to pick. */
+  projectId?: string;
+  taskId?: string;
   billable: boolean;
 };
 
-export default function StartTimer(
-  props: LaunchProps<{ arguments: Arguments.StartTimer }>,
-): React.JSX.Element {
-  const [description, setDescription] = useState(
-    props.arguments?.description ?? "",
-  );
+/** `""` and "field absent" both mean "unassigned" by the time this ships. */
+const orNull = (value: string | undefined): string | null =>
+  value && value !== NONE ? value : null;
+
+export default function StartTimer(): React.JSX.Element {
+  const [description, setDescription] = useState("");
   const [projectId, setProjectId] = useState<string>(NONE);
   const [billable, setBillable] = useState(false);
   const [taskId, setTaskId] = useState<string>(NONE);
@@ -53,14 +53,20 @@ export default function StartTimer(
 
   if (projects.signedOut) return <SignedOutView />;
 
+  // A dropdown holding only its own "none" row is a dead control: it looks
+  // interactive, opens onto nothing, and teaches the user not to trust it.
+  // Both of these render only once they have something to offer.
+  const hasProjects = (projects.data ?? []).length > 0;
+  const hasTasks = projectId !== NONE && (tasks.data ?? []).length > 0;
+
   const submit = async (values: FormValues): Promise<void> => {
     setSubmitting(true);
     try {
       const api = await getTracktime();
       const entry = await api.start({
         description: values.description.trim(),
-        projectId: values.projectId === NONE ? null : values.projectId,
-        taskId: values.taskId === NONE ? null : values.taskId,
+        projectId: orNull(values.projectId),
+        taskId: orNull(values.taskId),
         billable: values.billable,
       });
       await refreshMenuBar();
@@ -102,61 +108,70 @@ export default function StartTimer(
         value={description}
         onChange={setDescription}
       />
-      <Form.Dropdown
-        id="projectId"
-        title="Project"
-        value={projectId}
-        onChange={(value) => {
-          setProjectId(value);
-          setTaskId(NONE);
-        }}
-      >
-        <Form.Dropdown.Item value={NONE} title="No project" icon={Icon.Circle} />
-        {(projects.data ?? []).map((project) => (
+      {hasProjects ? (
+        <Form.Dropdown
+          id="projectId"
+          title="Project"
+          value={projectId}
+          onChange={(value) => {
+            setProjectId(value);
+            setTaskId(NONE);
+          }}
+        >
           <Form.Dropdown.Item
-            key={project.id}
-            value={project.id}
-            title={
-              project.clientName
-                ? `${project.name} — ${project.clientName}`
-                : project.name
-            }
-            icon={{ source: Icon.CircleFilled, tintColor: project.color }}
+            value={NONE}
+            title="No project"
+            icon={Icon.Circle}
           />
-        ))}
-      </Form.Dropdown>
-      <Form.Dropdown
-        id="taskId"
-        title="Task"
-        value={taskId}
-        onChange={setTaskId}
-        info={
-          projectId === NONE
-            ? "Pick a project first — tasks belong to a project."
-            : undefined
-        }
-      >
-        <Form.Dropdown.Item value={NONE} title="No task" icon={Icon.Circle} />
-        {(tasks.data ?? []).map((task) => (
-          <Form.Dropdown.Item
-            key={task.id}
-            value={task.id}
-            title={
-              task.totalSec > 0
-                ? `${task.name} (${formatDurationShort(task.totalSec)})`
-                : task.name
-            }
-            icon={task.done ? Icon.CheckCircle : Icon.Circle}
-          />
-        ))}
-      </Form.Dropdown>
+          {(projects.data ?? []).map((project) => (
+            <Form.Dropdown.Item
+              key={project.id}
+              value={project.id}
+              title={
+                project.clientName
+                  ? `${project.name} — ${project.clientName}`
+                  : project.name
+              }
+              icon={{ source: Icon.CircleFilled, tintColor: project.color }}
+            />
+          ))}
+        </Form.Dropdown>
+      ) : null}
+      {hasTasks ? (
+        <Form.Dropdown
+          id="taskId"
+          title="Task"
+          value={taskId}
+          onChange={setTaskId}
+        >
+          <Form.Dropdown.Item value={NONE} title="No task" icon={Icon.Circle} />
+          {(tasks.data ?? []).map((task) => (
+            <Form.Dropdown.Item
+              key={task.id}
+              value={task.id}
+              title={
+                task.totalSec > 0
+                  ? `${task.name} (${formatDurationShort(task.totalSec)})`
+                  : task.name
+              }
+              icon={task.done ? Icon.CheckCircle : Icon.Circle}
+            />
+          ))}
+        </Form.Dropdown>
+      ) : null}
       <Form.Checkbox
         id="billable"
         label="Billable"
         value={billable}
         onChange={setBillable}
       />
-      <Form.Description text="Starting a timer stops whatever is already running — tracktime keeps one timer at a time." />
+      <Form.Description
+        text={
+          hasProjects
+            ? "Starting a timer stops whatever is already running — tracktime keeps one timer at a time."
+            : "No projects yet — this timer will be unassigned. Create projects in the web app to file time against them."
+        }
+      />
     </Form>
   );
 }

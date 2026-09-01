@@ -48,15 +48,7 @@
       "title": "Start Timer",
       "subtitle": "tracktime",
       "description": "Start a new timer, optionally on a project and task.",
-      "mode": "view",
-      "arguments": [
-        {
-          "name": "description",
-          "placeholder": "What are you working on?",
-          "type": "text",
-          "required": false
-        }
-      ]
+      "mode": "view"
     },
     {
       "name": "stop-timer",

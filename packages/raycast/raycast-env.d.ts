@@ -41,10 +41,7 @@ declare namespace Arguments {
   /** Arguments passed to the `menu-bar` command */
   export type MenuBar = {}
   /** Arguments passed to the `start-timer` command */
-  export type StartTimer = {
-  /** What are you working on? */
-  "description": string
-}
+  export type StartTimer = {}
   /** Arguments passed to the `stop-timer` command */
   export type StopTimer = {}
   /** Arguments passed to the `toggle-timer` command */
