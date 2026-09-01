@@ -79,6 +79,26 @@ cost of that; do not move the token to `chrome.storage.local`.
 The session appears in Settings → Devices as `tracktime-extension` and can be
 revoked from there, which kills both the HTTP and the WebSocket path.
 
+## Icons
+
+The four PNGs in `public/icons/` are generated, not hand-drawn — regenerate
+them from the repo root after any change to the brand mark:
+
+```bash
+pnpm icons:extension
+```
+
+The source is `packages/client/public/brand/mark-tile.svg`. Chrome takes PNG
+only in `icons` and `action.default_icon`, and a service worker cannot
+rasterize an SVG itself, so the bitmaps have to be committed — the script is
+what keeps them derived from the SVG rather than drifting.
+
+The tile variant is deliberate. The bare timer arc draws its track ring in a
+page-background neutral that vanishes against the browser toolbar, whereas the
+tile brings its own indigo ground and reads on light and dark chrome alike. At
+16px the arc gap closes up and the mark reads as a ring — that is the honest
+limit of the shape at that size, not a rendering fault.
+
 ## Before shipping
 
 `host_permissions` currently includes `https://*/*`, which is far broader than

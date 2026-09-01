@@ -6,7 +6,13 @@
   "minimum_chrome_version": "116",
   "action": {
     "default_popup": "src/popup/index.html",
-    "default_title": "tracktime"
+    "default_title": "tracktime",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
   },
   "background": {
     "service_worker": "background.js",

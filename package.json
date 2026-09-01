@@ -20,6 +20,7 @@
     "dev:extension": "pnpm --filter @starter/extension run dev",
     "build:extension": "pnpm --filter @starter/shared run build && pnpm --filter @starter/core run build && pnpm --filter @starter/extension run build",
     "extension:id": "node scripts/extension-id.mjs",
+    "icons:extension": "node scripts/icons-extension.mjs",
     "test": "pnpm run test:unit && pnpm run test:client && pnpm run test:e2e",
     "test:unit": "pnpm --filter @starter/server run test",
     "test:client": "pnpm --filter @starter/client run test",
@@ -74,6 +75,7 @@
     "electron-builder": "^26.8.1",
     "icon-gen": "^5.0.0",
     "mongodb": "^7.2.0",
+    "sharp": "^0.34.5",
     "tsx": "^4.22.0",
     "typescript": "^6.0.3",
     "wait-on": "^9.0.10"
