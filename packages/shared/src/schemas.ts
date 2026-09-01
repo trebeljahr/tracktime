@@ -196,6 +196,12 @@ export const reportFiltersSchema = z.object({
   taskIds: z.array(idString).optional(),
   billable: z.boolean().optional(),
   search: z.string().max(200).optional(),
+  /**
+   * IANA zone the caller wants days bucketed in, e.g. "Europe/Berlin".
+   * Without it the server would answer with its own zone — usually UTC on a
+   * deployment — and file after-midnight work under the previous day.
+   */
+  timeZone: z.string().max(64).optional(),
 });
 
 export const summaryReportSchema = reportFiltersSchema.extend({

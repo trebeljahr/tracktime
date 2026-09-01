@@ -2,7 +2,11 @@
 
 import * as React from "react";
 import { Copy, Ellipsis, Euro, Pencil, Play, Square, Trash2 } from "lucide-react";
-import type { DetailedEntry } from "@starter/shared";
+import {
+  rollEndAfterStart,
+  spansLocalDayBoundary,
+  type DetailedEntry,
+} from "@starter/shared";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -94,10 +98,10 @@ export function EntryRow({
 
   const handleEndCommit = React.useCallback(
     (iso: string): void => {
-      const end =
-        Date.parse(iso) <= Date.parse(entry.start)
-          ? new Date(Date.parse(entry.start) + MINUTE_MS).toISOString()
-          : iso;
+      // An end at or before the start means the timer ran past midnight —
+      // "23:30 to 00:30" is an hour, not a minute. Roll it to the next day
+      // rather than clamping, which used to silently destroy the entry.
+      const end = rollEndAfterStart(entry.start, iso);
       mutations.updateEntry({ id: entry.id, end });
     },
     [entry.id, entry.start, mutations]
@@ -231,6 +235,17 @@ export function EntryRow({
             onCommit={handleEndCommit}
           />
         )}
+        {/* Without this an entry reads "23:30 – 00:30" and looks like it ran
+            backwards, with nothing to say the end is on the next day. */}
+        {spansLocalDayBoundary(entry.start, entry.end) ? (
+          <span
+            className="ml-1 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground"
+            title="Ends on the next day"
+            data-testid="entry-next-day"
+          >
+            +1d
+          </span>
+        ) : null}
       </div>
 
       {running ? (

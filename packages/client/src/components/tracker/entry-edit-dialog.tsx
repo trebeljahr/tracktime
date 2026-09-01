@@ -1,7 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { toLocalDateKey, type DetailedEntry } from "@starter/shared";
+import {
+  rollEndAfterStart,
+  toLocalDateKey,
+  type DetailedEntry,
+} from "@starter/shared";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -86,10 +90,9 @@ export function EntryEditDialog({
 
   const save = React.useCallback((): void => {
     if (entry === null) return;
-    const safeEnd =
-      Date.parse(end) > Date.parse(start)
-        ? end
-        : new Date(Date.parse(start) + MINUTE_MS).toISOString();
+    // Roll a midnight-crossing end forward rather than clamping it: an entry
+    // from 23:30 to 00:30 is an hour of work, and clamping threw that away.
+    const safeEnd = rollEndAfterStart(start, end);
 
     mutations.updateEntry({
       id: entry.id,
@@ -150,20 +153,40 @@ export function EntryEditDialog({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="entry-edit-date">Date</Label>
-            <Input
-              id="entry-edit-date"
-              type="date"
-              value={toLocalDateKey(new Date(start))}
-              onChange={(event) => {
-                const nextStart = withDate(start, event.target.value);
-                const delta = Date.parse(nextStart) - Date.parse(start);
-                setStart(nextStart);
-                setEnd(new Date(Date.parse(end) + delta).toISOString());
-              }}
-              data-testid="entry-edit-date"
-            />
+          <div className="flex flex-wrap gap-3">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="entry-edit-date">Start date</Label>
+              <Input
+                id="entry-edit-date"
+                type="date"
+                value={toLocalDateKey(new Date(start))}
+                onChange={(event) => {
+                  // Moving the start date carries the end with it, so the
+                  // entry keeps its length instead of silently stretching.
+                  const nextStart = withDate(start, event.target.value);
+                  const delta = Date.parse(nextStart) - Date.parse(start);
+                  setStart(nextStart);
+                  setEnd(new Date(Date.parse(end) + delta).toISOString());
+                }}
+                data-testid="entry-edit-date"
+              />
+            </div>
+
+            {/* An entry that ran past midnight ends on a different day, and
+                there was no way to see or set that. */}
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="entry-edit-end-date">End date</Label>
+              <Input
+                id="entry-edit-end-date"
+                type="date"
+                value={toLocalDateKey(new Date(end))}
+                min={toLocalDateKey(new Date(start))}
+                onChange={(event) =>
+                  setEnd(withDate(end, event.target.value))
+                }
+                data-testid="entry-edit-end-date"
+              />
+            </div>
           </div>
 
           <div className="flex flex-wrap items-end gap-3">

@@ -13,6 +13,8 @@ import {
   splitEntryByDay,
   toLocalDateKey,
   type DurationEntry,
+  rollEndAfterStart,
+  spansLocalDayBoundary,
 } from "@starter/shared/duration";
 
 const HOUR = 3600;
@@ -274,4 +276,56 @@ test("parseTimeOfDay rejects impossible clock times", () => {
   assert.equal(parseTimeOfDay("13pm", "2026-08-21"), null);
   assert.equal(parseTimeOfDay("noon", "2026-08-21"), null);
   assert.equal(parseTimeOfDay("9:15", "not-a-day"), null);
+});
+
+// ── rollEndAfterStart / spansLocalDayBoundary ────────────────────────
+
+test("rollEndAfterStart leaves an end that is already after the start", () => {
+  const start = "2026-08-21T09:00:00.000Z";
+  const end = "2026-08-21T10:00:00.000Z";
+  assert.equal(rollEndAfterStart(start, end), end);
+});
+
+test("rollEndAfterStart rolls a midnight-crossing end onto the next day", () => {
+  // 23:30 → 00:30 is an hour of work. It used to be clamped to one minute.
+  const start = "2026-08-21T23:30:00.000Z";
+  const typed = "2026-08-21T00:30:00.000Z";
+  const rolled = rollEndAfterStart(start, typed);
+
+  assert.equal(rolled, "2026-08-22T00:30:00.000Z");
+  assert.equal((Date.parse(rolled) - Date.parse(start)) / 1000, 3600);
+});
+
+test("rollEndAfterStart rolls an end equal to the start", () => {
+  const start = "2026-08-21T09:00:00.000Z";
+  assert.equal(rollEndAfterStart(start, start), "2026-08-22T09:00:00.000Z");
+});
+
+test("rollEndAfterStart gives up rather than inventing a multi-day entry", () => {
+  // Two days earlier cannot be reached within the one-day allowance, so the
+  // input is returned untouched for the caller to reject.
+  const start = "2026-08-21T09:00:00.000Z";
+  const end = "2026-08-19T09:00:00.000Z";
+  assert.equal(rollEndAfterStart(start, end), end);
+});
+
+test("rollEndAfterStart passes through unparseable input", () => {
+  assert.equal(rollEndAfterStart("nonsense", "also nonsense"), "also nonsense");
+});
+
+test("spansLocalDayBoundary detects an entry that ends on another day", () => {
+  const sameDay = new Date(2026, 7, 21, 9, 0);
+  const laterSameDay = new Date(2026, 7, 21, 17, 0);
+  const nextDay = new Date(2026, 7, 22, 0, 30);
+
+  assert.equal(
+    spansLocalDayBoundary(sameDay.toISOString(), laterSameDay.toISOString()),
+    false,
+  );
+  assert.equal(
+    spansLocalDayBoundary(sameDay.toISOString(), nextDay.toISOString()),
+    true,
+  );
+  // A running entry has no end and therefore spans nothing yet.
+  assert.equal(spansLocalDayBoundary(sameDay.toISOString(), null), false);
 });

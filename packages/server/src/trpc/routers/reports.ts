@@ -24,10 +24,17 @@ import {
   entryDurationSec,
   exportCsvSchema,
   formatDuration,
-  splitEntryByDay,
   summaryReportSchema,
   sumAmounts,
-  toLocalDateKey,
+  addDaysToKey,
+  dayKeyInZone,
+  dayKeysBetween,
+  monthKeyOf,
+  resolveTimeZone,
+  splitIntervalByZonedDay,
+  weekStartKey,
+  zonedDayStartMs,
+  type DayKey,
   weeklyReportSchema,
   type CsvExportResult,
   type DetailedEntry,
@@ -123,32 +130,29 @@ const parseRange = (filters: ReportFilters): Range => {
   return { from, to, fromMs: from.getTime(), toMs: to.getTime() };
 };
 
-/** Local midnight of the day containing `ms`. */
-const startOfLocalDay = (ms: number): Date => {
-  const date = new Date(ms);
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-};
+/**
+ * How this report reads the calendar.
+ *
+ * Days, weeks and months are resolved in the CALLER's zone. Using the host's
+ * own local time meant the server's zone — UTC on a deployment — so a user
+ * tracking after midnight had that time filed under the previous day in every
+ * report, while the tracker list (grouped in the browser) filed it under the
+ * right one.
+ */
+type Calendar = { timeZone: string; weekStartsOn: WeekStart };
 
-/** Local midnight of the week containing `ms`, honouring `weekStartsOn`. */
-const startOfLocalWeek = (ms: number, weekStartsOn: WeekStart): Date => {
-  const day = startOfLocalDay(ms);
-  const shift = (day.getDay() - weekStartsOn + DAYS_PER_WEEK) % DAYS_PER_WEEK;
-  return new Date(day.getFullYear(), day.getMonth(), day.getDate() - shift);
-};
-
-/** Every local day key in `[fromMs, toMs)`, inclusive of the last partial day. */
-const localDayKeysInRange = (fromMs: number, toMs: number): string[] => {
-  const keys: string[] = [];
-  const cursor = startOfLocalDay(fromMs);
+/** Every day key in `[fromMs, toMs)`, inclusive of the last partial day. */
+const dayKeysInRange = (
+  fromMs: number,
+  toMs: number,
+  timeZone: string,
+): DayKey[] =>
   // `to` is exclusive: a range ending exactly at midnight must not add a day.
-  const lastMs = startOfLocalDay(toMs - 1).getTime();
+  dayKeysBetween(
+    dayKeyInZone(fromMs, timeZone),
+    dayKeyInZone(toMs - 1, timeZone),
+  );
 
-  while (cursor.getTime() <= lastMs && keys.length < MAX_TIMELINE_DAYS) {
-    keys.push(toLocalDateKey(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return keys;
-};
 
 // ── filter → aggregation stages ──────────────────────────────────────
 
@@ -331,7 +335,8 @@ type MeasuredEntry = {
   /** Local-day slices whose seconds sum to exactly `seconds`. */
   slices: { date: string; seconds: number }[];
   /** Local day the entry *started* on — the bucket for day/week/month groups. */
-  startDayMs: number;
+  /** Calendar day the entry starts on, in the caller's zone. */
+  dayKey: DayKey;
 };
 
 /**
@@ -347,7 +352,7 @@ const measureEntry = (
   doc: JoinedEntry,
   range: Range,
   nowMs: number,
-  weekStartsOn: WeekStart,
+  calendar: Calendar,
 ): MeasuredEntry | null => {
   const startMs = doc.start.getTime();
   const rawEndMs = doc.end === null ? nowMs : doc.end.getTime();
@@ -367,15 +372,7 @@ const measureEntry = (
     : Math.max(0, Math.round((clipEnd - clipStart) / 1000));
   if (seconds <= 0) return null;
 
-  const slices = splitEntryByDay(
-    {
-      start: new Date(clipStart).toISOString(),
-      end: new Date(clipEnd).toISOString(),
-      durationSec: seconds,
-    },
-    weekStartsOn,
-    nowMs,
-  );
+  const slices = splitIntervalByZonedDay(clipStart, clipEnd, calendar.timeZone);
 
   // Absorb any rounding drift into the final slice so the day series and the
   // entry total can never diverge.
@@ -391,7 +388,7 @@ const measureEntry = (
     billableSec: doc.billable ? seconds : 0,
     amount: entryAmount(seconds, doc.billable ? doc.hourlyRate : null),
     slices,
-    startDayMs: startOfLocalDay(clipStart).getTime(),
+    dayKey: dayKeyInZone(clipStart, calendar.timeZone),
   };
 };
 
@@ -409,7 +406,7 @@ const groupIdentity = (
   measured: MeasuredEntry,
   groupBy: ReportGroupBy,
   ownerId: string,
-  weekStartsOn: WeekStart,
+  calendar: Calendar,
 ): GroupIdentity => {
   const { doc } = measured;
   const project = ownedBy(doc.project, ownerId);
@@ -437,28 +434,23 @@ const groupIdentity = (
         : { key: "none", label: "No task", color: null };
 
     case "day": {
-      const key = toLocalDateKey(new Date(measured.startDayMs));
+      const key = measured.dayKey;
       return { key, label: key, color: null };
     }
 
     case "week": {
-      const weekStart = startOfLocalWeek(measured.startDayMs, weekStartsOn);
-      const weekEnd = new Date(
-        weekStart.getFullYear(),
-        weekStart.getMonth(),
-        weekStart.getDate() + DAYS_PER_WEEK - 1,
-      );
-      const key = toLocalDateKey(weekStart);
-      return { key, label: `${key} – ${toLocalDateKey(weekEnd)}`, color: null };
+      const key = weekStartKey(measured.dayKey, calendar.weekStartsOn);
+      const weekEnd = addDaysToKey(key, DAYS_PER_WEEK - 1);
+      return { key, label: `${key} – ${weekEnd}`, color: null };
     }
 
     case "month": {
-      const day = new Date(measured.startDayMs);
-      const month = day.getMonth();
-      const key = `${day.getFullYear()}-${String(month + 1).padStart(2, "0")}`;
+      const key = monthKeyOf(measured.dayKey);
+      const month = Number(key.slice(5, 7)) - 1;
+      const year = key.slice(0, 4);
       return {
         key,
-        label: `${MONTH_NAMES[month] ?? key} ${day.getFullYear()}`,
+        label: `${MONTH_NAMES[month] ?? key} ${year}`,
         color: null,
       };
     }
@@ -473,13 +465,13 @@ type GroupAccumulator = GroupIdentity & {
 
 // ── report bodies (shared by the queries and by exportCsv) ───────────
 
-const emptySummary = (currency: string, range: Range): SummaryReportResult => ({
+const emptySummary = (currency: string, range: Range, timeZone: string): SummaryReportResult => ({
   totalSec: 0,
   billableSec: 0,
   totalAmount: 0,
   currency,
   groups: [],
-  timeline: localDayKeysInRange(range.fromMs, range.toMs).map((date) => ({
+  timeline: dayKeysInRange(range.fromMs, range.toMs, timeZone).map((date) => ({
     date,
     seconds: 0,
     billableSec: 0,
@@ -494,14 +486,19 @@ const buildSummary = async (
   const settings = await getOrCreateSettings(ownerId);
   const range = parseRange(filters);
   const nowMs = Date.now();
+  const calendar: Calendar = {
+    timeZone: resolveTimeZone(filters.timeZone),
+    weekStartsOn: settings.weekStartsOn,
+  };
 
   const conditions = await buildMatchConditions(ownerId, filters, range);
-  if (conditions === null) return emptySummary(settings.currency, range);
+  if (conditions === null)
+    return emptySummary(settings.currency, range, calendar.timeZone);
 
   const docs = await runJoinedQuery(ownerId, conditions);
 
   const timeline = new Map<string, SummaryTimelinePoint>();
-  for (const date of localDayKeysInRange(range.fromMs, range.toMs)) {
+  for (const date of dayKeysInRange(range.fromMs, range.toMs, calendar.timeZone)) {
     timeline.set(date, { date, seconds: 0, billableSec: 0 });
   }
 
@@ -511,19 +508,14 @@ const buildSummary = async (
   const amounts: number[] = [];
 
   for (const doc of docs) {
-    const measured = measureEntry(doc, range, nowMs, settings.weekStartsOn);
+    const measured = measureEntry(doc, range, nowMs, calendar);
     if (!measured) continue;
 
     totalSec += measured.seconds;
     billableSec += measured.billableSec;
     if (measured.amount !== 0) amounts.push(measured.amount);
 
-    const identity = groupIdentity(
-      measured,
-      groupBy,
-      ownerId,
-      settings.weekStartsOn,
-    );
+    const identity = groupIdentity(measured, groupBy, ownerId, calendar);
     const group = groups.get(identity.key) ?? {
       ...identity,
       seconds: 0,
@@ -675,7 +667,12 @@ const buildDetailed = async (
 
   const window = docs.slice(0, limit);
   const entries = window
-    .map((doc) => measureEntry(doc, range, nowMs, settings.weekStartsOn))
+    .map((doc) =>
+      measureEntry(doc, range, nowMs, {
+        timeZone: resolveTimeZone(filters.timeZone),
+        weekStartsOn: settings.weekStartsOn,
+      }),
+    )
     .filter((measured): measured is MeasuredEntry => measured !== null)
     .map((measured) => toDetailedEntry(measured, ownerId));
 
@@ -701,35 +698,36 @@ const buildWeekly = async (
 ): Promise<WeeklyReportResult> => {
   const settings = await getOrCreateSettings(ownerId);
   const nowMs = Date.now();
+  const calendar: Calendar = {
+    timeZone: resolveTimeZone(filters.timeZone),
+    weekStartsOn: settings.weekStartsOn,
+  };
 
   // The week window is authoritative for the date range; `from`/`to` on the
   // filters only bound which week the caller may ask for. The grid must always
   // be exactly seven days wide starting at `weekStart`.
-  const weekFrom = startOfLocalDay(parseRangeBound(weekStart, false).getTime());
-  const weekTo = new Date(
-    weekFrom.getFullYear(),
-    weekFrom.getMonth(),
-    weekFrom.getDate() + DAYS_PER_WEEK,
+  const firstKey = dayKeyInZone(
+    parseRangeBound(weekStart, false).getTime(),
+    calendar.timeZone,
+  );
+  const days: DayKey[] = [];
+  for (let index = 0; index < DAYS_PER_WEEK; index += 1) {
+    days.push(addDaysToKey(firstKey, index));
+  }
+
+  // The grid's window is the seven zoned days themselves, so a week is exactly
+  // the time between local midnights — 167 or 169 hours across a DST shift.
+  const fromMs = zonedDayStartMs(firstKey, calendar.timeZone);
+  const toMs = zonedDayStartMs(
+    addDaysToKey(firstKey, DAYS_PER_WEEK),
+    calendar.timeZone,
   );
   const range: Range = {
-    from: weekFrom,
-    to: weekTo,
-    fromMs: weekFrom.getTime(),
-    toMs: weekTo.getTime(),
+    from: new Date(fromMs),
+    to: new Date(toMs),
+    fromMs,
+    toMs,
   };
-
-  const days: string[] = [];
-  for (let index = 0; index < DAYS_PER_WEEK; index += 1) {
-    days.push(
-      toLocalDateKey(
-        new Date(
-          weekFrom.getFullYear(),
-          weekFrom.getMonth(),
-          weekFrom.getDate() + index,
-        ),
-      ),
-    );
-  }
   const dayIndex = new Map(days.map((day, index) => [day, index]));
   const dayTotals = days.map(() => 0);
 
@@ -744,7 +742,7 @@ const buildWeekly = async (
   let totalSec = 0;
 
   for (const doc of docs) {
-    const measured = measureEntry(doc, range, nowMs, settings.weekStartsOn);
+    const measured = measureEntry(doc, range, nowMs, calendar);
     if (!measured) continue;
 
     const project = ownedBy(doc.project, ownerId);
@@ -830,12 +828,15 @@ const DETAILED_COLUMNS: CsvColumn[] = [
   { key: "id", header: "Id" },
 ];
 
-const detailedCsvRows = (result: DetailedReportResult): CsvRow[] => {
+const detailedCsvRows = (
+  result: DetailedReportResult,
+  timeZone: string,
+): CsvRow[] => {
   const nowMs = Date.now();
   return result.entries.map((entry) => {
     const seconds = entryDurationSec(entry, nowMs);
     return {
-      date: toLocalDateKey(new Date(entry.start)),
+      date: dayKeyInZone(Date.parse(entry.start), timeZone),
       start: entry.start,
       end: entry.end,
       duration: formatDuration(seconds, "hms"),
@@ -874,11 +875,15 @@ const weeklyCsvRows = (result: WeeklyReportResult): CsvRow[] =>
   });
 
 /** The CSV filename carries the range so a folder of exports stays readable. */
-const exportFilename = (report: string, range: Range): string =>
+const exportFilename = (
+  report: string,
+  range: Range,
+  timeZone: string,
+): string =>
   csvFilename(
     report,
-    toLocalDateKey(startOfLocalDay(range.fromMs)),
-    toLocalDateKey(startOfLocalDay(range.toMs - 1)),
+    dayKeyInZone(range.fromMs, timeZone),
+    dayKeyInZone(range.toMs - 1, timeZone),
   );
 
 type CsvExport = CsvExportResult & { mimeType: "text/csv" };
@@ -916,6 +921,7 @@ export const reportsRouter = router({
     .query(async ({ ctx, input }): Promise<CsvExport> => {
       const ownerId = ctx.user.id;
       const range = parseRange(input);
+      const exportZone = resolveTimeZone(input.timeZone);
 
       if (input.report === "summary") {
         const result = await buildSummary(
@@ -924,7 +930,7 @@ export const reportsRouter = router({
           input.groupBy ?? "project",
         );
         return {
-          filename: exportFilename("summary", range),
+          filename: exportFilename("summary", range, exportZone),
           csv: toCsv(summaryCsvRows(result), SUMMARY_COLUMNS),
           mimeType: "text/csv",
         };
@@ -932,11 +938,10 @@ export const reportsRouter = router({
 
       if (input.report === "weekly") {
         const weekStart =
-          input.weekStart ??
-          toLocalDateKey(startOfLocalDay(range.fromMs));
+          input.weekStart ?? dayKeyInZone(range.fromMs, exportZone);
         const result = await buildWeekly(ownerId, input, weekStart);
         return {
-          filename: exportFilename("weekly", range),
+          filename: exportFilename("weekly", range, exportZone),
           csv: toCsv(weeklyCsvRows(result), weeklyCsvColumns(result)),
           mimeType: "text/csv",
         };
@@ -963,14 +968,12 @@ export const reportsRouter = router({
       } while (cursor && guard < MAX_EXPORT_PAGES);
 
       return {
-        filename: exportFilename("detailed", range),
+        filename: exportFilename("detailed", range, exportZone),
         csv: toCsv(
-          detailedCsvRows({
-            entries,
-            totalSec: 0,
-            totalAmount: 0,
-            currency,
-          }),
+          detailedCsvRows(
+            { entries, totalSec: 0, totalAmount: 0, currency },
+            exportZone,
+          ),
           DETAILED_COLUMNS,
         ),
         mimeType: "text/csv",

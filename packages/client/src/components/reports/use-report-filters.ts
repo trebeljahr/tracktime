@@ -66,10 +66,33 @@ const parseBillable = (raw: string | null): BillableFilter =>
 const parseDateKey = (raw: string | null): string | null =>
   raw !== null && DATE_KEY.test(raw) ? raw : null;
 
-/** The server-side filter payload — empty selections are omitted entirely. */
+/**
+ * The device's IANA zone, e.g. "Europe/Berlin".
+ *
+ * Read once: it is stable for the session, and a value that changed identity
+ * between renders would churn every report's query key. Falls back to UTC where
+ * the runtime cannot say (and on the server during prerender).
+ */
+const DEVICE_TIME_ZONE: string = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+})();
+
+/**
+ * The server-side filter payload — empty selections are omitted entirely.
+ *
+ * `timeZone` travels with every report so days, weeks and months are bucketed
+ * in the zone the user is actually in. Without it the server answers in its own
+ * zone (UTC on a deployment) and files after-midnight work under the previous
+ * day, disagreeing with the tracker list.
+ */
 export const toReportFilters = (state: ReportFilterState): ReportFilters => ({
   from: state.range.from,
   to: state.range.to,
+  timeZone: DEVICE_TIME_ZONE,
   ...(state.projectIds.length > 0 ? { projectIds: state.projectIds } : {}),
   ...(state.clientIds.length > 0 ? { clientIds: state.clientIds } : {}),
   ...(state.taskIds.length > 0 ? { taskIds: state.taskIds } : {}),

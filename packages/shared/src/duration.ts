@@ -219,3 +219,43 @@ export const splitEntryByDay = (
 
   return buckets;
 };
+
+/**
+ * Resolve an end that landed on or before its start by rolling it forward a day.
+ *
+ * A timer running at 23:30 and stopped at 00:30 is an hour of work across
+ * midnight. Editing the end to "00:30" used to be clamped to start + 1 minute,
+ * silently destroying the entry — the one interpretation the user certainly did
+ * not mean. Rolling forward is the reading that matches what they typed.
+ *
+ * Only ever advances by whole days, and only far enough to clear the start, so
+ * an end already after the start is returned untouched.
+ */
+export const rollEndAfterStart = (
+  startIso: string,
+  endIso: string,
+  maxDays = 1
+): string => {
+  const startMs = Date.parse(startIso);
+  const endMs = Date.parse(endIso);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return endIso;
+  if (endMs > startMs) return endIso;
+
+  for (let days = 1; days <= maxDays; days += 1) {
+    const rolled = endMs + days * MS_PER_DAY;
+    if (rolled > startMs) return new Date(rolled).toISOString();
+  }
+  return endIso;
+};
+
+/** True when the two instants fall on different local calendar days. */
+export const spansLocalDayBoundary = (
+  startIso: string,
+  endIso: string | null
+): boolean => {
+  if (endIso === null) return false;
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+  return toLocalDateKey(start) !== toLocalDateKey(end);
+};

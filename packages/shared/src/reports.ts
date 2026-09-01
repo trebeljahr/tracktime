@@ -11,6 +11,8 @@ export type ReportFilters = {
   taskIds?: string[];
   billable?: boolean;
   search?: string;
+  /** IANA zone days are bucketed in. Defaults to UTC when absent. */
+  timeZone?: string;
 };
 
 export type SummaryReportInput = ReportFilters & { groupBy: ReportGroupBy };
