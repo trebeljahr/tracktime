@@ -9,16 +9,27 @@
 import { resolveSyncUrl, type ClientId } from "@starter/core";
 import { chromeStorage, localStorageArea } from "./chrome-storage";
 
-/** `import.meta.env` is loosely typed by vite/client — narrow before trusting. */
-const buildTimeApiUrl = ((): string | null => {
+/**
+ * The origin this build targets, injected by vite.config.ts from the build
+ * mode — localhost for a development build, the deployed host for production.
+ *
+ * There is deliberately no localhost fallback. A fallback cannot tell which
+ * build it is standing in for, so a production build whose define went missing
+ * would quietly ship pointing at a laptop, and present as "the extension is
+ * broken" rather than as the build error it is. `import.meta.env` is loosely
+ * typed by vite/client, so the value is still narrowed before it is trusted.
+ */
+const buildTimeApiUrl = ((): string => {
   const configured: unknown = import.meta.env.VITE_API_URL;
-  return typeof configured === "string" && configured.trim() !== ""
-    ? configured.trim()
-    : null;
+  if (typeof configured !== "string" || configured.trim() === "") {
+    throw new Error(
+      "No API URL was baked into this build — see `define` in vite.config.ts.",
+    );
+  }
+  return configured.trim();
 })();
 
-export const DEFAULT_API_URL: string =
-  buildTimeApiUrl ?? "http://localhost:5159";
+export const DEFAULT_API_URL: string = buildTimeApiUrl;
 
 export const API_URL_STORAGE_KEY = "tracktime.api-url";
 

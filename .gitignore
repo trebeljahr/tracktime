@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+# The production extension bundle. `dist/` above does not match it.
+dist-prod/
 .next/
 # Per-instance Next build dirs (scripts/dev.mjs)
 .next-*/

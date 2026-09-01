@@ -242,6 +242,24 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
 - Server origin and web origin come from extension preferences, defaulting to
   the deployed hosts. Point **API URL** at the dev API port for local work.
 
+### Browser extension build modes
+
+`packages/extension` bakes its API URL in at build time, so a build is a
+target. Both are declared in `packages/extension/manifest.config.ts` — not in
+`.env.*`, which is gitignored and would yield a URL-less bundle silently.
+
+```bash
+pnpm run build:extension        # dist/      -> http://localhost:5159
+pnpm run build:extension:prod   # dist-prod/ -> https://tracktime.trebeljahr.com
+pnpm run extension:id [dev|prod]  # the chrome-extension:// origin to trust
+```
+
+Each target carries its own name and `host_permissions`, so both can be
+installed at once and a production build cannot be pointed at localhost. As
+unpacked extensions the two have different ids, and **each id's origin must be
+in that server's `TRUSTED_ORIGINS`**. Pin `EXTENSION_KEY` to fix the production
+id before the server needs to trust it.
+
 ### Static export caveats
 
 - `NEXT_PUBLIC_API_URL` is baked at build time — desktop/mobile binaries

@@ -5,6 +5,53 @@ popup that shows the running entry, starts and stops the timer, and reports
 today's total. There are no content scripts and nothing is injected into any
 page.
 
+## Build modes
+
+The API URL is baked in at build time, so a build **is** a target — there is no
+one bundle that works against both a laptop and the deployed server.
+
+```bash
+pnpm run build:extension        # development -> dist/,      http://localhost:5159
+pnpm run build:extension:prod   # production  -> dist-prod/, https://tracktime.trebeljahr.com
+```
+
+Both targets are described in `manifest.config.ts`, in TypeScript that ships in
+the repo rather than in `.env.development` / `.env.production` — those two
+filenames are commonly gitignored, which would make a fresh clone build an
+extension with no URL in it and no error to say so.
+
+Each target gets its own name (`tracktime` vs `tracktime (dev)`) and its own
+`host_permissions`, so the two can be installed side by side and neither asks
+for access to hosts it will never talk to. `VITE_API_URL=… pnpm --filter
+@starter/extension run build` still overrides the URL for a one-off build.
+
+The popup can repoint the API URL at runtime, but only within the host
+permissions its build declared: a production build cannot be aimed at
+localhost. That is deliberate — use the development build for that.
+
+### Production ids and TRUSTED_ORIGINS
+
+The two builds live in different directories, so as unpacked extensions they
+have **different ids** — and each id's origin has to be in the server's
+`TRUSTED_ORIGINS` or sign-in returns `403 INVALID_ORIGIN`:
+
+```bash
+pnpm run extension:id prod
+```
+
+An unpacked id follows the path it was loaded from, which is no use for a
+server that must trust the extension before anyone has installed it. Pin a key
+to fix the id instead:
+
+```bash
+openssl genrsa 2048 | openssl pkcs8 -topk8 -nocrypt -out tracktime-extension.pem
+openssl rsa -in tracktime-extension.pem -pubout -outform DER | base64 | tr -d '\n'
+```
+
+Pass that public half as `EXTENSION_KEY` when building; keep the `.pem` out of
+the repo. `pnpm run extension:id prod` then reports the pinned id, which stays
+the same wherever the build is loaded — including once it is uploaded.
+
 ## The server has to trust this extension's origin
 
 Sign-in answers `403 {"code":"INVALID_ORIGIN"}` until it does, before the

@@ -1,4 +1,5 @@
 import { useState, type FormEvent, type JSX } from "react";
+import { DEFAULT_API_URL } from "../lib/config";
 
 export type ApiUrlEditorProps = {
   apiUrl: string;
@@ -64,7 +65,9 @@ export function ApiUrlEditor({ apiUrl, onSave }: ApiUrlEditorProps): JSX.Element
           inputMode="url"
           autoComplete="off"
           spellCheck={false}
-          placeholder="http://localhost:5159"
+          // This build's own target, not a hardcoded localhost: a production
+          // popup suggesting a laptop address is worse than no hint at all.
+          placeholder={DEFAULT_API_URL}
           value={draft}
           onChange={(event) => {
             setDraft(event.target.value);

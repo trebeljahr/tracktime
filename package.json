@@ -19,6 +19,7 @@
     "dev:raycast": "pnpm --filter @starter/shared run build && pnpm --filter @starter/core run build && pnpm --filter tracktime-raycast run dev",
     "dev:extension": "pnpm --filter @starter/extension run dev",
     "build:extension": "pnpm --filter @starter/shared run build && pnpm --filter @starter/core run build && pnpm --filter @starter/extension run build",
+    "build:extension:prod": "pnpm --filter @starter/shared run build && pnpm --filter @starter/core run build && pnpm --filter @starter/extension run build:prod",
     "extension:id": "node scripts/extension-id.mjs",
     "icons:extension": "node scripts/icons-extension.mjs",
     "test": "pnpm run test:unit && pnpm run test:client && pnpm run test:e2e",
