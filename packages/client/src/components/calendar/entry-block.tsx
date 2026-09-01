@@ -82,8 +82,8 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
           draggable ? "cursor-grab" : "cursor-pointer",
           isDragging && "z-30 cursor-grabbing shadow-lg",
           isSelected && "ring-ring/60 z-20 ring-2",
-          continuesBefore && "rounded-t-none border-t-transparent",
-          continuesAfter && "rounded-b-none border-b-transparent",
+          continuesBefore && "rounded-t-none",
+          continuesAfter && "rounded-b-none",
           className
         )}
         style={{
@@ -92,8 +92,14 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
           left: `calc(${leftPct}% + 2px)`,
           width: `calc(${widthPct}% - 4px)`,
           background: palette.background,
-          borderColor: palette.border,
-          borderLeft: `3px solid ${palette.accent}`,
+          // Longhand only: mixing `borderColor` with the `borderLeft`
+          // shorthand makes React warn about conflicting style properties.
+          borderTopColor: continuesBefore ? "transparent" : palette.border,
+          borderRightColor: palette.border,
+          borderBottomColor: continuesAfter ? "transparent" : palette.border,
+          borderLeftColor: palette.accent,
+          borderLeftStyle: "solid",
+          borderLeftWidth: 3,
           touchAction: "none",
           ...style,
         }}
