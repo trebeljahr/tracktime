@@ -21,7 +21,7 @@ import {
   signOut,
   storeSession,
 } from "./lib/auth.js";
-import { apiUrl, webLink, webUrl } from "./lib/preferences.js";
+import { apiUrl, hostLabel, webLink, webUrl } from "./lib/preferences.js";
 import { describeFailure, refreshMenuBar } from "./lib/ui.js";
 
 /**
@@ -129,6 +129,9 @@ export default function SignIn(): React.JSX.Element {
           "",
           "Run **Timer** once to put the clock in the menu bar, and give",
           "**Toggle Timer** a hotkey in Raycast Settings → Extensions.",
+          "",
+          "This session appears as **Raycast** under Settings → Devices in the",
+          "web app — sign it out there to revoke it.",
         ].join("\n")}
         metadata={
           <Detail.Metadata>
@@ -137,13 +140,7 @@ export default function SignIn(): React.JSX.Element {
               text={phase.email ?? "Signed in"}
               icon={Icon.Person}
             />
-            <Detail.Metadata.Label title="Server" text={apiUrl()} />
-            <Detail.Metadata.Separator />
-            <Detail.Metadata.Label
-              title="Revoke"
-              text="Settings → Devices, in the web app"
-              icon={Icon.Lock}
-            />
+            <Detail.Metadata.Label title="Server" text={hostLabel(apiUrl())} />
           </Detail.Metadata>
         }
         actions={
@@ -206,9 +203,9 @@ export default function SignIn(): React.JSX.Element {
             <Detail.Metadata.Link
               title="Approval Page"
               target={approvalUrl}
-              text={verificationUri || webLink("/device")}
+              text={hostLabel(verificationUri || webLink("/device"))}
             />
-            <Detail.Metadata.Label title="Server" text={apiUrl()} />
+            <Detail.Metadata.Label title="Server" text={hostLabel(apiUrl())} />
           </Detail.Metadata>
         }
         actions={
@@ -229,20 +226,29 @@ export default function SignIn(): React.JSX.Element {
         "# Could not pair",
         "",
         phase.message,
+        "",
+        "---",
+        "",
+        "**Running locally?** `pnpm dev` prints one port for the API and one for",
+        "the client. Put the API port in **API URL** and the client port in",
+        "**Web App URL**, then try again.",
       ].join("\n")}
       metadata={
         <Detail.Metadata>
+          <Detail.Metadata.TagList title="Status">
+            <Detail.Metadata.TagList.Item
+              text="Unreachable"
+              color={Color.Red}
+            />
+          </Detail.Metadata.TagList>
           <Detail.Metadata.Label
             title="API URL"
-            text={apiUrl()}
+            text={hostLabel(apiUrl())}
             icon={Icon.Globe}
           />
-          <Detail.Metadata.Label title="Web App URL" text={webUrl()} />
-          <Detail.Metadata.Separator />
           <Detail.Metadata.Label
-            title="Running locally?"
-            text="Point API URL at the port `pnpm dev` prints"
-            icon={Icon.Terminal}
+            title="Web App URL"
+            text={hostLabel(webUrl())}
           />
         </Detail.Metadata>
       }

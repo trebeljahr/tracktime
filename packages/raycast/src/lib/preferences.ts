@@ -17,3 +17,12 @@ export const webUrl = (): string => {
 /** Deep link into a page of the web app, e.g. `webLink("/track")`. */
 export const webLink = (path: string): string =>
   `${webUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+
+/**
+ * Host without the scheme, for Raycast's metadata column.
+ *
+ * That column is narrow and renders plain text — a full URL truncates to
+ * "https://api.example…" and hides the part that matters.
+ */
+export const hostLabel = (url: string): string =>
+  url.replace(/^https?:\/\//, "") || url;
