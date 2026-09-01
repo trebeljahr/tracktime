@@ -6,6 +6,7 @@ import {
   createEntrySchema,
   createProjectSchema,
   entryListSchema,
+  entrySourceSchema,
   hexColorSchema,
   hourlyRateSchema,
   isoDateOrDateTimeSchema,
@@ -61,6 +62,21 @@ test("hourlyRateSchema takes a non-negative rate", () => {
   assert.ok(!accepts(hourlyRateSchema, -1));
   assert.ok(!accepts(hourlyRateSchema, 1_000_001));
   assert.ok(!accepts(hourlyRateSchema, "60"));
+});
+
+test("entrySourceSchema names every first-party client, extension included", () => {
+  // The extension used to have to claim "api" to get an entry accepted, which
+  // made its rows indistinguishable from third-party callers'. Order is part
+  // of the assertion so a drifting Mongoose enum shows up here first.
+  assert.deepEqual(entrySourceSchema.options, [
+    "web",
+    "desktop",
+    "mobile",
+    "extension",
+    "api",
+  ]);
+  assert.ok(accepts(entrySourceSchema, "extension"));
+  assert.ok(!accepts(entrySourceSchema, "watch"));
 });
 
 // ── timer ────────────────────────────────────────────────────────────

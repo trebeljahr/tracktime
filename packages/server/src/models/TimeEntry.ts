@@ -64,7 +64,9 @@ const timeEntrySchema = new Schema<ITimeEntry>(
     currency: { type: String, required: true, default: "EUR" },
     source: {
       type: String,
-      enum: ["web", "desktop", "mobile", "api"],
+      // Must stay in lockstep with EntrySource — Mongoose rejects the write
+      // silently-looking (a ValidationError deep in a mutation) if it drifts.
+      enum: ["web", "desktop", "mobile", "extension", "api"],
       required: true,
       default: "web",
     },

@@ -1,16 +1,17 @@
 /**
- * Tests for the pure parts of the client's offline plumbing: temp ids, the
- * decoder that narrows a stored row back into a typed mutation, and the
+ * Tests for the browser-bound half of the client's offline plumbing: the
+ * localStorage-backed queue wrapper, the reactive pending count, and the
  * network-vs-server error classification that decides whether an optimistic
- * update survives or rolls back.
+ * update survives or rolls back. The pure op contract it builds on is covered
+ * by core-offline-ops.test.ts.
+ *
+ * Everything is imported through "./offline", so these also pin the module's
+ * public surface after the contract moved into @starter/core.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { QueuedMutation } from "@starter/core";
 import {
   cancelQueuedForTemp,
   clearOfflineQueue,
-  createTempId,
-  decodeOfflineMutation,
   enqueueOffline,
   flushOfflineQueue,
   getOfflineQueue,
@@ -18,7 +19,6 @@ import {
   getServerPendingCount,
   isNetworkError,
   isOnline,
-  isTempId,
   refreshPendingCount,
   subscribePending,
   type OfflineMutation,
@@ -34,83 +34,6 @@ const startInput: OfflineStartInput = {
   source: "web",
   originId: "tab-1",
 };
-
-const row = (op: string, payload: unknown, id = "q1"): QueuedMutation => ({
-  id,
-  op,
-  payload,
-  createdAt: "2026-08-21T09:00:00.000Z",
-});
-
-describe("temp ids", () => {
-  it("marks ids invented client-side", () => {
-    const id = createTempId();
-    expect(isTempId(id)).toBe(true);
-    expect(id.startsWith("temp-")).toBe(true);
-  });
-
-  it("does not mistake a server id for a temp id", () => {
-    expect(isTempId("68a7c1f2e4b0a9d3c5f10123")).toBe(false);
-  });
-
-  it("mints a fresh id every time", () => {
-    expect(createTempId()).not.toBe(createTempId());
-  });
-});
-
-describe("decodeOfflineMutation", () => {
-  it("narrows a stored row back to its typed input", () => {
-    const decoded = decodeOfflineMutation(
-      row("entries.start", { input: startInput, tempId: "temp-1" })
-    );
-    expect(decoded).toEqual({
-      queueId: "q1",
-      tempId: "temp-1",
-      op: "entries.start",
-      input: startInput,
-    });
-  });
-
-  it("decodes every supported op", () => {
-    const ops = [
-      "entries.start",
-      "entries.stop",
-      "entries.create",
-      "entries.update",
-      "entries.remove",
-      "entries.discard",
-    ];
-    for (const op of ops) {
-      const decoded = decodeOfflineMutation(row(op, { input: { originId: "t" } }));
-      expect(decoded?.op).toBe(op);
-    }
-  });
-
-  it("leaves tempId undefined when the row carries none", () => {
-    const decoded = decodeOfflineMutation(row("entries.stop", { input: {} }));
-    expect(decoded?.tempId).toBeUndefined();
-  });
-
-  it("drops rows written by an older build", () => {
-    expect(decodeOfflineMutation(row("entries.pause", { input: {} }))).toBeNull();
-    expect(decodeOfflineMutation(row("projects.create", { input: {} }))).toBeNull();
-  });
-
-  it("drops rows whose payload is not a stored input envelope", () => {
-    expect(decodeOfflineMutation(row("entries.start", null))).toBeNull();
-    expect(decodeOfflineMutation(row("entries.start", "oops"))).toBeNull();
-    expect(decodeOfflineMutation(row("entries.start", {}))).toBeNull();
-    expect(decodeOfflineMutation(row("entries.start", { input: null }))).toBeNull();
-    expect(decodeOfflineMutation(row("entries.start", { input: 7 }))).toBeNull();
-  });
-
-  it("ignores a tempId of the wrong type", () => {
-    const decoded = decodeOfflineMutation(
-      row("entries.start", { input: startInput, tempId: 42 })
-    );
-    expect(decoded?.tempId).toBeUndefined();
-  });
-});
 
 describe("the client queue", () => {
   beforeEach(async () => {

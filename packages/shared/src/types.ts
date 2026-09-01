@@ -25,8 +25,17 @@ export type UserProfile = {
 // without a migration. All ids are stringified Mongo ObjectIds and every
 // timestamp crosses the wire as an ISO string — never a Date object.
 
-/** Where a time entry was created. */
-export type EntrySource = "web" | "desktop" | "mobile" | "api";
+/**
+ * Where a time entry was created. The browser extension is its own source
+ * rather than folding into "api", so an entry can be traced back to the thing
+ * that actually made it; "api" stays the catch-all for third-party callers.
+ */
+export type EntrySource =
+  | "web"
+  | "desktop"
+  | "mobile"
+  | "extension"
+  | "api";
 
 /** How durations are rendered ("1:23:45" vs "1.40 h"). */
 export type DurationFormat = "hms" | "decimal";

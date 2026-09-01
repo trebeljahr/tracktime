@@ -74,3 +74,11 @@ docs-site/build/
 # Misc
 *.log
 npm-debug.log*
+
+# The extension's toolbar icons. macOS-oriented global ignores commonly carry
+# an `Icon?` rule for the Finder's `Icon\r` artifact, and on a case-insensitive
+# match that also swallows `icons/` — silently shipping an extension with no
+# toolbar icon. Git will not descend into an ignored directory, so the
+# directory itself has to be un-ignored before its contents can be.
+!packages/extension/public/icons/
+!packages/extension/public/icons/**

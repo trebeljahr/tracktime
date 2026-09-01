@@ -5,6 +5,7 @@ import {
   createId,
   createSyncClient,
   createTimerStore,
+  resolveSyncUrl,
   startTicking,
   type SyncEvent,
   type SyncStatus,
@@ -49,25 +50,8 @@ export const useSyncStatus = (): SyncStatus =>
 
 // ── URL derivation ───────────────────────────────────────────────────
 
-/**
- * `wss://api.example.com/ws` from `https://api.example.com`. With no
- * `NEXT_PUBLIC_API_URL` the socket is same-origin, which is what the local
- * dev proxy and single-origin deployments want.
- */
-export const resolveSyncUrl = (apiUrl: string, origin: string): string => {
-  const base = apiUrl.trim() === "" ? origin : apiUrl.trim();
-  let url: URL;
-  try {
-    url = new URL(base);
-  } catch {
-    return "";
-  }
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/ws`;
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-};
+/** Lives in `@starter/core` so non-React clients derive the same socket URL. */
+export { resolveSyncUrl } from "@starter/core";
 
 // ── cache invalidation ───────────────────────────────────────────────
 

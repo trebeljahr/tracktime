@@ -28,7 +28,13 @@ export const isoDateOrDateTimeSchema = z.union([
 ]);
 
 export const hourlyRateSchema = z.number().min(0).max(1_000_000);
-export const entrySourceSchema = z.enum(["web", "desktop", "mobile", "api"]);
+export const entrySourceSchema = z.enum([
+  "web",
+  "desktop",
+  "mobile",
+  "extension",
+  "api",
+]);
 export const reportGroupBySchema = z.enum([
   "project",
   "client",

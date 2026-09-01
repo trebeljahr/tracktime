@@ -1,0 +1,310 @@
+/*
+ * Plain CSS on purpose.
+ *
+ * The web client's styling is Tailwind v4 wired through Next's postcss
+ * pipeline; pulling that into this package would mean new dependencies and a
+ * second build config for one 360px surface. A stylesheet is cheaper and the
+ * popup's whole visual vocabulary fits in one file.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #ffffff;
+  --surface: #f6f7f9;
+  --fg: #0f172a;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --accent: #4f46e5;
+  --accent-fg: #ffffff;
+  --danger: #b91c1c;
+  --danger-bg: #fef2f2;
+  --ok: #16a34a;
+  --warn: #d97706;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --fg: #e8eaed;
+    --muted: #99a1af;
+    --border: #2a2f3a;
+    --accent: #6366f1;
+    --accent-fg: #ffffff;
+    --danger: #fca5a5;
+    --danger-bg: #2a1414;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.popup {
+  /* Chrome sizes the popup to its content, so the width lives here rather
+     than in a viewport unit — and a max-height keeps a long project list
+     from growing the popup past the screen. */
+  width: 360px;
+  max-height: 560px;
+  display: flex;
+  flex-direction: column;
+}
+
+.popup__body {
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.popup__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.popup__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ── forms ───────────────────────────────────────────────────────── */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.input,
+.select {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.input:focus-visible,
+.select:focus-visible,
+.button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── buttons ─────────────────────────────────────────────────────── */
+
+.button {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.button--primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-fg);
+}
+
+.button--danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button--link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.button--block {
+  width: 100%;
+}
+
+/* ── messages ────────────────────────────────────────────────────── */
+
+/* Always mounted so screen readers have a live region to announce into;
+   an empty one must not leave a coloured box behind. */
+.notice:empty {
+  display: none;
+}
+
+.notice {
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.notice--ok {
+  background: var(--surface);
+  color: var(--muted);
+}
+
+/* ── tracker ─────────────────────────────────────────────────────── */
+
+.running {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.running__description {
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.running__description--empty {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.elapsed {
+  font-size: 30px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  letter-spacing: -0.01em;
+}
+
+.project {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.project__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.today {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.today__value {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+/* ── footer ──────────────────────────────────────────────────────── */
+
+.footer {
+  border-top: 1px solid var(--border);
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.footer__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.footer__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+
+.status__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.status__dot--open {
+  background: var(--ok);
+}
+
+.status__dot--connecting {
+  background: var(--warn);
+}
+
+.loading {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* The tracker is the only screen with a pinned footer, so it takes the
+   popup's height and lets its own body do the scrolling. */
+.tracker {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
