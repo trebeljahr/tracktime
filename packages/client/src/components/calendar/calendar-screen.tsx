@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   addDays,
   addMonths,
+  addYears,
   endOfMonth,
   endOfWeek,
   format as formatDate,
@@ -32,16 +33,21 @@ import {
 } from "./calendar-math";
 import { EntryCreateDialog, type CreateDraft } from "./entry-create-dialog";
 import { MonthView } from "./month-view";
-import { WeekView } from "./week-view";
+import { TimeGrid } from "./time-grid";
+import { YearView } from "./year-view";
 import {
   useCalendarActions,
   useCalendarEntries,
   type CalendarQueryInput,
 } from "./use-calendar-entries";
 
-type CalendarView = "week" | "month";
+const CALENDAR_VIEWS = ["day", "week", "month", "year"] as const;
+type CalendarView = (typeof CALENDAR_VIEWS)[number];
 
-/** Selectable day windows for the week grid. */
+const isCalendarView = (value: string | null): value is CalendarView =>
+  value !== null && CALENDAR_VIEWS.some((view) => view === value);
+
+/** Selectable day windows for the day and week grids. */
 const VISIBLE_RANGE_OPTIONS: {
   id: string;
   label: string;
@@ -72,13 +78,32 @@ const parseDateParam = (raw: string | null): Date => {
 /** Entries are fetched for whole days so blocks are never half-loaded. */
 const ENTRY_LIMIT = 500;
 
+/** Views that render the draggable time grid. */
+const GRID_VIEWS = new Set<CalendarView>(["day", "week"]);
+
+/** The single-key shortcuts, mirroring what every calendar app binds. */
+const VIEW_SHORTCUTS: Record<string, CalendarView> = {
+  d: "day",
+  w: "week",
+  m: "month",
+  y: "year",
+};
+
+/** True while the user is typing, when a bare letter must not navigate. */
+const isTypingTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+};
+
 export function CalendarScreen(): React.JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { weekStartsOn } = useFormatSettings();
 
-  const view: CalendarView =
-    searchParams.get("view") === "month" ? "month" : "week";
+  const viewParam = searchParams.get("view");
+  const view: CalendarView = isCalendarView(viewParam) ? viewParam : "week";
   const anchor = parseDateParam(searchParams.get("date"));
   const anchorMs = startOfDay(anchor).getTime();
 
@@ -93,10 +118,7 @@ export function CalendarScreen(): React.JSX.Element {
     (next: { view?: CalendarView; date?: Date }): void => {
       const params = new URLSearchParams();
       params.set("view", next.view ?? view);
-      params.set(
-        "date",
-        toDateKey(next.date ?? new Date(anchorMs))
-      );
+      params.set("date", toDateKey(next.date ?? new Date(anchorMs)));
       router.replace(`/calendar?${params.toString()}`, { scroll: false });
     },
     [anchorMs, router, view]
@@ -107,8 +129,18 @@ export function CalendarScreen(): React.JSX.Element {
     [anchorMs, weekStartsOn]
   );
 
-  // The fetch window covers whole weeks so month cells are complete too.
+  const gridDays = React.useMemo<Date[]>(() => {
+    if (view === "day") return [new Date(anchorMs)];
+    return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+  }, [anchorMs, view, weekStart]);
+
+  // The fetch window covers whole weeks so month cells are complete too. The
+  // year view never lands here: it reads aggregated report data instead.
   const fetchWindow = React.useMemo(() => {
+    if (view === "day") {
+      const day = new Date(anchorMs);
+      return { from: day, to: addDays(day, 1) };
+    }
     if (view === "week") {
       return { from: weekStart, to: addDays(weekStart, 7) };
     }
@@ -128,24 +160,75 @@ export function CalendarScreen(): React.JSX.Element {
     [fetchWindow]
   );
 
-  const { entries, isLoading } = useCalendarEntries(listInput);
+  const { entries, isLoading } = useCalendarEntries(listInput, view !== "year");
   const actions = useCalendarActions(listInput);
 
-  const title =
-    view === "week"
-      ? formatRangeLabel({
+  const title = React.useMemo<string>(() => {
+    const date = new Date(anchorMs);
+    switch (view) {
+      case "day":
+        return formatDate(date, "EEEE, d MMMM yyyy");
+      case "week":
+        return formatRangeLabel({
           from: toDateKey(weekStart),
           to: toDateKey(addDays(weekStart, 6)),
-        })
-      : formatDate(new Date(anchorMs), "MMMM yyyy");
+        });
+      case "month":
+        return formatDate(date, "MMMM yyyy");
+      case "year":
+        return formatDate(date, "yyyy");
+    }
+  }, [anchorMs, view, weekStart]);
 
-  const step = (direction: -1 | 1): void => {
-    const next =
-      view === "week"
-        ? addDays(new Date(anchorMs), direction * 7)
-        : addMonths(new Date(anchorMs), direction);
-    navigate({ date: next });
-  };
+  const step = React.useCallback(
+    (direction: -1 | 1): void => {
+      const date = new Date(anchorMs);
+      const next =
+        view === "day"
+          ? addDays(date, direction)
+          : view === "week"
+            ? addDays(date, direction * 7)
+            : view === "month"
+              ? addMonths(date, direction)
+              : addYears(date, direction);
+      navigate({ date: next });
+    },
+    [anchorMs, navigate, view]
+  );
+
+  // Keyboard navigation, the same bindings Google Calendar and Clockify use.
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTypingTarget(event.target)) return;
+
+      const shortcut = VIEW_SHORTCUTS[event.key.toLowerCase()];
+      if (shortcut) {
+        event.preventDefault();
+        navigate({ view: shortcut });
+        return;
+      }
+      if (event.key === "t") {
+        event.preventDefault();
+        navigate({ date: new Date() });
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        step(-1);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        step(1);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [navigate, step]);
 
   const openBlankDraft = (): void => {
     const base = new Date(anchorMs);
@@ -207,7 +290,7 @@ export function CalendarScreen(): React.JSX.Element {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {view === "week" ? (
+          {GRID_VIEWS.has(view) ? (
             <Select
               value={rangeId}
               onValueChange={(next) => {
@@ -239,16 +322,20 @@ export function CalendarScreen(): React.JSX.Element {
           <Tabs
             value={view}
             onValueChange={(next) => {
-              navigate({ view: next === "month" ? "month" : "week" });
+              navigate({ view: isCalendarView(next) ? next : "week" });
             }}
           >
             <TabsList>
-              <TabsTrigger value="week" data-testid="calendar-view-week">
-                Week
-              </TabsTrigger>
-              <TabsTrigger value="month" data-testid="calendar-view-month">
-                Month
-              </TabsTrigger>
+              {CALENDAR_VIEWS.map((candidate) => (
+                <TabsTrigger
+                  key={candidate}
+                  value={candidate}
+                  data-testid={`calendar-view-${candidate}`}
+                  className="capitalize"
+                >
+                  {candidate}
+                </TabsTrigger>
+              ))}
             </TabsList>
           </Tabs>
 
@@ -263,23 +350,31 @@ export function CalendarScreen(): React.JSX.Element {
         </div>
       </div>
 
-      {view === "week" ? (
-        <WeekView
-          weekStart={weekStart}
+      {GRID_VIEWS.has(view) ? (
+        <TimeGrid
+          days={gridDays}
           entries={entries}
           isLoading={isLoading}
           actions={actions}
           preferredRange={preferredRange}
           onRequestCreate={setDraft}
         />
-      ) : (
+      ) : view === "month" ? (
         <MonthView
           month={new Date(anchorMs)}
           entries={entries}
           isLoading={isLoading}
           weekStartsOn={weekStartsOn}
           onSelectDay={(date) => {
-            navigate({ view: "week", date });
+            navigate({ view: "day", date });
+          }}
+        />
+      ) : (
+        <YearView
+          year={new Date(anchorMs)}
+          weekStartsOn={weekStartsOn}
+          onSelectDay={(date) => {
+            navigate({ view: "day", date });
           }}
         />
       )}

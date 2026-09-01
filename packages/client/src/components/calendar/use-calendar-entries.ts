@@ -55,14 +55,23 @@ export type CalendarEntries = {
   isLoading: boolean;
 };
 
-/** Every entry overlapping the visible window, running entries included. */
+/**
+ * Every entry overlapping the visible window, running entries included.
+ *
+ * `enabled` is false for the year view, which would ask for a year of entries
+ * and get a truncated page back — it reads aggregated report data instead.
+ */
 export const useCalendarEntries = (
-  input: CalendarQueryInput
+  input: CalendarQueryInput,
+  enabled = true
 ): CalendarEntries => {
-  const query = trpc.entries.list.useQuery(input, { staleTime: 10_000 });
+  const query = trpc.entries.list.useQuery(input, {
+    staleTime: 10_000,
+    enabled,
+  });
   return {
     entries: query.data?.entries ?? [],
-    isLoading: query.isPending,
+    isLoading: enabled && query.isPending,
   };
 };
 

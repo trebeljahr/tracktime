@@ -12,6 +12,7 @@ import { toDateKey } from "@/components/date-range-picker";
 import {
   DRAG_THRESHOLD_PX,
   MINUTES_PER_DAY,
+  blockGeometry,
   daySegment,
   expandVisibleRange,
   formatMinuteOfDay,
@@ -84,9 +85,9 @@ type DragState =
       active: boolean;
     };
 
-export type WeekViewProps = {
-  /** Local date of the first day of the week (already week-start aligned). */
-  weekStart: Date;
+export type TimeGridProps = {
+  /** The consecutive local days to render, left to right. At least one. */
+  days: Date[];
   entries: DetailedEntry[];
   isLoading: boolean;
   actions: CalendarActions;
@@ -96,19 +97,20 @@ export type WeekViewProps = {
 };
 
 /**
- * The week grid: an hour gutter, seven day columns and absolutely positioned
- * entry blocks. All three gestures (move, resize, create) run through one
- * pointer-capture state machine, and every commit goes through the optimistic
- * `actions` so the block never snaps back while the mutation is in flight.
+ * The time grid behind the day and week views: an hour gutter, one column per
+ * day and absolutely positioned entry blocks. All three gestures (move,
+ * resize, create) run through one pointer-capture state machine, and every
+ * commit goes through the optimistic `actions` so the block never snaps back
+ * while the mutation is in flight.
  */
-export function WeekView({
-  weekStart,
+export function TimeGrid({
+  days,
   entries,
   isLoading,
   actions,
   preferredRange,
   onRequestCreate,
-}: WeekViewProps): React.JSX.Element {
+}: TimeGridProps): React.JSX.Element {
   const format = useFormatSettings();
   const hasRunning = entries.some((entry) => entry.end === null);
   const nowMs = useNow(hasRunning ? 1_000 : 30_000);
@@ -118,13 +120,6 @@ export function WeekView({
 
   const [drag, setDrag] = React.useState<DragState | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
-
-  const weekStartMs = startOfDay(weekStart).getTime();
-
-  const days = React.useMemo<Date[]>(() => {
-    const first = new Date(weekStartMs);
-    return Array.from({ length: 7 }, (_, index) => addDays(first, index));
-  }, [weekStartMs]);
 
   const columns = React.useMemo<DayColumn[]>(() => {
     return days.map((day) => {
@@ -186,8 +181,18 @@ export function WeekView({
     );
   }, [visibleEnd, visibleStart]);
 
-  // Auto-scroll to the first entry of the week (minus a little air).
-  const weekKey = toDateKey(new Date(weekStartMs));
+  // Half-hour guides, drawn fainter — they make a 30-minute block readable
+  // without another row of labels.
+  const halfHours = React.useMemo<number[]>(
+    () =>
+      hours
+        .map((minute) => minute + 30)
+        .filter((minute) => minute > visibleStart && minute < visibleEnd),
+    [hours, visibleEnd, visibleStart]
+  );
+
+  // Auto-scroll to the first entry on screen (minus a little air).
+  const rangeKey = days.map((day) => toDateKey(day)).join(",");
   const firstEntryMin = React.useMemo<number | null>(() => {
     let earliest: number | null = null;
     for (const column of columns) {
@@ -208,9 +213,9 @@ export function WeekView({
       0,
       offsetFromMinutes(target, PX_PER_MINUTE, visible) - 40
     );
-    // Only re-aim when the week changes, never on every tick.
+    // Only re-aim when the visible days change, never on every tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekKey]);
+  }, [rangeKey]);
 
   // Escape aborts an in-flight drag without committing anything.
   const dragging = drag !== null;
@@ -393,13 +398,15 @@ export function WeekView({
       ? null
       : (nowMs - startOfDay(new Date(nowMs)).getTime()) / 60_000;
 
-  const gridTemplate = "3.5rem repeat(7, minmax(0, 1fr))";
+  const isSingleDay = days.length === 1;
+  const gridTemplate = `3.5rem repeat(${days.length}, minmax(0, 1fr))`;
 
   return (
     <div
       className="flex min-h-[26rem] flex-col"
       style={{ height: "calc(100dvh - 15rem)" }}
-      data-testid="calendar-week"
+      data-testid={isSingleDay ? "calendar-day" : "calendar-week"}
+      data-day-count={days.length}
     >
       {/* Column headers — weekday, date and the day's tracked total. */}
       <div
@@ -419,7 +426,9 @@ export function WeekView({
               )}
             >
               <span className="text-muted-foreground text-[0.7rem] tracking-wide uppercase">
-                {column.day.toLocaleDateString(undefined, { weekday: "short" })}
+                {column.day.toLocaleDateString(undefined, {
+                  weekday: isSingleDay ? "long" : "short",
+                })}
               </span>
               <span
                 className={cn(
@@ -427,7 +436,12 @@ export function WeekView({
                   isToday && "text-primary"
                 )}
               >
-                {column.day.getDate()}
+                {isSingleDay
+                  ? column.day.toLocaleDateString(undefined, {
+                      day: "numeric",
+                      month: "long",
+                    })
+                  : column.day.getDate()}
               </span>
               <span
                 className="text-muted-foreground text-[0.7rem] tabular-nums"
@@ -506,6 +520,16 @@ export function WeekView({
                       }}
                     />
                   ))}
+                  {halfHours.map((minute) => (
+                    <div
+                      key={minute}
+                      aria-hidden
+                      className="border-border/30 pointer-events-none absolute inset-x-0 border-t"
+                      style={{
+                        top: offsetFromMinutes(minute, PX_PER_MINUTE, visible),
+                      }}
+                    />
+                  ))}
 
                   {column.blocks.map((block) => {
                     const dragged =
@@ -524,6 +548,7 @@ export function WeekView({
                       0,
                       (range.endMin - range.startMin) * 60
                     );
+                    const geometry = blockGeometry(block);
 
                     return (
                       <Popover
@@ -540,8 +565,10 @@ export function WeekView({
                             height={
                               (range.endMin - range.startMin) * PX_PER_MINUTE
                             }
-                            leftPct={(block.column / block.columns) * 100}
-                            widthPct={100 / block.columns}
+                            leftPct={geometry.leftPct}
+                            widthPct={geometry.widthPct}
+                            zIndex={geometry.zIndex}
+                            stacked={geometry.stacked}
                             isRunning={block.isRunning}
                             isDragging={dragged !== null}
                             isSelected={selectedId === block.entry.id}

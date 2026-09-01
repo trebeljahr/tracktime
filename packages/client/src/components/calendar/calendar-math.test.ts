@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MINUTES_PER_DAY,
+  blockGeometry,
   daySegment,
   expandVisibleRange,
   formatMinuteOfDay,
@@ -168,6 +169,70 @@ describe("layoutBlocks", () => {
     const byId = new Map(out.map((block) => [block.id, block]));
     expect(byId.get("c")?.column).toBe(0);
     expect(byId.get("c")?.columns).toBe(2);
+  });
+
+  it("grows a block across columns nothing overlapping occupies", () => {
+    const out = layoutBlocks([
+      { id: "a", startMin: 0, endMin: 180 },
+      { id: "b", startMin: 0, endMin: 60 },
+      { id: "c", startMin: 30, endMin: 90 },
+      { id: "d", startMin: 120, endMin: 150 },
+    ]);
+    const byId = new Map(out.map((block) => [block.id, block]));
+    expect(out.every((block) => block.columns === 3)).toBe(true);
+    // `d` sits in column 1 and column 2 is free while it runs, so it takes both
+    // rather than leaving a third of the column empty.
+    expect(byId.get("d")).toMatchObject({ column: 1, span: 2 });
+    expect(byId.get("a")).toMatchObject({ column: 0, span: 1 });
+  });
+});
+
+describe("blockGeometry", () => {
+  it("gives a lone block the whole column", () => {
+    expect(blockGeometry({ column: 0, columns: 1, span: 1 })).toMatchObject({
+      leftPct: 0,
+      widthPct: 100,
+      stacked: false,
+    });
+  });
+
+  it("splits small clusters evenly and honours the span", () => {
+    expect(blockGeometry({ column: 0, columns: 2, span: 1 })).toMatchObject({
+      leftPct: 0,
+      widthPct: 50,
+    });
+    const wide = blockGeometry({ column: 1, columns: 3, span: 2 });
+    expect(wide.leftPct).toBeCloseTo(100 / 3);
+    expect(wide.widthPct).toBeCloseTo(200 / 3);
+  });
+
+  it("never lets a span run past the last column", () => {
+    const geometry = blockGeometry({ column: 2, columns: 3, span: 9 });
+    expect(geometry.leftPct + geometry.widthPct).toBeCloseTo(100);
+  });
+
+  it("shingles clusters too wide to split, keeping every block readable", () => {
+    const columns = 6;
+    const geometries = Array.from({ length: columns }, (_, column) =>
+      blockGeometry({ column, columns, span: 1 })
+    );
+
+    // Every block runs to the right edge, so none is a sliver.
+    for (const geometry of geometries) {
+      expect(geometry.leftPct + geometry.widthPct).toBeCloseTo(100);
+      expect(geometry.widthPct).toBeGreaterThan(100 / columns);
+    }
+    // Each one starts further right than the last, and paints above it.
+    for (let index = 1; index < columns; index += 1) {
+      expect(geometries[index]!.leftPct).toBeGreaterThan(
+        geometries[index - 1]!.leftPct
+      );
+      expect(geometries[index]!.zIndex).toBeGreaterThan(
+        geometries[index - 1]!.zIndex
+      );
+      expect(geometries[index]!.stacked).toBe(true);
+    }
+    expect(geometries[0]!.stacked).toBe(false);
   });
 });
 

@@ -73,7 +73,7 @@ const parseDateKey = (raw: string | null): string | null =>
  * between renders would churn every report's query key. Falls back to UTC where
  * the runtime cannot say (and on the server during prerender).
  */
-const DEVICE_TIME_ZONE: string = (() => {
+export const DEVICE_TIME_ZONE: string = (() => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   } catch {

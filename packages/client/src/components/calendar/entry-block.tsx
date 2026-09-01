@@ -18,6 +18,10 @@ export type EntryBlockProps = {
   /** Percentages, so overlapping blocks share the column width. */
   leftPct: number;
   widthPct: number;
+  /** Paint order inside the column — later overlap columns sit on top. */
+  zIndex?: number;
+  /** The block is offset over another one rather than beside it. */
+  stacked?: boolean;
   isRunning: boolean;
   isDragging: boolean;
   isSelected: boolean;
@@ -34,7 +38,10 @@ export type EntryBlockProps = {
   ) => void;
 } & Omit<React.ComponentPropsWithoutRef<"div">, "onPointerDown" | "children">;
 
+/** Below this the time/project lines are dropped. */
 const COMPACT_HEIGHT = 34;
+/** Below this only a single clipped line of title fits. */
+const TINY_HEIGHT = 21;
 const HANDLE_PX = 7;
 
 /**
@@ -49,6 +56,8 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
       height,
       leftPct,
       widthPct,
+      zIndex = 0,
+      stacked = false,
       isRunning,
       isDragging,
       isSelected,
@@ -65,19 +74,35 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
     ref
   ) {
     const palette = blockPalette(entry.projectColor, isDragging || isSelected);
+    const title = entry.description || "No description";
     const compact = height < COMPACT_HEIGHT;
+    const tiny = height < TINY_HEIGHT;
+    // Shingled blocks need an opaque backing, or the block behind bleeds
+    // through the translucent tint and both titles become unreadable. The
+    // tint is painted as a one-colour gradient layer over that backing.
+    const backgroundColor = stacked
+      ? "var(--color-background)"
+      : palette.background;
+    const backgroundImage = stacked
+      ? `linear-gradient(${palette.background}, ${palette.background})`
+      : undefined;
 
     return (
       <div
         ref={ref}
         role="button"
         tabIndex={0}
-        aria-label={`${entry.description || "No description"}, ${timeLabel}`}
+        aria-label={`${title}, ${timeLabel}`}
+        title={`${title} · ${timeLabel} · ${durationLabel}${
+          entry.projectName ? ` · ${entry.projectName}` : ""
+        }`}
         data-testid={`calendar-entry-${entry.id}`}
         data-running={isRunning ? "true" : undefined}
         className={cn(
-          "group absolute overflow-hidden rounded-md border px-2 py-1 text-left text-xs",
+          "group absolute overflow-hidden rounded-md border text-left text-xs",
           "text-foreground shadow-sm transition-shadow select-none",
+          tiny ? "px-1 py-0" : "px-1.5 py-0.5",
+          stacked && "shadow-md",
           "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
           draggable ? "cursor-grab" : "cursor-pointer",
           isDragging && "z-30 cursor-grabbing shadow-lg",
@@ -88,10 +113,12 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
         )}
         style={{
           top,
-          height: Math.max(height, 14),
+          height: Math.max(height, 16),
           left: `calc(${leftPct}% + 2px)`,
           width: `calc(${widthPct}% - 4px)`,
-          background: palette.background,
+          zIndex: isDragging ? 30 : isSelected ? 20 : zIndex,
+          backgroundColor,
+          backgroundImage,
           // Longhand only: mixing `borderColor` with the `borderLeft`
           // shorthand makes React warn about conflicting style properties.
           borderTopColor: continuesBefore ? "transparent" : palette.border,
@@ -131,14 +158,27 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
           </>
         ) : null}
 
-        <div className="pointer-events-none flex h-full flex-col gap-0.5 overflow-hidden">
-          <span className="flex items-center gap-1 truncate font-medium">
+        <div
+          className={cn(
+            "pointer-events-none flex h-full flex-col overflow-hidden",
+            tiny ? "justify-center gap-0" : "gap-0.5"
+          )}
+        >
+          <span
+            className={cn(
+              "flex min-w-0 items-center gap-1 font-medium",
+              tiny && "text-[0.65rem] leading-none"
+            )}
+          >
             {isRunning ? (
               <Play className="size-3 shrink-0 fill-current" aria-hidden />
             ) : null}
-            <span className="truncate">
-              {entry.description || "No description"}
-            </span>
+            <span className="truncate">{title}</span>
+            {tiny ? (
+              <span className="text-muted-foreground shrink truncate tabular-nums">
+                {durationLabel}
+              </span>
+            ) : null}
           </span>
           {compact ? null : (
             <>

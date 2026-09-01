@@ -188,15 +188,41 @@ export type LaidOut<T extends LayoutInput> = T & {
   column: number;
   /** How many columns the cluster needs. */
   columns: number;
+  /** Columns this block may grow across, counting its own. */
+  span: number;
 };
+
+/** Above this many columns even splitting is unreadable and we shingle. */
+export const MAX_EVEN_COLUMNS = 3;
+
+/** How much of a column shingled blocks give up to the ones behind them. */
+const SHINGLE_SPREAD_PCT = 58;
+
+/** A block's box inside its day column, as percentages of the column. */
+export type BlockGeometry = {
+  leftPct: number;
+  widthPct: number;
+  /** Later columns paint above earlier ones so a shingle stack reads. */
+  zIndex: number;
+  /** True when the block is offset over a block behind it. */
+  stacked: boolean;
+};
+
+/** Zero-length blocks still occupy a sliver of time. */
+const effectiveEnd = (block: MinuteRange): number =>
+  Math.max(block.endMin, block.startMin + 1);
+
+const overlaps = (a: MinuteRange, b: MinuteRange): boolean =>
+  a.startMin < effectiveEnd(b) && effectiveEnd(a) > b.startMin;
 
 /**
  * Side-by-side layout for overlapping blocks.
  *
  * Blocks are swept in start order into clusters of mutually overlapping
  * entries; inside a cluster each block takes the first column whose previous
- * block has already ended. Every block of a cluster reports the cluster's
- * column count so their widths line up.
+ * block has already ended. Every block then grows rightwards over any column
+ * nothing overlapping occupies — the step that stops a lone long entry from
+ * being pinned to a third of the day just because two short ones crossed it.
  */
 export const layoutBlocks = <T extends LayoutInput>(
   blocks: readonly T[]
@@ -215,15 +241,25 @@ export const layoutBlocks = <T extends LayoutInput>(
 
   const flush = (): void => {
     const columns = Math.max(1, columnEnds.length);
-    for (const block of cluster) out.push({ ...block, columns });
+    for (const block of cluster) {
+      let span = 1;
+      while (block.column + span < columns) {
+        const column = block.column + span;
+        const blocked = cluster.some(
+          (other) => other.column === column && overlaps(other, block)
+        );
+        if (blocked) break;
+        span += 1;
+      }
+      out.push({ ...block, columns, span });
+    }
     cluster = [];
     columnEnds = [];
     clusterEnd = Number.NEGATIVE_INFINITY;
   };
 
   for (const block of sorted) {
-    // A zero-length block still occupies a sliver of time visually.
-    const end = Math.max(block.endMin, block.startMin + 1);
+    const end = effectiveEnd(block);
     if (cluster.length > 0 && block.startMin >= clusterEnd) flush();
 
     let column = columnEnds.findIndex((columnEnd) => block.startMin >= columnEnd);
@@ -234,12 +270,48 @@ export const layoutBlocks = <T extends LayoutInput>(
       columnEnds[column] = end;
     }
 
-    cluster.push({ ...block, column, columns: 1 });
+    cluster.push({ ...block, column, columns: 1, span: 1 });
     clusterEnd = Math.max(clusterEnd, end);
   }
   flush();
 
   return out;
+};
+
+/**
+ * Where a laid-out block sits inside its day column.
+ *
+ * Up to `MAX_EVEN_COLUMNS` the cluster splits the column evenly, the way
+ * Google Calendar and Clockify do. Past that an even split leaves slivers too
+ * narrow to read, so the blocks shingle instead: each one starts a little
+ * further right and runs to the edge, keeping every title legible while the
+ * offsets still show how many entries are stacked.
+ */
+export const blockGeometry = (block: {
+  column: number;
+  columns: number;
+  span: number;
+}): BlockGeometry => {
+  const columns = Math.max(1, block.columns);
+  const column = Math.min(Math.max(0, block.column), columns - 1);
+
+  if (columns <= MAX_EVEN_COLUMNS) {
+    const span = Math.min(Math.max(1, block.span), columns - column);
+    return {
+      leftPct: (column / columns) * 100,
+      widthPct: (span / columns) * 100,
+      zIndex: column,
+      stacked: false,
+    };
+  }
+
+  const leftPct = column * (SHINGLE_SPREAD_PCT / (columns - 1));
+  return {
+    leftPct,
+    widthPct: 100 - leftPct,
+    zIndex: column,
+    stacked: column > 0,
+  };
 };
 
 // ── formatting + conversion ──────────────────────────────────────────
