@@ -43,11 +43,13 @@ export const BUILD_TARGETS: Record<BuildMode, BuildTarget> = {
     outDir: "dist",
   },
   production: {
-    // Single origin: this deployment serves the API and the web app from the
-    // same host, so there is no api.* to point at.
-    apiUrl: "https://tracktime.trebeljahr.com",
+    // The API lives on its own host. That is the shape hatchkit's Coolify
+    // split deploys (`api.<domain>` for the server, the bare domain for the
+    // client) and the one the sibling playtiao.com deployment already runs, so
+    // matching it keeps this client working with the deploy the CLI produces.
+    apiUrl: "https://api.tracktime.trebeljahr.com",
     name: "tracktime",
-    hostPermissions: ["https://tracktime.trebeljahr.com/*"],
+    hostPermissions: ["https://api.tracktime.trebeljahr.com/*"],
     outDir: "dist-prod",
   },
 };

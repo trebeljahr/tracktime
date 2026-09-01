@@ -250,7 +250,7 @@ target. Both are declared in `packages/extension/manifest.config.ts` — not in
 
 ```bash
 pnpm run build:extension        # dist/      -> http://localhost:5159
-pnpm run build:extension:prod   # dist-prod/ -> https://tracktime.trebeljahr.com
+pnpm run build:extension:prod   # dist-prod/ -> https://api.tracktime.trebeljahr.com
 pnpm run extension:id [dev|prod]  # the chrome-extension:// origin to trust
 ```
 
