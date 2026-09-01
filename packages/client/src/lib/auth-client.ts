@@ -1,4 +1,5 @@
 import { createAuthClient } from "better-auth/react";
+import { deviceAuthorizationClient } from "better-auth/client/plugins";
 
 /**
  * better-auth validates its baseURL with `new URL()`, so a relative
@@ -31,6 +32,17 @@ function resolveAuthBaseUrl(): string {
 
 export const authClient = createAuthClient({
   baseURL: resolveAuthBaseUrl(),
+  /**
+   * Adds `authClient.device.*`, which backs /device — the page where a
+   * signed-in browser approves the short code shown by Raycast or a CLI that
+   * has nowhere sensible to type a password.
+   */
+  plugins: [deviceAuthorizationClient()],
+  /**
+   * Names this client on every session it creates, so Settings → Devices can
+   * show "Chrome on macOS" instead of an unlabelled row.
+   */
+  fetchOptions: { headers: { "x-tracktime-client": "web" } },
 });
 
 // Re-export commonly used methods.

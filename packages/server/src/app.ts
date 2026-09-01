@@ -23,6 +23,12 @@ export function createApp() {
     cors({
       origin: trustedOrigins.length > 0 ? trustedOrigins : false,
       credentials: true,
+      /**
+       * The bearer plugin hands a non-cookie client its session token on
+       * `set-auth-token`. A cross-origin caller (the browser extension) can
+       * only read that header if it is explicitly exposed.
+       */
+      exposedHeaders: ["set-auth-token"],
     }),
   );
 

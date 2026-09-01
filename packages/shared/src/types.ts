@@ -145,17 +145,37 @@ export type WorkspaceSettings = {
   pomodoro: PomodoroSettings;
 };
 
-/** A personal access token. The plaintext value is only ever returned once. */
-export type ApiToken = {
-  id: string;
-  ownerId: string;
-  name: string;
-  /** Short, non-secret prefix used to identify the token in listings. */
-  prefix: string;
-  lastUsedAt: string | null;
-  createdAt: string;
-  revokedAt: string | null;
-};
+/**
+ * Which tracktime client a session was created from. Set by the client
+ * itself (`x-tracktime-client` header, or the device-flow `client_id`), so
+ * treat it as a label, never as a permission.
+ */
+export type ClientKind =
+  | "web"
+  | "desktop"
+  | "mobile"
+  | "raycast"
+  | "extension"
+  | "cli"
+  | "unknown";
 
-/** Returned by `tokens.create` — the only time `token` is ever exposed. */
-export type CreatedApiToken = ApiToken & { token: string };
+/**
+ * One signed-in device or app, as shown in Settings → Devices. This is a
+ * projection of a better-auth session: the session token itself is secret and
+ * never crosses the wire — `id` is what the revoke call takes.
+ */
+export type DeviceSession = {
+  id: string;
+  /** Human label, e.g. "Raycast on macOS" or "Chrome on macOS". */
+  name: string;
+  client: ClientKind;
+  /** Raw user agent, kept for the "is this really me?" case. */
+  userAgent: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+  /** better-auth refreshes this as the session is used. */
+  updatedAt: string;
+  expiresAt: string;
+  /** True for the session making the request — it cannot be revoked blindly. */
+  current: boolean;
+};

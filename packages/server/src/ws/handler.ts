@@ -12,7 +12,21 @@ const PONG_TIMEOUT_MS = 5_000;
 export const roomManager = new RoomManager();
 
 export function setupWebSocket(server: Server): WebSocketServer {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({
+    noServer: true,
+    /**
+     * A browser that offers a subprotocol closes the socket unless the server
+     * echoes one back. The extension carries its session token as
+     * `bearer.<token>` (see ws/auth.ts), so accept that one and ignore the
+     * rest — the token is read from the request, not from what we echo.
+     */
+    handleProtocols: (protocols) => {
+      for (const protocol of protocols) {
+        if (protocol.startsWith("bearer.")) return protocol;
+      }
+      return false;
+    },
+  });
 
   // Handle HTTP upgrade manually for path/origin validation
   server.on("upgrade", async (req, socket, head) => {
@@ -35,8 +49,15 @@ export function setupWebSocket(server: Server): WebSocketServer {
       }
     }
 
-    // Authenticate
+    // Authenticate. An unauthenticated socket can never join a room (both
+    // join paths below require `ws.userId`), so refuse the upgrade outright
+    // rather than holding a connection open that can do nothing.
     const session = await authenticateUpgrade(req);
+    if (!session?.user?.id) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
       (ws as WebSocket & { userId?: string; displayName?: string }).userId =

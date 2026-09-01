@@ -11,7 +11,11 @@ export type SyncClientOptions = {
   url: string;
   onEvent: (event: SyncEvent, originId?: string) => void;
   onStatus?: (status: SyncStatus) => void;
-  /** Bearer token for non-cookie clients (Raycast, Chrome extension). */
+  /**
+   * better-auth session token, for clients with no cookie (Raycast, the
+   * extensions, the native shells). Obtain it from `signInWithPassword()` or
+   * the device flow — there is no separate credential to mint.
+   */
   token?: string;
   /** Injectable for Node tests and non-DOM hosts. */
   WebSocketImpl?: typeof WebSocket;
@@ -25,11 +29,16 @@ export type SyncClient = {
   status(): SyncStatus;
 };
 
-const withToken = (url: string, token?: string): string => {
-  if (!token) return url;
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}token=${encodeURIComponent(token)}`;
-};
+/** Subprotocol prefix the server reads the session token from. */
+const BEARER_SUBPROTOCOL_PREFIX = "bearer.";
+
+/**
+ * The WebSocket constructor cannot set an Authorization header, so the token
+ * rides in the subprotocol instead of the query string — a URL is the one
+ * place it could end up in an access log or a referrer.
+ */
+const subprotocols = (token?: string): string[] | undefined =>
+  token ? [`${BEARER_SUBPROTOCOL_PREFIX}${encodeURIComponent(token)}`] : undefined;
 
 /**
  * WebSocket subscription to the signed-in user's sync room.
@@ -105,7 +114,10 @@ export const createSyncClient = ({
 
     setStatus("connecting");
     try {
-      socket = new SocketCtor(withToken(url, token));
+      const protocols = subprotocols(token);
+      socket = protocols
+        ? new SocketCtor(url, protocols)
+        : new SocketCtor(url);
     } catch {
       socket = null;
       scheduleReconnect();

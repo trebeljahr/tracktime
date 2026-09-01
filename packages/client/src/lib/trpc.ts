@@ -12,6 +12,7 @@ export function getTRPCClient() {
         fetch(url, options) {
           return fetch(url, { ...options, credentials: "include" });
         },
+        headers: () => ({ "x-tracktime-client": "web" }),
       }),
     ],
   });

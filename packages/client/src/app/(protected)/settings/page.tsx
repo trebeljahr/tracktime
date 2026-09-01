@@ -4,7 +4,7 @@ import * as React from "react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountSettings } from "@/components/settings/account-settings";
-import { ApiTokensPanel } from "@/components/settings/api-tokens";
+import { DevicesPanel } from "@/components/settings/devices";
 import { BillingSettings } from "@/components/settings/billing-settings";
 import { GeneralSettings } from "@/components/settings/general-settings";
 import { PomodoroSettingsPanel } from "@/components/settings/pomodoro-settings";
@@ -14,7 +14,7 @@ const TABS = [
   { value: "general", label: "General" },
   { value: "billing", label: "Billing" },
   { value: "pomodoro", label: "Pomodoro" },
-  { value: "api", label: "API access" },
+  { value: "devices", label: "Devices" },
   { value: "account", label: "Account" },
 ];
 
@@ -58,8 +58,8 @@ export default function SettingsPage() {
         <TabsContent value="pomodoro" data-testid="settings-panel-pomodoro">
           <PomodoroSettingsPanel controller={controller} />
         </TabsContent>
-        <TabsContent value="api" data-testid="settings-panel-api">
-          <ApiTokensPanel />
+        <TabsContent value="devices" data-testid="settings-panel-devices">
+          <DevicesPanel />
         </TabsContent>
         <TabsContent value="account" data-testid="settings-panel-account">
           <AccountSettings />

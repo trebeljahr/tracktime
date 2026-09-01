@@ -1,26 +1,28 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import { getAuth } from "../auth/auth.js";
-import {
-  extractBearerToken,
-  resolveApiTokenPrincipal,
-} from "../auth/api-token.js";
 import { fromNodeHeaders } from "better-auth/node";
 
 /**
  * How the caller proved who they are:
- *  - "session" — better-auth cookie (browser / desktop / mobile shells)
- *  - "token"   — `Authorization: Bearer tt_...` personal API token
- *  - null      — anonymous
+ *  - "cookie" — browser session cookie (web app, desktop and mobile shells
+ *               that run in a webview with cookies)
+ *  - "bearer" — the same better-auth session, carried as
+ *               `Authorization: Bearer <token>` by Raycast, the extensions
+ *               and any other non-cookie client
+ *  - null     — anonymous
+ *
+ * Both are the *same* session record — there is no second credential type.
+ * The distinction is kept only for logging and debugging.
  */
-export type AuthMethod = "session" | "token" | null;
+export type AuthMethod = "cookie" | "bearer" | null;
 
 /**
  * Build the tRPC request context.
  *
- * The better-auth cookie session is the primary path and behaves exactly as
- * before. Only when there is no session do we fall back to a personal API
- * token, so a browser request can never be influenced by an Authorization
- * header it happens to carry.
+ * There is exactly one auth path: a better-auth session. The `bearer` plugin
+ * turns an `Authorization: Bearer <session-token>` header into that same
+ * session before `getSession()` looks it up, so cookie clients and token
+ * clients converge here with identical `session`/`user` shapes.
  */
 export async function createContext({ req, res }: CreateExpressContextOptions) {
   const auth = getAuth();
@@ -29,24 +31,13 @@ export async function createContext({ req, res }: CreateExpressContextOptions) {
   });
 
   if (session?.user) {
+    const usedBearer = /^Bearer\s+\S/i.test(req.headers.authorization ?? "");
     return {
       req,
       res,
       session,
       user: session.user,
-      authMethod: "session" as const,
-    };
-  }
-
-  const bearer = extractBearerToken(req.headers.authorization);
-  const principal = bearer ? await resolveApiTokenPrincipal(bearer) : null;
-  if (principal) {
-    return {
-      req,
-      res,
-      session: principal,
-      user: principal.user,
-      authMethod: "token" as const,
+      authMethod: (usedBearer ? "bearer" : "cookie") satisfies AuthMethod,
     };
   }
 
@@ -55,7 +46,7 @@ export async function createContext({ req, res }: CreateExpressContextOptions) {
     res,
     session: null,
     user: null,
-    authMethod: null,
+    authMethod: null satisfies AuthMethod,
   };
 }
 

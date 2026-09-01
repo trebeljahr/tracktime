@@ -177,6 +177,40 @@ Tauri serves the bundled frontend from `tauri://localhost` (macOS/Linux)
 and `http://tauri.localhost` (Windows) — both must be in
 `TRUSTED_ORIGINS` for cookie auth to work.
 
+### Clients without a cookie jar (Raycast, CLI, extensions)
+
+There are no API tokens to mint or paste. Every client signs in normally
+and keeps the resulting better-auth **session token**, which it sends as
+`Authorization: Bearer <token>` (and as the `bearer.<token>` WebSocket
+subprotocol). Server side this is the `bearer` plugin in `auth/auth.ts` —
+by the time `getSession()` runs, a token client and a cookie client are
+indistinguishable, so there is exactly one auth path to reason about.
+
+Use the helpers in `@starter/core` (`session-auth.ts`):
+
+```ts
+// Client shows its own sign-in form (browser extension popup):
+const { token } = await signInWithPassword(
+  { baseUrl, clientId: "tracktime-extension" },
+  { email, password },
+);
+
+// Client cannot show a form (Raycast, CLI) — RFC 8628 device flow:
+const auth = await startDeviceAuthorization({ baseUrl, clientId: "tracktime-raycast" });
+// show auth.userCode, open auth.verificationUriComplete
+const { token } = await pollForDeviceSession(
+  { baseUrl, clientId: "tracktime-raycast" },
+  auth.deviceCode,
+  { intervalSeconds: auth.intervalSeconds },
+);
+```
+
+Store that token in real secret storage (Keychain, `chrome.storage.session`,
+the Raycast password store), never a plain config file. Clients send
+`x-tracktime-client` so their session is named in Settings → Devices, where
+any of them can be signed out; revocation kills the HTTP and WebSocket paths
+at once. Device-flow client ids are allowlisted in `auth/client-label.ts`.
+
 ### Static export caveats
 
 - `NEXT_PUBLIC_API_URL` is baked at build time — desktop/mobile binaries

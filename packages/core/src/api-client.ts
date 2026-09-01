@@ -19,8 +19,13 @@ export class ApiError extends Error {
 export type ApiClientOptions = {
   /** Origin of the server, e.g. `https://api.tracktime.trebeljahr.com`. */
   baseUrl: string;
-  /** `tt_…` API token. Omit to fall back to cookie auth. */
+  /**
+   * better-auth session token from `signInWithPassword()` or the device flow.
+   * Omit to fall back to cookie auth (the web app's path).
+   */
   token?: string;
+  /** Names this client in Settings → Devices. Cosmetic, never a permission. */
+  clientId?: string;
   fetchImpl?: typeof fetch;
 };
 
@@ -52,6 +57,7 @@ const unwrap = (body: unknown, httpStatus: number): unknown => {
 export const createApiClient = ({
   baseUrl,
   token,
+  clientId,
   fetchImpl,
 }: ApiClientOptions): ApiClient => {
   const doFetch =
@@ -64,6 +70,7 @@ export const createApiClient = ({
   const headers = (): Record<string, string> => {
     const base: Record<string, string> = { "content-type": "application/json" };
     if (token) base.authorization = `Bearer ${token}`;
+    if (clientId) base["x-tracktime-client"] = clientId;
     return base;
   };
 

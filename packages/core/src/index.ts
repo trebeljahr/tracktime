@@ -10,4 +10,5 @@ export * from "./timer-store.js";
 export * from "./offline-queue.js";
 export * from "./sync-client.js";
 export * from "./api-client.js";
+export * from "./session-auth.js";
 export * from "./pomodoro.js";

@@ -9,7 +9,7 @@ import { tasksRouter } from "./routers/tasks.js";
 import { entriesRouter } from "./routers/entries.js";
 import { reportsRouter } from "./routers/reports.js";
 import { settingsRouter } from "./routers/settings.js";
-import { tokensRouter } from "./routers/tokens.js";
+import { devicesRouter } from "./routers/devices.js";
 
 export const appRouter = router({
   health: healthRouter,
@@ -23,7 +23,7 @@ export const appRouter = router({
   entries: entriesRouter,
   reports: reportsRouter,
   settings: settingsRouter,
-  tokens: tokensRouter,
+  devices: devicesRouter,
 });
 
 export type AppRouter = typeof appRouter;

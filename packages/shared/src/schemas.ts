@@ -260,9 +260,22 @@ export const updateSettingsSchema = z.object({
   originId,
 });
 
-export const createTokenSchema = z.object({
-  name: z.string().min(1, "Name is required").max(120),
+/** Revoking one device session. `id` is the session id, never its token. */
+export const revokeDeviceSchema = z.object({
+  id: z.string().min(1),
   originId,
+});
+
+/** Sign every other device out, keeping the current one. */
+export const revokeOtherDevicesSchema = z.object({ originId });
+
+/** Approving or denying a device-flow pairing code typed by the user. */
+export const deviceCodeSchema = z.object({
+  userCode: z
+    .string()
+    .min(4, "Enter the code shown on your device")
+    .max(32)
+    .transform((value) => value.trim().toUpperCase()),
 });
 
 // ── inferred input types ─────────────────────────────────────────────
@@ -288,4 +301,6 @@ export type DetailedReportSchemaInput = z.infer<typeof detailedReportSchema>;
 export type WeeklyReportSchemaInput = z.infer<typeof weeklyReportSchema>;
 export type ExportCsvInput = z.infer<typeof exportCsvSchema>;
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
-export type CreateTokenInput = z.infer<typeof createTokenSchema>;
+export type RevokeDeviceInput = z.infer<typeof revokeDeviceSchema>;
+export type RevokeOtherDevicesInput = z.infer<typeof revokeOtherDevicesSchema>;
+export type DeviceCodeInput = z.infer<typeof deviceCodeSchema>;
