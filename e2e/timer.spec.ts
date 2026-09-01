@@ -179,4 +179,56 @@ test.describe("Timer", () => {
     await expect(page.getByTestId("tracker-duration")).toHaveValue("1:00:00");
     await expect(runningRows(page)).toHaveCount(0);
   });
+
+  /**
+   * Regression: the running row used to render a Continue button. Clicking it
+   * stopped the entry and started an identical copy, so repeatedly pressing it
+   * shredded one stretch of work into a pile of few-second fragments instead of
+   * doing the obvious thing.
+   */
+  test("the running row offers Stop, not Continue", async ({ page }) => {
+    await openTracker(page, "running-row");
+
+    await page.getByTestId("tracker-description").fill("Long stretch");
+    await page.getByTestId("tracker-toggle").click();
+    await expect(runningRows(page)).toHaveCount(1);
+
+    const row = runningRows(page).first();
+    await expect(row.getByTestId("entry-stop")).toBeVisible();
+    await expect(row.getByTestId("entry-continue")).toHaveCount(0);
+
+    // Stopping from the row stops that entry — it must not spawn a second one.
+    await row.getByTestId("entry-stop").click();
+    await expect(runningRows(page)).toHaveCount(0);
+    await expect(entryRow(page, "Long stretch")).toHaveCount(1);
+    await expect(page.getByTestId("tracker-toggle")).toHaveAttribute(
+      "data-state",
+      "idle",
+    );
+
+    // And the stopped row goes back to offering Continue.
+    await expect(
+      entryRow(page, "Long stretch").getByTestId("entry-continue"),
+    ).toBeVisible();
+  });
+
+  test("the project picker can create a project without typing a name", async ({
+    page,
+  }) => {
+    await openTracker(page, "picker-create");
+
+    // The create surfaces must be reachable from an empty workspace, where
+    // there is no existing name to search for.
+    await page.getByTestId("tracker-project").click();
+    await page.getByTestId("project-picker-new-project").click();
+
+    await expect(page.getByTestId("project-dialog")).toBeVisible();
+    await page.getByTestId("project-name-input").fill("Dropdown Project");
+    await page.getByTestId("project-submit").click();
+
+    // Creating from the picker selects the new project straight away.
+    await expect(page.getByTestId("tracker-project")).toContainText(
+      "Dropdown Project",
+    );
+  });
 });

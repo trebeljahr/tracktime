@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Copy, Ellipsis, Euro, Pencil, Play, Trash2 } from "lucide-react";
+import { Copy, Ellipsis, Euro, Pencil, Play, Square, Trash2 } from "lucide-react";
 import type { DetailedEntry } from "@starter/shared";
 
 import { Button } from "@/components/ui/button";
@@ -259,17 +259,34 @@ export function EntryRow({
         {entry.hourlyRate === null ? "" : format.money(entry.amount)}
       </span>
 
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-8 text-primary"
-        aria-label="Continue this entry"
-        onClick={() => mutations.continueEntry(entry)}
-        data-testid="entry-continue"
-      >
-        <Play />
-      </Button>
+      {/* The running entry gets Stop, not Continue. "Continuing" something
+          already running stops it and starts an identical copy, which silently
+          shreds one stretch of work into a pile of few-second fragments. */}
+      {running ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 text-destructive"
+          aria-label="Stop this entry"
+          onClick={() => mutations.stopTimer()}
+          data-testid="entry-stop"
+        >
+          <Square />
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 text-primary"
+          aria-label="Continue this entry"
+          onClick={() => mutations.continueEntry(entry)}
+          data-testid="entry-continue"
+        >
+          <Play />
+        </Button>
+      )}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

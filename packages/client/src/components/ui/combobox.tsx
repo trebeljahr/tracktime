@@ -33,6 +33,12 @@ export interface ComboboxOption {
   disabled?: boolean;
 }
 
+export interface ComboboxFooterAction {
+  label: string;
+  onSelect: () => void;
+  testId?: string;
+}
+
 export interface ComboboxProps
   extends Omit<
     React.ComponentPropsWithoutRef<typeof Button>,
@@ -51,6 +57,12 @@ export interface ComboboxProps
   createLabel?: (query: string) => string;
   /** Muted hint under the create row, for a shorthand worth advertising. */
   createHint?: string;
+  /**
+   * Rows pinned to the bottom of the list, always visible regardless of the
+   * search query. Use for "New project…"-style actions, which must be
+   * discoverable without first typing a name that matches nothing.
+   */
+  footerActions?: ComboboxFooterAction[];
   searchPlaceholder?: string;
   /** Adds a row that resets the selection to `null`. */
   allowClear?: boolean;
@@ -114,6 +126,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
       onCreate,
       createLabel,
       createHint,
+      footerActions,
       searchPlaceholder = "Search...",
       allowClear = false,
       clearLabel = "Clear selection",
@@ -306,6 +319,28 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
                       {createHint}
                     </p>
                   )}
+                </>
+              )}
+              {footerActions && footerActions.length > 0 && (
+                <>
+                  <CommandSeparator />
+                  <CommandGroup forceMount>
+                    {footerActions.map((action) => (
+                      <CommandItem
+                        key={action.label}
+                        forceMount
+                        value={`\u0000action-${action.label}`}
+                        onSelect={() => {
+                          setOpen(false);
+                          action.onSelect();
+                        }}
+                        data-testid={action.testId}
+                      >
+                        <Plus />
+                        <span className="truncate">{action.label}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
                 </>
               )}
             </CommandList>

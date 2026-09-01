@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import { ClientFormDialog } from "@/components/catalog/client-form-dialog";
+import { ProjectFormDialog } from "@/components/catalog/project-form-dialog";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { toast } from "@/components/ui/sonner";
 import { ORIGIN_ID } from "@/hooks/use-sync";
@@ -100,6 +102,12 @@ export function ProjectPicker({
     },
   });
 
+  // Explicit create surfaces. The "Client / Project" shorthand is quick once
+  // you know it, but it only appears after typing a name that matches nothing —
+  // so on an empty workspace there was no visible way to make a project at all.
+  const [projectDialogOpen, setProjectDialogOpen] = React.useState(false);
+  const [clientDialogOpen, setClientDialogOpen] = React.useState(false);
+
   const options = React.useMemo(
     () => toProjectOptions(projects.data ?? []),
     [projects.data]
@@ -151,27 +159,57 @@ export function ProjectPicker({
   );
 
   return (
-    <Combobox
-      options={options}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      searchPlaceholder="Search projects..."
-      emptyText="No projects found."
-      allowClear
-      clearLabel="No project"
-      onCreate={allowCreate ? handleCreate : undefined}
-      createLabel={(query) => {
-        const { clientName, projectName } = splitClientAndProject(query);
-        return clientName
-          ? `Create project "${projectName}" for client "${clientName}"`
-          : `Create project "${projectName}"`;
-      }}
-      createHint={'Tip: type "Client / Project" to create both at once'}
-      disabled={disabled || createProject.isPending || createClient.isPending}
-      size={size}
-      className={cn("min-w-48", className)}
-      data-testid={testId}
-    />
+    <>
+      <Combobox
+        options={options}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        searchPlaceholder="Search projects..."
+        emptyText="No projects found."
+        allowClear
+        clearLabel="No project"
+        onCreate={allowCreate ? handleCreate : undefined}
+        createLabel={(query) => {
+          const { clientName, projectName } = splitClientAndProject(query);
+          return clientName
+            ? `Create project "${projectName}" for client "${clientName}"`
+            : `Create project "${projectName}"`;
+        }}
+        createHint={'Tip: type "Client / Project" to create both at once'}
+        disabled={disabled || createProject.isPending || createClient.isPending}
+        size={size}
+        className={cn("min-w-48", className)}
+        data-testid={testId}
+        footerActions={
+          allowCreate
+            ? [
+                {
+                  label: "New project…",
+                  onSelect: () => setProjectDialogOpen(true),
+                  testId: "project-picker-new-project",
+                },
+                {
+                  label: "New client…",
+                  onSelect: () => setClientDialogOpen(true),
+                  testId: "project-picker-new-client",
+                },
+              ]
+            : undefined
+        }
+      />
+
+      <ProjectFormDialog
+        open={projectDialogOpen}
+        onOpenChange={setProjectDialogOpen}
+        clients={clients.data ?? []}
+        onCreated={(project) => onChange(project.id)}
+      />
+
+      <ClientFormDialog
+        open={clientDialogOpen}
+        onOpenChange={setClientDialogOpen}
+      />
+    </>
   );
 }

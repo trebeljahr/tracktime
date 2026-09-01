@@ -30,6 +30,12 @@ export type ProjectFormDialogProps = {
   /** Omitted/null creates; otherwise the dialog edits this project. */
   project?: ProjectRow | null;
   clients: ClientRow[];
+  /**
+   * Called with the newly created project. Lets a caller act on the result —
+   * the tracker's project picker selects it immediately, so "New project…"
+   * leaves you ready to start the timer.
+   */
+  onCreated?: (project: { id: string; name: string }) => void;
 };
 
 const FALLBACK_COLOR = COLOR_PALETTE[0] ?? "#4f46e5";
@@ -43,6 +49,7 @@ export function ProjectFormDialog({
   onOpenChange,
   project,
   clients,
+  onCreated,
 }: ProjectFormDialogProps): React.JSX.Element {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -52,7 +59,10 @@ export function ProjectFormDialog({
             key={project?.id ?? "new"}
             project={project ?? null}
             clients={clients}
-            onDone={() => onOpenChange(false)}
+            onDone={(created) => {
+              onOpenChange(false);
+              if (created) onCreated?.(created);
+            }}
           />
         ) : null}
       </DialogContent>
@@ -63,7 +73,8 @@ export function ProjectFormDialog({
 type ProjectFormProps = {
   project: ProjectRow | null;
   clients: ClientRow[];
-  onDone: () => void;
+  /** Receives the created project on create; nothing on edit. */
+  onDone: (created?: { id: string; name: string }) => void;
 };
 
 function ProjectForm({
@@ -158,7 +169,7 @@ function ProjectForm({
     }).then((created) => {
       if (!created) return;
       toast.success(`Project "${created.name}" created.`);
-      onDone();
+      onDone(created);
     });
   };
 
@@ -262,7 +273,9 @@ function ProjectForm({
         <Button
           type="button"
           variant="outline"
-          onClick={onDone}
+          // Wrapped: onDone takes an optional created project, and passing it
+          // straight to onClick would hand it the mouse event instead.
+          onClick={() => onDone()}
           data-testid="project-cancel"
         >
           Cancel

@@ -587,6 +587,12 @@ export const useEntryMutations = (): EntryMutations => {
 
   const continueEntry = React.useCallback(
     (entry: DetailedEntry): void => {
+      // Continuing the entry that is already running would stop it and start an
+      // identical copy, shredding one stretch of work into fragments. The row
+      // renders Stop instead of Continue for exactly this reason; this guard
+      // covers every other caller.
+      if (entry.end === null) return;
+
       // Deliberately `start`, not `continue`: every field is already in hand,
       // so this works offline where a server-side copy could not.
       startTimer({
