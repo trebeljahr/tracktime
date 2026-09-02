@@ -14,7 +14,15 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Plus, Redo2, Undo2 } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Redo2,
+  Undo2,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +37,10 @@ import { formatRangeLabel, toDateKey } from "@/components/date-range-picker";
 import { useFormatSettings } from "@/lib/format";
 import {
   DEFAULT_VISIBLE_RANGE,
+  DEFAULT_ZOOM_INDEX,
+  ZOOM_LEVELS,
+  clampZoomIndex,
+  zoomPxPerMinute,
   type VisibleRange,
 } from "./calendar-math";
 import { EntryCreateDialog, type CreateDraft } from "./entry-create-dialog";
@@ -60,12 +72,21 @@ const VISIBLE_RANGE_OPTIONS: {
 ];
 
 const RANGE_STORAGE_KEY = "tracktime.calendar.range";
+const ZOOM_STORAGE_KEY = "tracktime.calendar.zoom";
 
 const readStoredRangeId = (): string => {
   if (typeof window === "undefined") return "work";
   const stored = window.localStorage.getItem(RANGE_STORAGE_KEY);
   const match = VISIBLE_RANGE_OPTIONS.find((option) => option.id === stored);
   return match ? match.id : "work";
+};
+
+const readStoredZoomIndex = (): number => {
+  if (typeof window === "undefined") return DEFAULT_ZOOM_INDEX;
+  const raw = window.localStorage.getItem(ZOOM_STORAGE_KEY);
+  if (raw === null) return DEFAULT_ZOOM_INDEX;
+  const stored = Number(raw);
+  return Number.isFinite(stored) ? clampZoomIndex(stored) : DEFAULT_ZOOM_INDEX;
 };
 
 /** `?date=` is the source of truth so every view is linkable. */
@@ -108,7 +129,23 @@ export function CalendarScreen(): React.JSX.Element {
   const anchorMs = startOfDay(anchor).getTime();
 
   const [rangeId, setRangeId] = React.useState<string>(readStoredRangeId);
+  const [zoomIndex, setZoomIndex] = React.useState<number>(readStoredZoomIndex);
   const [draft, setDraft] = React.useState<CreateDraft | null>(null);
+
+  const pxPerMinute = zoomPxPerMinute(zoomIndex);
+
+  const zoomBy = React.useCallback((delta: number): void => {
+    setZoomIndex((current) => clampZoomIndex(current + delta));
+  }, []);
+
+  const resetZoom = React.useCallback((): void => {
+    setZoomIndex(DEFAULT_ZOOM_INDEX);
+  }, []);
+
+  // Persisted outside the updater, which has to stay pure.
+  React.useEffect(() => {
+    window.localStorage.setItem(ZOOM_STORAGE_KEY, String(zoomIndex));
+  }, [zoomIndex]);
 
   const preferredRange =
     VISIBLE_RANGE_OPTIONS.find((option) => option.id === rangeId)?.range ??
@@ -181,6 +218,8 @@ export function CalendarScreen(): React.JSX.Element {
     }
   }, [anchorMs, view, weekStart]);
 
+  const isGridView = GRID_VIEWS.has(view);
+
   const step = React.useCallback(
     (direction: -1 | 1): void => {
       const date = new Date(anchorMs);
@@ -232,6 +271,21 @@ export function CalendarScreen(): React.JSX.Element {
         navigate({ date: new Date() });
         return;
       }
+      if (isGridView && (event.key === "+" || event.key === "=")) {
+        event.preventDefault();
+        zoomBy(1);
+        return;
+      }
+      if (isGridView && (event.key === "-" || event.key === "_")) {
+        event.preventDefault();
+        zoomBy(-1);
+        return;
+      }
+      if (isGridView && event.key === "0") {
+        event.preventDefault();
+        resetZoom();
+        return;
+      }
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         step(-1);
@@ -247,7 +301,7 @@ export function CalendarScreen(): React.JSX.Element {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [history, navigate, step]);
+  }, [history, isGridView, navigate, resetZoom, step, zoomBy]);
 
   const openBlankDraft = (): void => {
     const base = new Date(anchorMs);
@@ -309,7 +363,7 @@ export function CalendarScreen(): React.JSX.Element {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {GRID_VIEWS.has(view) ? (
+          {isGridView ? (
             <Select
               value={rangeId}
               onValueChange={(next) => {
@@ -336,6 +390,51 @@ export function CalendarScreen(): React.JSX.Element {
                 ))}
               </SelectContent>
             </Select>
+          ) : null}
+
+          {isGridView ? (
+            <div
+              className="border-input flex items-center rounded-md border"
+              role="group"
+              aria-label="Zoom"
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 rounded-r-none"
+                aria-label="Zoom out"
+                data-testid="calendar-zoom-out"
+                disabled={zoomIndex === 0}
+                onClick={() => {
+                  zoomBy(-1);
+                }}
+              >
+                <ZoomOut className="size-4" />
+              </Button>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground w-12 text-xs tabular-nums"
+                title="Reset zoom (0)"
+                aria-label="Reset zoom"
+                data-testid="calendar-zoom-level"
+                onClick={resetZoom}
+              >
+                {Math.round(pxPerMinute * 100)}%
+              </button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 rounded-l-none"
+                aria-label="Zoom in"
+                data-testid="calendar-zoom-in"
+                disabled={zoomIndex === ZOOM_LEVELS.length - 1}
+                onClick={() => {
+                  zoomBy(1);
+                }}
+              >
+                <ZoomIn className="size-4" />
+              </Button>
+            </div>
           ) : null}
 
           <Tabs
@@ -398,13 +497,15 @@ export function CalendarScreen(): React.JSX.Element {
         </div>
       </div>
 
-      {GRID_VIEWS.has(view) ? (
+      {isGridView ? (
         <TimeGrid
           days={gridDays}
           entries={entries}
           isLoading={isLoading}
           actions={actions}
           preferredRange={preferredRange}
+          pxPerMinute={pxPerMinute}
+          onZoomBy={zoomBy}
           onRequestCreate={setDraft}
         />
       ) : view === "month" ? (

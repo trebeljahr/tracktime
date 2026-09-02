@@ -368,3 +368,143 @@ export const expandVisibleRange = (
   if (endMin - startMin < 60) endMin = Math.min(MINUTES_PER_DAY, startMin + 60);
   return { startMin, endMin };
 };
+
+// ── zoom ─────────────────────────────────────────────────────────────
+
+/**
+ * Selectable vertical scales, in pixels per minute. 1 is the baseline the
+ * grid was designed at (60px per hour). The bottom of the ladder fits a whole
+ * 24h day on a laptop screen; the top is high enough that even a three-minute
+ * entry clears {@link MICRO_BLOCK_PX}, so zooming all the way in always
+ * dissolves the last density cluster into real blocks.
+ */
+export const ZOOM_LEVELS = [0.35, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6] as const;
+
+/** Index of the 1px-per-minute baseline. */
+export const DEFAULT_ZOOM_INDEX = ZOOM_LEVELS.indexOf(1);
+
+export const clampZoomIndex = (index: number): number =>
+  Math.min(ZOOM_LEVELS.length - 1, Math.max(0, Math.round(index)));
+
+/** Pixels per minute for a zoom index, clamped to the ladder. */
+export const zoomPxPerMinute = (index: number): number =>
+  ZOOM_LEVELS[clampZoomIndex(index)] ?? 1;
+
+/** How the hour rules are drawn at a given scale. */
+export type GridTicks = {
+  /** Minutes between labelled lines. */
+  labelStepMin: number;
+  /** Minutes between fainter unlabelled lines, or null for none. */
+  minorStepMin: number | null;
+};
+
+/**
+ * Thin out the rules as the grid shrinks: hour labels collide below roughly
+ * 34px per hour, and half-hour guides stop helping long before that. Zoomed
+ * right in there is room for quarter-hour guides instead.
+ */
+export const gridTicks = (pxPerMinute: number): GridTicks => {
+  const hourPx = pxPerMinute * 60;
+  if (hourPx >= 150) return { labelStepMin: 60, minorStepMin: 15 };
+  if (hourPx >= 46) return { labelStepMin: 60, minorStepMin: 30 };
+  if (hourPx >= 34) return { labelStepMin: 60, minorStepMin: null };
+  if (hourPx >= 20) return { labelStepMin: 120, minorStepMin: 60 };
+  return { labelStepMin: 180, minorStepMin: 60 };
+};
+
+// ── density clustering ───────────────────────────────────────────────
+
+/** A block shorter than this many pixels cannot carry a readable label. */
+export const MICRO_BLOCK_PX = 16;
+
+/** Micro blocks closer together than this belong to the same burst. */
+export const MICRO_GAP_PX = 12;
+
+/** A burst is only worth collapsing from this many blocks up. */
+export const MIN_CLUSTER_SIZE = 3;
+
+/**
+ * Cluster chips are drawn at least this tall, however short their span — one
+ * line of label plus its padding. Kept tight on purpose: the grid lays the
+ * chip out at its drawn height, so every extra pixel is time the chip claims
+ * from whatever follows it, and a taller chip starts shouldering real blocks
+ * into a second column at low zoom.
+ */
+export const CLUSTER_MIN_PX = 20;
+
+/** A run of unreadably short blocks, drawn as one density chip. */
+export type MicroCluster<T extends LayoutInput> = MinuteRange & {
+  id: string;
+  members: T[];
+};
+
+export type ClusterOptions = {
+  microPx?: number;
+  gapPx?: number;
+  minSize?: number;
+};
+
+/**
+ * Split blocks into the ones worth drawing individually and the bursts of
+ * unreadably short ones.
+ *
+ * A five-minute entry is 5px tall at the default scale — a line, not a block,
+ * and a dozen of them in one afternoon read as noise rather than as work. So
+ * anything under `microPx` is swept into runs with its neighbours, and a run
+ * of at least `minSize` becomes one chip that says how many there are and
+ * where they sit. Zooming in raises every block's height, which dissolves the
+ * clusters back into real blocks — the chip is a function of scale, not a
+ * property of the entries.
+ */
+export const clusterMicroBlocks = <T extends LayoutInput>(
+  blocks: readonly T[],
+  pxPerMinute: number,
+  options: ClusterOptions = {}
+): { loose: T[]; clusters: MicroCluster<T>[] } => {
+  const microPx = options.microPx ?? MICRO_BLOCK_PX;
+  const gapPx = options.gapPx ?? MICRO_GAP_PX;
+  const minSize = options.minSize ?? MIN_CLUSTER_SIZE;
+
+  if (pxPerMinute <= 0) return { loose: [...blocks], clusters: [] };
+
+  const loose: T[] = [];
+  const micro: T[] = [];
+  for (const block of blocks) {
+    const heightPx = (block.endMin - block.startMin) * pxPerMinute;
+    if (heightPx < microPx) micro.push(block);
+    else loose.push(block);
+  }
+
+  micro.sort((a, b) => a.startMin - b.startMin || a.id.localeCompare(b.id));
+
+  const clusters: MicroCluster<T>[] = [];
+  let group: T[] = [];
+  let groupEnd = Number.NEGATIVE_INFINITY;
+
+  const flush = (): void => {
+    const [first] = group;
+    if (first && group.length >= minSize) {
+      clusters.push({
+        id: `cluster:${first.id}`,
+        startMin: first.startMin,
+        endMin: groupEnd,
+        members: group,
+      });
+    } else {
+      loose.push(...group);
+    }
+    group = [];
+    groupEnd = Number.NEGATIVE_INFINITY;
+  };
+
+  for (const block of micro) {
+    if (group.length > 0 && (block.startMin - groupEnd) * pxPerMinute > gapPx) {
+      flush();
+    }
+    group.push(block);
+    groupEnd = Math.max(groupEnd, block.endMin);
+  }
+  flush();
+
+  return { loose, clusters };
+};

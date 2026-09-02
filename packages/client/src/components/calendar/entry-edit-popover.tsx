@@ -93,8 +93,9 @@ export function EntryEditPopover({
   return (
     <PopoverContent
       align="start"
-      side="right"
+      side="bottom"
       sideOffset={8}
+      collisionPadding={8}
       className="w-80 space-y-3"
       data-testid="calendar-edit-popover"
       onOpenAutoFocus={(event) => {

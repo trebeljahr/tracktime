@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   MINUTES_PER_DAY,
+  ZOOM_LEVELS,
+  clampZoomIndex,
+  clusterMicroBlocks,
+  gridTicks,
+  zoomPxPerMinute,
   blockGeometry,
   daySegment,
   expandVisibleRange,
@@ -272,5 +277,107 @@ describe("expandVisibleRange", () => {
         { startMin: 310, endMin: 1370 },
       ])
     ).toEqual({ startMin: 300, endMin: 1380 });
+  });
+});
+
+describe("zoom ladder", () => {
+  it("clamps an index to the ladder", () => {
+    expect(clampZoomIndex(-3)).toBe(0);
+    expect(clampZoomIndex(99)).toBe(ZOOM_LEVELS.length - 1);
+    expect(zoomPxPerMinute(-1)).toBe(ZOOM_LEVELS[0]);
+    expect(zoomPxPerMinute(ZOOM_LEVELS.length)).toBe(
+      ZOOM_LEVELS[ZOOM_LEVELS.length - 1]
+    );
+  });
+
+  it("keeps 1px per minute on the ladder as the baseline", () => {
+    expect(ZOOM_LEVELS).toContain(1);
+  });
+});
+
+describe("gridTicks", () => {
+  it("thins the rules out as the grid shrinks", () => {
+    expect(gridTicks(3)).toEqual({ labelStepMin: 60, minorStepMin: 15 });
+    expect(gridTicks(1)).toEqual({ labelStepMin: 60, minorStepMin: 30 });
+    expect(gridTicks(0.6)).toEqual({ labelStepMin: 60, minorStepMin: null });
+    expect(gridTicks(0.5)).toEqual({ labelStepMin: 120, minorStepMin: 60 });
+    expect(gridTicks(0.3)).toEqual({ labelStepMin: 180, minorStepMin: 60 });
+  });
+});
+
+describe("clusterMicroBlocks", () => {
+  const micro = (id: string, startMin: number, length = 4) => ({
+    id,
+    startMin,
+    endMin: startMin + length,
+  });
+
+  it("collapses a burst of unreadably short blocks", () => {
+    const blocks = [micro("a", 540), micro("b", 546), micro("c", 552)];
+    const { loose, clusters } = clusterMicroBlocks(blocks, 1);
+
+    expect(loose).toEqual([]);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]?.members.map((member) => member.id)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+    expect(clusters[0]).toMatchObject({ startMin: 540, endMin: 556 });
+  });
+
+  it("leaves readable blocks alone", () => {
+    const blocks = [
+      micro("a", 540),
+      micro("b", 546),
+      micro("c", 552),
+      { id: "long", startMin: 600, endMin: 660 },
+    ];
+    const { loose, clusters } = clusterMicroBlocks(blocks, 1);
+
+    expect(loose.map((block) => block.id)).toEqual(["long"]);
+    expect(clusters).toHaveLength(1);
+  });
+
+  it("does not cluster short blocks spread across the day", () => {
+    const blocks = [micro("a", 540), micro("b", 700), micro("c", 900)];
+    const { loose, clusters } = clusterMicroBlocks(blocks, 1);
+
+    expect(clusters).toEqual([]);
+    expect(loose.map((block) => block.id).sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("needs at least three blocks before it collapses anything", () => {
+    const { loose, clusters } = clusterMicroBlocks(
+      [micro("a", 540), micro("b", 546)],
+      1
+    );
+
+    expect(clusters).toEqual([]);
+    expect(loose).toHaveLength(2);
+  });
+
+  it("dissolves the cluster once zoom makes the blocks readable", () => {
+    const blocks = [micro("a", 540), micro("b", 546), micro("c", 552)];
+
+    expect(clusterMicroBlocks(blocks, 1).clusters).toHaveLength(1);
+    expect(clusterMicroBlocks(blocks, 4).clusters).toEqual([]);
+    expect(clusterMicroBlocks(blocks, 4).loose).toHaveLength(3);
+  });
+
+  it("splits one burst from another when the gap is wide enough", () => {
+    const blocks = [
+      micro("a", 540),
+      micro("b", 546),
+      micro("c", 552),
+      micro("d", 600),
+      micro("e", 606),
+      micro("f", 612),
+    ];
+    const { clusters } = clusterMicroBlocks(blocks, 1);
+
+    expect(clusters).toHaveLength(2);
+    expect(clusters[0]?.members).toHaveLength(3);
+    expect(clusters[1]?.members).toHaveLength(3);
   });
 });

@@ -10,12 +10,15 @@ import { useFormatSettings } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toDateKey } from "@/components/date-range-picker";
 import {
+  CLUSTER_MIN_PX,
   DRAG_THRESHOLD_PX,
   MINUTES_PER_DAY,
   blockGeometry,
+  clusterMicroBlocks,
   daySegment,
   expandVisibleRange,
   formatMinuteOfDay,
+  gridTicks,
   isoAtMinute,
   layoutBlocks,
   minutesFromOffset,
@@ -30,13 +33,11 @@ import {
 } from "./calendar-math";
 import { EntryBlock, type BlockDragMode } from "./entry-block";
 import { EntryEditPopover } from "./entry-edit-popover";
+import { DensityCluster, DensityClusterPopover } from "./density-cluster";
 import { blockPalette } from "./entry-color";
 import type { CreateDraft } from "./entry-create-dialog";
 import type { CalendarActions } from "./use-calendar-entries";
 import { useNow } from "./use-now";
-
-/** 60px per hour keeps the minute→pixel conversion a straight 1:1. */
-const PX_PER_MINUTE = 1;
 
 type Segment = MinuteRange & {
   id: string;
@@ -48,12 +49,32 @@ type Segment = MinuteRange & {
   draggable: boolean;
 };
 
+/**
+ * What the overlap layout positions: either one entry, or one chip standing
+ * in for a burst of entries too short to draw at the current zoom.
+ */
+type GridItem = MinuteRange & {
+  id: string;
+} & (
+    | { kind: "entry"; segment: Segment }
+    | {
+        kind: "cluster";
+        /**
+         * The members' true span — the item's own `startMin`/`endMin` are
+         * padded out to the chip's drawn height. Not called `span`: the
+         * layout writes a column span of its own under that name.
+         */
+        trueRange: MinuteRange;
+        members: Segment[];
+      }
+  );
+
 type DayColumn = {
   day: Date;
   key: string;
   dayStartMs: number;
   dayEndMs: number;
-  blocks: LaidOut<Segment>[];
+  items: LaidOut<GridItem>[];
   totalSec: number;
 };
 
@@ -93,6 +114,10 @@ export type TimeGridProps = {
   actions: CalendarActions;
   /** The user's configured window; widened when entries fall outside it. */
   preferredRange: VisibleRange;
+  /** Vertical scale. 1 is the 60px-per-hour baseline. */
+  pxPerMinute: number;
+  /** Step the zoom ladder by `delta` levels, for ctrl/⌘ + wheel. */
+  onZoomBy?: (delta: number) => void;
   onRequestCreate: (draft: CreateDraft) => void;
 };
 
@@ -109,6 +134,8 @@ export function TimeGrid({
   isLoading,
   actions,
   preferredRange,
+  pxPerMinute,
+  onZoomBy,
   onRequestCreate,
 }: TimeGridProps): React.JSX.Element {
   const format = useFormatSettings();
@@ -120,6 +147,7 @@ export function TimeGrid({
 
   const [drag, setDrag] = React.useState<DragState | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [openClusterId, setOpenClusterId] = React.useState<string | null>(null);
 
   const columns = React.useMemo<DayColumn[]>(() => {
     return days.map((day) => {
@@ -151,54 +179,95 @@ export function TimeGrid({
         });
       }
 
+      // A running entry is never folded away — it is the one block whose
+      // shortness is temporary, and hiding the live timer reads as a bug.
+      const { loose, clusters } = clusterMicroBlocks(
+        segments.filter((segment) => !segment.isRunning),
+        pxPerMinute
+      );
+
+      const items: GridItem[] = [
+        ...loose,
+        ...segments.filter((segment) => segment.isRunning),
+      ].map((segment) => ({
+        kind: "entry",
+        id: segment.id,
+        startMin: segment.startMin,
+        endMin: segment.endMin,
+        segment,
+      }));
+
+      for (const cluster of clusters) {
+        // Lay the chip out at its drawn height, not its true span, so the
+        // block below it gets its own column instead of being covered.
+        const minSpan = pxPerMinute > 0 ? CLUSTER_MIN_PX / pxPerMinute : 0;
+        items.push({
+          kind: "cluster",
+          id: cluster.id,
+          startMin: cluster.startMin,
+          endMin: Math.max(cluster.endMin, cluster.startMin + minSpan),
+          trueRange: { startMin: cluster.startMin, endMin: cluster.endMin },
+          members: cluster.members,
+        });
+      }
+
       return {
         day,
         key: toDateKey(day),
         dayStartMs,
         dayEndMs,
-        blocks: layoutBlocks(segments),
+        items: layoutBlocks(items),
         totalSec,
       };
     });
-  }, [days, entries, nowMs]);
+  }, [days, entries, nowMs, pxPerMinute]);
 
   const visible = React.useMemo<VisibleRange>(
     () =>
       expandVisibleRange(
         preferredRange,
-        columns.flatMap((column) => column.blocks)
+        columns.flatMap((column) => column.items)
       ),
     [columns, preferredRange]
   );
   const { startMin: visibleStart, endMin: visibleEnd } = visible;
-  const height = (visibleEnd - visibleStart) * PX_PER_MINUTE;
+  const height = (visibleEnd - visibleStart) * pxPerMinute;
 
-  const hours = React.useMemo<number[]>(() => {
-    const first = Math.ceil(visibleStart / 60);
-    const last = Math.floor(visibleEnd / 60);
-    return Array.from({ length: Math.max(0, last - first + 1) }, (_, index) =>
-      (first + index) * 60
-    );
-  }, [visibleEnd, visibleStart]);
-
-  // Half-hour guides, drawn fainter — they make a 30-minute block readable
-  // without another row of labels.
-  const halfHours = React.useMemo<number[]>(
-    () =>
-      hours
-        .map((minute) => minute + 30)
-        .filter((minute) => minute > visibleStart && minute < visibleEnd),
-    [hours, visibleEnd, visibleStart]
+  const { labelStepMin, minorStepMin } = React.useMemo(
+    () => gridTicks(pxPerMinute),
+    [pxPerMinute]
   );
+
+  /** The labelled rules — thinned out as the grid shrinks. */
+  const majorMinutes = React.useMemo<number[]>(() => {
+    const out: number[] = [];
+    const first = Math.ceil(visibleStart / labelStepMin) * labelStepMin;
+    for (let minute = first; minute <= visibleEnd; minute += labelStepMin) {
+      out.push(minute);
+    }
+    return out;
+  }, [labelStepMin, visibleEnd, visibleStart]);
+
+  /** Fainter unlabelled guides between them, when there is room. */
+  const minorMinutes = React.useMemo<number[]>(() => {
+    if (minorStepMin === null) return [];
+    const out: number[] = [];
+    const first = Math.ceil(visibleStart / minorStepMin) * minorStepMin;
+    for (let minute = first; minute < visibleEnd; minute += minorStepMin) {
+      if (minute <= visibleStart || minute % labelStepMin === 0) continue;
+      out.push(minute);
+    }
+    return out;
+  }, [labelStepMin, minorStepMin, visibleEnd, visibleStart]);
 
   // Auto-scroll to the first entry on screen (minus a little air).
   const rangeKey = days.map((day) => toDateKey(day)).join(",");
   const firstEntryMin = React.useMemo<number | null>(() => {
     let earliest: number | null = null;
     for (const column of columns) {
-      for (const block of column.blocks) {
-        if (earliest === null || block.startMin < earliest) {
-          earliest = block.startMin;
+      for (const item of column.items) {
+        if (earliest === null || item.startMin < earliest) {
+          earliest = item.startMin;
         }
       }
     }
@@ -211,11 +280,58 @@ export function TimeGrid({
     const target = firstEntryMin ?? preferredRange.startMin;
     node.scrollTop = Math.max(
       0,
-      offsetFromMinutes(target, PX_PER_MINUTE, visible) - 40
+      offsetFromMinutes(target, pxPerMinute, visible) - 40
     );
     // Only re-aim when the visible days change, never on every tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rangeKey]);
+
+  // ── zoom ───────────────────────────────────────────────────────────
+  // Zooming keeps one minute pinned under the viewport centre (or under the
+  // pointer, for ctrl+wheel), so the grid grows around what you were reading
+  // instead of jumping to a different hour.
+  const scrollTopRef = React.useRef(0);
+  const prevPxRef = React.useRef(pxPerMinute);
+  const zoomAnchorRef = React.useRef<{
+    minute: number;
+    viewportY: number;
+  } | null>(null);
+
+  React.useLayoutEffect(() => {
+    const node = scrollRef.current;
+    const prevPx = prevPxRef.current;
+    const anchor = zoomAnchorRef.current;
+    zoomAnchorRef.current = null;
+    prevPxRef.current = pxPerMinute;
+    if (!node || prevPx === pxPerMinute || prevPx <= 0) return;
+
+    const viewportY = anchor?.viewportY ?? node.clientHeight / 2;
+    const minute =
+      anchor?.minute ?? visibleStart + (scrollTopRef.current + viewportY) / prevPx;
+    node.scrollTop = Math.max(
+      0,
+      offsetFromMinutes(minute, pxPerMinute, visible) - viewportY
+    );
+  }, [pxPerMinute, visible, visibleStart]);
+
+  React.useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || !onZoomBy) return;
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const viewportY = event.clientY - node.getBoundingClientRect().top;
+      zoomAnchorRef.current = {
+        minute: visibleStart + (node.scrollTop + viewportY) / pxPerMinute,
+        viewportY,
+      };
+      onZoomBy(event.deltaY < 0 ? 1 : -1);
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      node.removeEventListener("wheel", onWheel);
+    };
+  }, [onZoomBy, pxPerMinute, visibleStart]);
 
   // Escape aborts an in-flight drag without committing anything.
   const dragging = drag !== null;
@@ -233,17 +349,22 @@ export function TimeGrid({
   const minuteAtClientY = (clientY: number): number => {
     const rect = gridRef.current?.getBoundingClientRect();
     if (!rect) return visibleStart;
-    return minutesFromOffset(clientY - rect.top, PX_PER_MINUTE, visible);
+    return minutesFromOffset(clientY - rect.top, pxPerMinute, visible);
   };
 
   const capture = (event: React.PointerEvent<HTMLDivElement>): void => {
     gridRef.current?.setPointerCapture(event.pointerId);
   };
 
+  const closePopovers = (): void => {
+    setSelectedId(null);
+    setOpenClusterId(null);
+  };
+
   const handleBlockPointerDown = (
     event: React.PointerEvent<HTMLDivElement>,
     mode: BlockDragMode,
-    block: LaidOut<Segment>,
+    block: Segment,
     dayIndex: number
   ): void => {
     event.stopPropagation();
@@ -288,7 +409,12 @@ export function TimeGrid({
     dayIndex: number
   ): void => {
     if (event.button !== 0 && event.pointerType === "mouse") return;
-    setSelectedId(null);
+    // A popover is a React child of its block, so React bubbles its events
+    // up to this column even though the DOM node lives in a portal. Without
+    // this, every click inside the editor closed it and armed a create-drag.
+    const target = event.target;
+    if (!(target instanceof Node) || !gridRef.current?.contains(target)) return;
+    closePopovers();
     const anchorMin = minuteAtClientY(event.clientY);
     capture(event);
     setDrag({
@@ -314,7 +440,7 @@ export function TimeGrid({
       if (current.kind === "create") {
         const active =
           current.active ||
-          Math.abs(pointerMin - current.anchorMin) * PX_PER_MINUTE >
+          Math.abs(pointerMin - current.anchorMin) * pxPerMinute >
             DRAG_THRESHOLD_PX;
         return {
           ...current,
@@ -327,7 +453,7 @@ export function TimeGrid({
       const active = current.active || Math.abs(deltaPx) > DRAG_THRESHOLD_PX;
       if (!active) return current;
 
-      const deltaMinutes = deltaPx / PX_PER_MINUTE;
+      const deltaMinutes = deltaPx / pxPerMinute;
       const range =
         current.kind === "move"
           ? moveRange(current.origin, deltaMinutes)
@@ -455,7 +581,13 @@ export function TimeGrid({
       </div>
 
       {/* Scrollable body. */}
-      <div ref={scrollRef} className="relative flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="relative flex-1 overflow-y-auto"
+        onScroll={(event) => {
+          scrollTopRef.current = event.currentTarget.scrollTop;
+        }}
+      >
         {isLoading ? (
           <div className="space-y-2 p-4">
             <Skeleton className="h-16 w-full" />
@@ -475,12 +607,12 @@ export function TimeGrid({
           >
             {/* Hour gutter. */}
             <div className="border-border relative border-r">
-              {hours.map((minute) => (
+              {majorMinutes.map((minute) => (
                 <span
                   key={minute}
                   className="text-muted-foreground absolute right-1 -translate-y-1/2 text-[0.7rem] tabular-nums"
                   style={{
-                    top: offsetFromMinutes(minute, PX_PER_MINUTE, visible),
+                    top: offsetFromMinutes(minute, pxPerMinute, visible),
                   }}
                 >
                   {formatMinuteOfDay(minute, format.timeFormat)}
@@ -510,28 +642,96 @@ export function TimeGrid({
                     handleColumnPointerDown(event, dayIndex);
                   }}
                 >
-                  {hours.map((minute) => (
+                  {majorMinutes.map((minute) => (
                     <div
                       key={minute}
                       aria-hidden
                       className="border-border/70 pointer-events-none absolute inset-x-0 border-t"
                       style={{
-                        top: offsetFromMinutes(minute, PX_PER_MINUTE, visible),
+                        top: offsetFromMinutes(minute, pxPerMinute, visible),
                       }}
                     />
                   ))}
-                  {halfHours.map((minute) => (
+                  {minorMinutes.map((minute) => (
                     <div
                       key={minute}
                       aria-hidden
                       className="border-border/30 pointer-events-none absolute inset-x-0 border-t"
                       style={{
-                        top: offsetFromMinutes(minute, PX_PER_MINUTE, visible),
+                        top: offsetFromMinutes(minute, pxPerMinute, visible),
                       }}
                     />
                   ))}
 
-                  {column.blocks.map((block) => {
+                  {column.items.map((item) => {
+                    const geometry = blockGeometry(item);
+
+                    if (item.kind === "cluster") {
+                      const selected = item.members.find(
+                        (member) => member.entry.id === selectedId
+                      );
+                      const listOpen = openClusterId === item.id;
+
+                      return (
+                        <Popover
+                          key={item.id}
+                          open={listOpen || selected !== undefined}
+                          onOpenChange={(open) => {
+                            if (!open) closePopovers();
+                          }}
+                        >
+                          <PopoverAnchor asChild>
+                            <DensityCluster
+                              members={item.members}
+                              startMin={item.trueRange.startMin}
+                              endMin={item.trueRange.endMin}
+                              top={offsetFromMinutes(
+                                item.startMin,
+                                pxPerMinute,
+                                visible
+                              )}
+                              height={
+                                (item.endMin - item.startMin) * pxPerMinute
+                              }
+                              leftPct={geometry.leftPct}
+                              widthPct={geometry.widthPct}
+                              zIndex={geometry.zIndex}
+                              stacked={geometry.stacked}
+                              isOpen={listOpen || selected !== undefined}
+                              onOpen={() => {
+                                setSelectedId(null);
+                                setOpenClusterId(item.id);
+                              }}
+                            />
+                          </PopoverAnchor>
+                          {selected ? (
+                            <EntryEditPopover
+                              entry={selected.entry}
+                              actions={actions}
+                              nowMs={nowMs}
+                              onClose={() => {
+                                // Step back to the list rather than closing
+                                // outright — the other entries are still there.
+                                setSelectedId(null);
+                                setOpenClusterId(item.id);
+                              }}
+                            />
+                          ) : listOpen ? (
+                            <DensityClusterPopover
+                              members={item.members}
+                              startMin={item.trueRange.startMin}
+                              endMin={item.trueRange.endMin}
+                              onSelect={(entryId) => {
+                                setOpenClusterId(null);
+                                setSelectedId(entryId);
+                              }}
+                            />
+                          ) : null}
+                        </Popover>
+                      );
+                    }
+
+                    const block = item.segment;
                     const dragged =
                       drag &&
                       drag.kind !== "create" &&
@@ -548,22 +748,21 @@ export function TimeGrid({
                       0,
                       (range.endMin - range.startMin) * 60
                     );
-                    const geometry = blockGeometry(block);
 
                     return (
                       <Popover
-                        key={block.id}
+                        key={item.id}
                         open={selectedId === block.entry.id}
                         onOpenChange={(open) => {
-                          if (!open) setSelectedId(null);
+                          if (!open) closePopovers();
                         }}
                       >
                         <PopoverAnchor asChild>
                           <EntryBlock
                             entry={block.entry}
-                            top={offsetFromMinutes(range.startMin, PX_PER_MINUTE, visible)}
+                            top={offsetFromMinutes(range.startMin, pxPerMinute, visible)}
                             height={
-                              (range.endMin - range.startMin) * PX_PER_MINUTE
+                              (range.endMin - range.startMin) * pxPerMinute
                             }
                             leftPct={geometry.leftPct}
                             widthPct={geometry.widthPct}
@@ -618,12 +817,12 @@ export function TimeGrid({
                       style={{
                         top: offsetFromMinutes(
                           createPreview.startMin,
-                          PX_PER_MINUTE,
+                          pxPerMinute,
                           visible
                         ),
                         height:
                           (createPreview.endMin - createPreview.startMin) *
-                          PX_PER_MINUTE,
+                          pxPerMinute,
                         background: blockPalette(null).background,
                       }}
                     >
@@ -641,7 +840,7 @@ export function TimeGrid({
                       style={{
                         top: offsetFromMinutes(
                           Math.min(nowMinute, MINUTES_PER_DAY),
-                          PX_PER_MINUTE,
+                          pxPerMinute,
                           visible
                         ),
                       }}
