@@ -28,6 +28,7 @@ const EMPTY_STATE: IdleWatcherState = {
   pending: null,
   settledEntryId: null,
   awaitingResume: null,
+  pausedEntryId: null,
 };
 
 let store: KeyValueStorage | null = null;

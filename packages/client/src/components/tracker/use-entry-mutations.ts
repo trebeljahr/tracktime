@@ -357,7 +357,11 @@ export const useEntryMutations = (): EntryMutations => {
     onSuccess: (entry, _raw, context) => {
       if (context?.tempId) replaceEntry(context.tempId, toDetailed(entry));
       utils.entries.current.setData(undefined, entry);
-      idleWatcher.noteLocalStart(entry.id, Date.now());
+      // A rename of the claim, never a fresh one: the detector can fire while
+      // the start is still in flight, and re-claiming here would discard what
+      // it decided — which is how a pause-and-resume lost the resume it was
+      // holding the moment the server answered.
+      if (context?.tempId) idleWatcher.noteServerId(context.tempId, entry.id);
     },
     onError: (error, raw, context) =>
       handleError(

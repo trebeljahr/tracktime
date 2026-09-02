@@ -19,7 +19,10 @@
  *  1. **It opened the entry.** `noteLocalStart(id)` records what this device
  *     started; a device that merely *sees* a running entry over sync never
  *     touches it. This alone kills the headline bug — a second machine falling
- *     asleep cannot pause a timer it did not start.
+ *     asleep cannot pause a timer it did not start. A client that opens the
+ *     entry optimistically claims the temp id and then calls `noteServerId`
+ *     once the server names it, which renames the claim without disturbing
+ *     anything decided in between.
  *
  *  2. **Nothing has proved the person alive since.** Any sync event from a
  *     different origin means some other device just did something, so the
@@ -154,6 +157,11 @@ export type IdleWatcherState = {
   /** Already prompted or acted on; stops a repeating detector re-firing. */
   settledEntryId: string | null;
   awaitingResume: IdleResumeSeed | null;
+  /**
+   * The entry a held resume was paused out of, so a caller's cache still
+   * showing it open does not read as somebody starting something else.
+   */
+  pausedEntryId: string | null;
 };
 
 export type IdleWatcher = {
@@ -161,6 +169,19 @@ export type IdleWatcher = {
   observe(observation: IdleObservation): IdlePlan;
   /** This device just opened `entryId`. Claims it for the ownership rule. */
   noteLocalStart(entryId: string, atMs: number): void;
+  /**
+   * The server named an entry this device had opened optimistically.
+   *
+   * A rename, not a second claim: everything the watcher decided while the
+   * start was in flight — a prompt on screen, a resume waiting for the person
+   * to come back — refers to the temp id and has to survive being renamed.
+   * Calling `noteLocalStart` again instead would reset all of it, which is
+   * exactly how a pause-and-resume lost its resume.
+   *
+   * A no-op once ownership has been released, so an entry this device has
+   * already paused or stopped is not silently re-claimed.
+   */
+  noteServerId(tempId: string, entryId: string): void;
   /** This device just closed the timer; nothing is owned any more. */
   noteLocalStop(atMs: number): void;
   /** A sync event arrived from another origin — the person is alive elsewhere. */
@@ -275,27 +296,45 @@ export const createIdleWatcher = (
   /** Set by a truncation with `resume: "on-return"`, spent on the next input. */
   let awaitingResume: IdleResumeSeed | null = initial?.awaitingResume ?? null;
 
+  /**
+   * The entry the held resume was paused out of.
+   *
+   * A caller's view of the running timer is a cache, and for a moment after a
+   * pause it still holds the entry the pause just closed. Without this, that
+   * lag read as "somebody started something else" and threw the resume away —
+   * so a person who stepped away came back to a stopped timer, which is the
+   * one thing pause-and-resume exists to prevent. Seeing our own just-closed
+   * entry is a cache catching up, not news.
+   */
+  let pausedEntryId: string | null = initial?.pausedEntryId ?? null;
+
   const reset = (): void => {
     ownedEntryId = null;
     idleFloorMs = 0;
     pendingIdle = null;
     settledEntryId = null;
     awaitingResume = null;
+    pausedEntryId = null;
   };
 
   const onActive = (atMs: number, timer: IdleTimerRef | null): IdlePlan => {
     if (awaitingResume === null) return NONE;
 
-    // Something is running again — another device started it, or the user did
-    // it by hand. Reopening a second entry on top would be a duplicate, and the
-    // one-running-timer invariant would stop the first one to make room.
-    if (timer !== null) {
+    // Something *else* is running again — another device started it, or the
+    // user did it by hand. Reopening a second entry on top would be a
+    // duplicate, and the one-running-timer invariant would stop the first one
+    // to make room. The entry this pause just closed is the exception: a
+    // caller still showing it has a cache that has not caught up with our own
+    // write, and dropping the resume for that is how the timer stayed stopped.
+    if (timer !== null && timer.id !== pausedEntryId) {
       awaitingResume = null;
+      pausedEntryId = null;
       return NONE;
     }
 
     const seed = awaitingResume;
     awaitingResume = null;
+    pausedEntryId = null;
     idleFloorMs = atMs;
     return { kind: "resume", seed, startAt: iso(atMs) };
   };
@@ -356,6 +395,7 @@ export const createIdleWatcher = (
       case "pause-and-resume":
         settledEntryId = timer.id;
         awaitingResume = pending.seed;
+        pausedEntryId = timer.id;
         ownedEntryId = null;
         return truncatePlan(pending, "on-return");
 
@@ -396,6 +436,16 @@ export const createIdleWatcher = (
       pendingIdle = null;
       settledEntryId = null;
       awaitingResume = null;
+      pausedEntryId = null;
+    },
+
+    noteServerId: (tempId, entryId) => {
+      if (ownedEntryId === tempId) ownedEntryId = entryId;
+      if (settledEntryId === tempId) settledEntryId = entryId;
+      if (pausedEntryId === tempId) pausedEntryId = entryId;
+      if (pendingIdle !== null && pendingIdle.entryId === tempId) {
+        pendingIdle = { ...pendingIdle, entryId };
+      }
     },
 
     noteLocalStop: (atMs) => {
@@ -403,6 +453,7 @@ export const createIdleWatcher = (
       idleFloorMs = atMs;
       pendingIdle = null;
       awaitingResume = null;
+      pausedEntryId = null;
     },
 
     noteRemoteActivity: (atMs) => {
@@ -440,6 +491,7 @@ export const createIdleWatcher = (
       pending: pendingIdle,
       settledEntryId,
       awaitingResume,
+      pausedEntryId,
     }),
 
     restore: (next) => {
@@ -448,6 +500,7 @@ export const createIdleWatcher = (
       pendingIdle = next.pending;
       settledEntryId = next.settledEntryId;
       awaitingResume = next.awaitingResume;
+      pausedEntryId = next.pausedEntryId;
     },
   };
 };

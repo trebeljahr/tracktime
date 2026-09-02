@@ -255,6 +255,58 @@ describe("createIdleWatcher — pause then resume", () => {
     });
   });
 
+  it("resumes even while the caller still shows the entry it paused", () => {
+    // The caller's running timer is a cache. For a moment after the pause it
+    // still holds the entry the pause closed, and the web detector reports
+    // `active` on a fixed interval whether or not anything happened — so this
+    // reading is not hypothetical, and dropping the resume for it left the
+    // person coming back to a stopped timer.
+    const watcher = ownedWatcher();
+    const config = settings({ behavior: "pause-and-resume" });
+    observeIdle(watcher, {
+      atMinutes: 45,
+      idleSinceMinutes: 5,
+      config,
+    });
+
+    expect(
+      watcher.observe({
+        signal: "active",
+        atMs: at(46),
+        timer: TIMER,
+        settings: config,
+      })
+    ).toMatchObject({ kind: "resume", startAt: iso(46) });
+  });
+
+  it("drops the resume when a different entry is running", () => {
+    // Somebody genuinely started something else. Reopening on top of it would
+    // be a duplicate, and the one-running-timer rule would stop theirs to make
+    // room for ours.
+    const watcher = ownedWatcher();
+    const config = settings({ behavior: "pause-and-resume" });
+    observeIdle(watcher, { atMinutes: 45, idleSinceMinutes: 5, config });
+
+    expect(
+      watcher.observe({
+        signal: "active",
+        atMs: at(46),
+        timer: { ...TIMER, id: "entry-2" },
+        settings: config,
+      })
+    ).toEqual({ kind: "none" });
+
+    // And it is gone for good, not merely skipped for this reading.
+    expect(
+      watcher.observe({
+        signal: "active",
+        atMs: at(47),
+        timer: null,
+        settings: config,
+      })
+    ).toEqual({ kind: "none" });
+  });
+
   it("resumes exactly once", () => {
     const watcher = ownedWatcher();
     observeIdle(watcher, {
@@ -423,6 +475,90 @@ describe("createIdleWatcher — idle is per device, the timer is not", () => {
   });
 });
 
+describe("createIdleWatcher — an optimistic start being named", () => {
+  /** The entry as the server hands it back: same instant, a real id. */
+  const named: IdleTimerRef = { ...TIMER, id: "entry-real" };
+
+  it("keeps acting on the entry once the temp id is renamed", () => {
+    const watcher = createIdleWatcher();
+    watcher.noteLocalStart("temp-1", at(0));
+    watcher.noteServerId("temp-1", named.id);
+
+    expect(
+      observeIdle(watcher, {
+        atMinutes: 45,
+        idleSinceMinutes: 5,
+        timer: named,
+        config: settings({ behavior: "stop" }),
+      })
+    ).toMatchObject({ kind: "truncate", entryId: named.id });
+  });
+
+  it("does not throw away a resume the server reply raced", () => {
+    // The exact shape of the bug: the detector fires against the optimistic
+    // entry while `entries.start` is still in flight, and the reply lands
+    // afterwards. Re-claiming there wiped the pending resume, so the person
+    // came back to a stopped timer.
+    const watcher = createIdleWatcher();
+    watcher.noteLocalStart("temp-1", at(0));
+
+    const config = settings({ behavior: "pause-and-resume" });
+    expect(
+      observeIdle(watcher, {
+        atMinutes: 45,
+        idleSinceMinutes: 5,
+        timer: { ...TIMER, id: "temp-1" },
+        config,
+      })
+    ).toMatchObject({ kind: "truncate", resume: "on-return" });
+
+    watcher.noteServerId("temp-1", named.id);
+
+    expect(
+      watcher.observe({
+        signal: "active",
+        atMs: at(50),
+        timer: null,
+        settings: config,
+      })
+    ).toMatchObject({ kind: "resume", startAt: iso(50) });
+  });
+
+  it("leaves a prompt answerable after the entry is named", () => {
+    const watcher = createIdleWatcher();
+    watcher.noteLocalStart("temp-1", at(0));
+    observeIdle(watcher, {
+      atMinutes: 45,
+      idleSinceMinutes: 5,
+      timer: { ...TIMER, id: "temp-1" },
+    });
+
+    watcher.noteServerId("temp-1", named.id);
+
+    expect(watcher.pending()).toMatchObject({ entryId: named.id });
+    expect(watcher.answer("discard", at(46))).toMatchObject({
+      kind: "truncate",
+      entryId: named.id,
+    });
+  });
+
+  it("does not re-claim an entry this device has already released", () => {
+    const watcher = createIdleWatcher();
+    watcher.noteLocalStart("temp-1", at(0));
+    // "stop" releases ownership: the device is done with this entry.
+    observeIdle(watcher, {
+      atMinutes: 45,
+      idleSinceMinutes: 5,
+      timer: { ...TIMER, id: "temp-1" },
+      config: settings({ behavior: "stop" }),
+    });
+
+    watcher.noteServerId("temp-1", named.id);
+
+    expect(watcher.state().ownedEntryId).toBeNull();
+  });
+});
+
 describe("createIdleWatcher — never destroys tracked time", () => {
   it("never truncates before the entry started", () => {
     const watcher = createIdleWatcher();
@@ -513,6 +649,7 @@ describe("createIdleWatcher — surviving a process that does not", () => {
       pending: null,
       settledEntryId: null,
       awaitingResume: null,
+      pausedEntryId: null,
     });
   });
 });

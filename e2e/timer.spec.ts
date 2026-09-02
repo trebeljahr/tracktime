@@ -120,7 +120,7 @@ test.describe("Timer", () => {
     );
   });
 
-  test("pauses at the idle start and resumes the same work", async ({
+  test("pauses when the screen locks and resumes the same work", async ({
     page,
   }) => {
     await openTracker(page, "timer-idle");
@@ -161,12 +161,20 @@ test.describe("Timer", () => {
       )
       .toBe("function");
 
-    // Two minutes without input, against a one-minute threshold.
-    await page.evaluate(() => window.__tracktimeIdle?.simulate("idle", 120));
+    // A locked screen rather than a silent one, and that is not an arbitrary
+    // choice: an `idle` reading is clamped to the running entry's own start,
+    // so a timer opened seconds ago can never have been idle long enough to
+    // cross even the one-minute minimum threshold — the entry itself is the
+    // proof that somebody was at the keyboard. Locking is deliberate, so it
+    // skips the threshold (the "Treat a locked screen as away" setting, on by
+    // default) and is the only signal a test can raise without burning a real
+    // minute of wall clock. The threshold path is covered exhaustively in
+    // `core-idle.test.ts`, where the clock is a parameter.
+    await page.evaluate(() => window.__tracktimeIdle?.simulate("locked"));
 
-    // Paused: the entry is closed, nothing is running, and the time it had
-    // before the idle span survives — the truncation is clamped so an entry
-    // that began inside the idle window keeps a second rather than vanishing.
+    // Paused: the entry is closed, nothing is running, and the seconds it had
+    // before the lock survive — a truncation is clamped to stay after the
+    // entry's start, so it can never destroy tracked time.
     await expect(runningRows(page)).toHaveCount(0);
     const paused = entryRow(page, "Reading the RFC").first();
     await expect(paused).toHaveAttribute("data-running", "false");
@@ -174,13 +182,28 @@ test.describe("Timer", () => {
     // Back at the keyboard: the same work reopens, by itself.
     await page.evaluate(() => window.__tracktimeIdle?.simulate("active"));
 
+    // A resume is two chained writes — close the old entry, open a new one —
+    // and the list is briefly inconsistent while `entries.start` is in flight:
+    // the optimistic row is on screen before every cache the pause invalidated
+    // has caught up, so a count taken in that window can still see the paused
+    // row as running. Wait for the new row to carry its server id first.
+    const resumed = runningRows(page).first();
+    await expect
+      .poll(async () => (await resumed.getAttribute("data-entry-id")) ?? "", {
+        message: "expected the resumed row to settle to its server id",
+        // The optimistic row is there in a frame; the id it settles to comes
+        // from the server, which is the slow part under a loaded suite.
+        timeout: 15_000,
+      })
+      .not.toMatch(/^(?:temp-|$)/);
+
     await expect(runningRows(page)).toHaveCount(1);
     await expect(
       runningRows(page).getByTestId("entry-description"),
     ).toHaveText("Reading the RFC");
 
-    // One session, now two rows: the work before the idle span and the work
-    // after it. The idle minutes are in neither.
+    // One session, now two rows: the work before the lock and the work after
+    // it. The time spent away is in neither.
     await expect(entryRow(page, "Reading the RFC")).toHaveCount(2);
   });
 
