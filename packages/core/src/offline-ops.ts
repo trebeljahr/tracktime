@@ -11,6 +11,7 @@
  */
 
 import { createId } from "./ids.js";
+import type { IdleWatcher } from "./idle.js";
 import type { QueuedMutation } from "./offline-queue.js";
 import type { EntrySource } from "@starter/shared";
 
@@ -200,4 +201,53 @@ export const decodeOfflineMutation = (
         input: stored.input as OfflineDiscardInput,
       };
   }
+};
+
+// ── replay ───────────────────────────────────────────────────────────
+
+/**
+ * The entry a replayed `entries.start` produced, as far as a caller with an
+ * untyped mutation result can tell. Only the id matters here, and it has to be
+ * read defensively: the replay runner holds the API binding, so what comes
+ * back is whatever that binding returned.
+ */
+const replayedEntryId = (result: unknown): string | null => {
+  if (typeof result !== "object" || result === null) return null;
+  const { id } = result as { id?: unknown };
+  return typeof id === "string" && id.length > 0 ? id : null;
+};
+
+/**
+ * Rename the idle watcher's ownership claim after a queued start finally
+ * reached the server. Returns whether anything changed, so a client that has
+ * to persist its watcher only writes when there is something to write.
+ *
+ * A timer started offline is claimed against its temp id — that is the only id
+ * it has — and the claim is what lets this device act on its own idle signal
+ * for that entry. Replay gives the entry a real id, and without this the claim
+ * still names the temp one, so the ownership check in `observe` fails against
+ * every later reading and idle detection silently stops working for the rest
+ * of the entry's life.
+ *
+ * `noteServerId` rather than `noteLocalStart`: a row can sit in the queue for
+ * hours, and anything the watcher decided in the meantime — a prompt on
+ * screen, a resume waiting for the person to come back — names the temp id and
+ * has to survive the rename rather than be reset by a fresh claim.
+ */
+export const noteReplayedServerId = (
+  watcher: Pick<IdleWatcher, "noteServerId">,
+  mutation: OfflineMutation,
+  result: unknown
+): boolean => {
+  // Only a start invents an id. Every other op names an entry that already
+  // exists, so there is nothing to rename.
+  if (mutation.op !== "entries.start") return false;
+  const { tempId } = mutation;
+  if (tempId === undefined) return false;
+
+  const entryId = replayedEntryId(result);
+  if (entryId === null || entryId === tempId) return false;
+
+  watcher.noteServerId(tempId, entryId);
+  return true;
 };

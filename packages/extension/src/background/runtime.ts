@@ -48,7 +48,11 @@ import {
 } from "../lib/session";
 import { clearWebSessionCookie, readWebSessionToken } from "../lib/web-session";
 import { renderBadge } from "./badge";
-import { noteRemoteActivity, resetIdleWatcher } from "./idle-state";
+import {
+  noteRemoteActivity,
+  noteReplayedStart,
+  resetIdleWatcher,
+} from "./idle-state";
 
 /** The rebuildable half of the worker: config plus whatever it configures. */
 export type Runtime = {
@@ -717,10 +721,11 @@ export async function flushQueue(): Promise<number> {
     // A row written by an older build cannot be replayed against today's
     // schema; resolving drops it rather than wedging everything behind it.
     if (decoded === null) return;
+    let replayed: unknown;
     try {
       // The op string *is* the tRPC path, by design — so there is no dispatch
       // table here to drift out of step with the queue contract.
-      await current.api.mutate(decoded.op, decoded.input);
+      replayed = await current.api.mutate(decoded.op, decoded.input);
     } catch (error) {
       // Anything the server can still accept later — a lapsed session, a 500,
       // a dead network — keeps its place and wedges the rest deliberately, so
@@ -729,7 +734,14 @@ export async function flushQueue(): Promise<number> {
       // close is exactly that), and stopping here would wedge the queue
       // forever. Drop it and let the reconcile below pull the truth back.
       if (!isPermanentRejection(error)) throw error;
+      return;
     }
+
+    // Outside the catch above on purpose: this writes to `chrome.storage`, and
+    // a failure there is not a failed replay. Letting it reach that handler
+    // would re-queue a mutation the server has already applied and replay it
+    // twice.
+    await noteReplayedStart(decoded, replayed);
   });
 
   // Drained: the server now holds everything the optimistic entry stood in for.

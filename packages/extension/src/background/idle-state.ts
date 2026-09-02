@@ -13,9 +13,11 @@
  */
 import {
   createIdleWatcher,
+  noteReplayedServerId,
   type IdleWatcher,
   type IdleWatcherState,
   type KeyValueStorage,
+  type OfflineMutation,
   type PendingIdle,
 } from "@starter/core";
 import { chromeStorage, localStorageArea } from "../lib/chrome-storage";
@@ -78,6 +80,25 @@ export async function noteLocalStart(
 ): Promise<void> {
   (await getIdleWatcher()).noteLocalStart(entryId, atMs);
   await persistIdleWatcher();
+}
+
+/**
+ * A queued mutation just replayed. Renames the claim when it was the start
+ * that opened the running entry, so a timer begun offline keeps its idle
+ * detection once the server names it.
+ *
+ * The decision itself lives in core, next to the queue contract it reads, and
+ * only the persistence is here — the worker is evicted every 30 seconds, so a
+ * rename that is not written back is a rename that never happened.
+ */
+export async function noteReplayedStart(
+  mutation: OfflineMutation,
+  result: unknown,
+): Promise<void> {
+  const watcher = await getIdleWatcher();
+  if (noteReplayedServerId(watcher, mutation, result)) {
+    await persistIdleWatcher();
+  }
 }
 
 /** The user stopped the timer themselves. */
