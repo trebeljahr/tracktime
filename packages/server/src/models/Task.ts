@@ -31,7 +31,12 @@ export type TaskDocLike = {
 const taskSchema = new Schema<ITask>(
   {
     workspaceId: { type: String, required: true, index: true },
-    createdBy: { type: String, required: true, default: "" },
+    // NOT `required` — mongoose's String required validator rejects ""
+    // because it tests for a non-empty string, so pairing required:true
+    // with default:"" makes any write that omits `createdBy` (a migration,
+    // a seed, a backfill) fail with "Path `createdBy` is required".
+    // Same trap as TimeEntry.description.
+    createdBy: { type: String, default: "" },
     projectId: { type: String, required: true },
     name: { type: String, required: true, maxlength: 200, trim: true },
     done: { type: Boolean, required: true, default: false },

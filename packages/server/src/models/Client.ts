@@ -31,7 +31,12 @@ export type ClientDocLike = {
 const clientSchema = new Schema<IClient>(
   {
     workspaceId: { type: String, required: true, index: true },
-    createdBy: { type: String, required: true, default: "" },
+    // NOT `required` — mongoose's String required validator rejects ""
+    // because it tests for a non-empty string, so pairing required:true
+    // with default:"" makes any write that omits `createdBy` (a migration,
+    // a seed, a backfill) fail with "Path `createdBy` is required".
+    // Same trap as TimeEntry.description.
+    createdBy: { type: String, default: "" },
     name: { type: String, required: true, maxlength: 120, trim: true },
     color: { type: String, required: true, default: DEFAULT_CLIENT_COLOR },
     archived: { type: Boolean, required: true, default: false },
