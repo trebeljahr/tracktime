@@ -8,7 +8,14 @@ import {
   open,
   showToast,
 } from "@raycast/api";
-import { entryDurationSec, type DetailedEntry } from "@starter/core";
+import {
+  entryDurationSec,
+  quickStartHint,
+  quickStartLabel,
+  repairQuickStart,
+  type DetailedEntry,
+  type DetailedFavorite,
+} from "@starter/core";
 import { getTracktime } from "./lib/api.js";
 import {
   formatDurationShort,
@@ -26,6 +33,7 @@ const RECENT_LIMIT = 6;
 type MenuData = {
   running: DetailedEntry | null;
   recent: DetailedEntry[];
+  favorites: DetailedFavorite[];
   todaySec: number;
 };
 
@@ -60,13 +68,18 @@ const load = async (): Promise<MenuData> => {
   const api = await getTracktime();
   const now = Date.now();
 
-  // One round trip: the running entry is in this window too, and it arrives
-  // with its project and client names already joined.
-  const { entries } = await api.list({
-    from: isoDaysAgo(RECENT_DAYS),
-    to: new Date(now + 60_000).toISOString(),
-    limit: 100,
-  });
+  // One round trip for the entries: the running entry is in this window too,
+  // and it arrives with its project and client names already joined. The pins
+  // are a second, small read — they are the section people actually aim for,
+  // so they must not depend on the entry window happening to contain them.
+  const [{ entries }, favorites] = await Promise.all([
+    api.list({
+      from: isoDaysAgo(RECENT_DAYS),
+      to: new Date(now + 60_000).toISOString(),
+      limit: 100,
+    }),
+    api.favorites(),
+  ]);
 
   const dayStart = startOfToday();
   const todaySec = entries.reduce((total, entry) => {
@@ -78,6 +91,7 @@ const load = async (): Promise<MenuData> => {
   return {
     running: entries.find((entry) => entry.end === null) ?? null,
     recent: shortlist(entries),
+    favorites,
     todaySec,
   };
 };
@@ -195,8 +209,46 @@ export default function MenuBar(): React.JSX.Element | null {
               });
             }}
           />
+          <MenuBarExtra.Item
+            title="Start a Favorite…"
+            icon={Icon.Star}
+            shortcut={{ modifiers: ["cmd"], key: "f" }}
+            onAction={() => {
+              void launchCommand({
+                name: "start-favorite",
+                type: LaunchType.UserInitiated,
+              });
+            }}
+          />
         </MenuBarExtra.Section>
       )}
+
+      {/* Pins first, and above Continue: they are the whole point of pinning.
+          Started through `startQuick`, which is `entries.start` with the
+          favorite's own fields — the same path every other client uses. */}
+      {data && data.favorites.length > 0 ? (
+        <MenuBarExtra.Section title="Favorites">
+          {data.favorites.map((favorite) => (
+            <MenuBarExtra.Item
+              key={favorite.id}
+              title={quickStartLabel(favorite)}
+              subtitle={quickStartHint(favorite) ?? undefined}
+              icon={Icon.Star}
+              onAction={() => {
+                void act(async () => {
+                  const api = await getTracktime();
+                  await api.startQuick(repairQuickStart(favorite));
+                  await showToast({
+                    style: Toast.Style.Success,
+                    title: "Timer started",
+                    message: quickStartLabel(favorite),
+                  });
+                }, "Could not start the timer");
+              }}
+            />
+          ))}
+        </MenuBarExtra.Section>
+      ) : null}
 
       {data && data.recent.length > 0 ? (
         <MenuBarExtra.Section title="Continue">

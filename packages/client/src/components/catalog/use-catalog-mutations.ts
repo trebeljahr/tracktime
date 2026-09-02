@@ -95,6 +95,11 @@ function announceRemoval(result: RemoveResult, noun: string): void {
       `${plural(result.entriesDetached, "time entry", "time entries")} kept without a ${noun}`,
     );
   }
+  if (result.favoritesDetached > 0) {
+    detail.push(
+      `${plural(result.favoritesDetached, "favorite", "favorites")} kept without a ${noun}`,
+    );
+  }
 
   const name = `${noun.charAt(0).toUpperCase()}${noun.slice(1)}`;
   toast.success(

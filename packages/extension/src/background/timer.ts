@@ -21,6 +21,7 @@ import {
   enqueueOffline,
   flushQueue,
   getCachedProjects,
+  invalidateRecents,
   isTransportFailure,
   ORIGIN_ID,
   rememberOptimisticRunning,
@@ -74,6 +75,15 @@ export async function startTimer(
   description: string,
   projectId: string | null,
   taskId: string | null = null,
+  /**
+   * Explicit for a quick start, omitted for the popup's own form.
+   *
+   * A favorite recorded its billable flag when it was pinned, and a recent
+   * carries the flag its original entry was tracked with. Re-deriving either
+   * from the project's current default would silently change what the user
+   * asked for — and would make a queued replay disagree with the live call.
+   */
+  billable?: boolean,
 ): Promise<void> {
   const current = await ensureReady();
   if (!current.session) throw notSignedIn();
@@ -82,7 +92,7 @@ export async function startTimer(
     description,
     projectId,
     taskId,
-    billable: billableDefaultFor(projectId),
+    billable: billable ?? billableDefaultFor(projectId),
     start: new Date().toISOString(),
     // Its own source, not "api": an entry made from the toolbar stays
     // traceable back to the toolbar.
@@ -103,6 +113,9 @@ export async function startTimer(
   try {
     const entry = await current.api.mutate<TimeEntry>("entries.start", input);
     setCachedRunning(entry);
+    // Starting stops whatever was running, so the entry log — and with it the
+    // derived recents list — has moved on.
+    invalidateRecents();
     await renderBadge(entry);
   } catch (error) {
     // A server rejection (validation, conflict, expired token) means the
@@ -147,6 +160,7 @@ export async function stopTimer(): Promise<void> {
   try {
     await current.api.mutate<TimeEntry>("entries.stop", input);
     setCachedRunning(null);
+    invalidateRecents();
     await renderBadge(null);
   } catch (error) {
     if (!isTransportFailure(error)) throw error;

@@ -5,6 +5,7 @@ import {
   formatDuration,
   type Client,
   type Project,
+  type QuickStart,
   type SyncStatus,
   type TimeEntry,
 } from "@starter/core";
@@ -12,6 +13,7 @@ import type { BackgroundState } from "../lib/messaging";
 import { ApiUrlEditor } from "./api-url-editor";
 import { Combobox, type ComboboxOption } from "./combobox";
 import { Menu } from "./menu";
+import { QuickStartList } from "./quick-start-list";
 import { useElapsedSec } from "./use-elapsed";
 
 export type TrackerScreenProps = {
@@ -22,8 +24,12 @@ export type TrackerScreenProps = {
     description: string,
     projectId: string | null,
     taskId: string | null,
+    /** Explicit for a quick start; omitted lets the project default decide. */
+    billable?: boolean,
   ) => Promise<boolean>;
   onStop: () => Promise<boolean>;
+  onPinFavorite: (quick: QuickStart) => Promise<boolean>;
+  onUnpinFavorite: (id: string) => Promise<boolean>;
   onSignOut: () => Promise<boolean>;
   onSaveApiUrl: (apiUrl: string) => Promise<boolean>;
   /** Loads the task list for a project into the worker's snapshot. */
@@ -127,6 +133,8 @@ export function TrackerScreen({
   error,
   onStart,
   onStop,
+  onPinFavorite,
+  onUnpinFavorite,
   onSignOut,
   onSaveApiUrl,
   onSelectProject,
@@ -189,6 +197,46 @@ export function TrackerScreen({
     await onCreateTask(projectId, name);
   };
 
+  /**
+   * Start a favorite or a recent.
+   *
+   * Same call as the form's own submit — `timer:start` with the four fields
+   * already chosen — so the worker's billable defaulting, offline queueing and
+   * optimistic badge all apply unchanged. The only difference is that
+   * `billable` is explicit, because a pin already decided it.
+   */
+  const startQuick = async (quick: QuickStart): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    setOptimistic({
+      running: provisionalEntry(
+        quick.description,
+        quick.projectId,
+        quick.taskId,
+      ),
+    });
+    await onStart(
+      quick.description,
+      quick.projectId,
+      quick.taskId,
+      quick.billable,
+    );
+    setOptimistic(null);
+    setBusy(false);
+  };
+
+  const pin = async (quick: QuickStart): Promise<void> => {
+    setBusy(true);
+    await onPinFavorite(quick);
+    setBusy(false);
+  };
+
+  const unpin = async (id: string): Promise<void> => {
+    setBusy(true);
+    await onUnpinFavorite(id);
+    setBusy(false);
+  };
+
   const start = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     if (busy) return;
@@ -240,6 +288,22 @@ export function TrackerScreen({
       <div className="popup__body">
         {running === null ? (
           <form className="form" onSubmit={start} data-testid="tracker-start-form">
+            {/* Above the description field on purpose: the whole point is not
+                having to fill it in. */}
+            <QuickStartList
+              items={state.quickStarts}
+              disabled={busy}
+              onStart={(quick) => {
+                void startQuick(quick);
+              }}
+              onPin={(quick) => {
+                void pin(quick);
+              }}
+              onUnpin={(id) => {
+                void unpin(id);
+              }}
+            />
+
             <div className="field">
               <label className="field__label" htmlFor="description">
                 Description

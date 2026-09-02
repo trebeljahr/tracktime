@@ -11,14 +11,17 @@
  * last knew, because a popup showing a stale running timer is far more useful
  * than one showing an error.
  */
-import type { ApiClient, TimeEntry } from "@starter/core";
+import { mergeQuickStarts, type ApiClient, type TimeEntry } from "@starter/core";
 import type { BackgroundState } from "../lib/messaging";
 import { fetchClients, fetchProjects, fetchTasks } from "./catalog";
+import { fetchFavorites, fetchRecents } from "./favorites";
 import {
   ensureReady,
   forgetSession,
   getCachedClients,
+  getCachedFavorites,
   getCachedProjects,
+  getCachedRecents,
   getCachedTasks,
   getCachedTasksProjectId,
   getCachedTodaySec,
@@ -34,6 +37,13 @@ import {
 /** Today's entries could plausibly run to a few dozen; 500 is the cap. */
 const TODAY_ENTRY_LIMIT = 500;
 
+/**
+ * How many chips the popup's quick-start row shows. Lower than the web app's:
+ * the popup is 360px wide, and a row that scrolls sideways is worse than a
+ * short one.
+ */
+const QUICK_START_LIMIT = 5;
+
 const signedOutState = (
   apiUrl: string,
   webUrl: string | null,
@@ -48,6 +58,9 @@ const signedOutState = (
   clients: [],
   tasks: [],
   tasksProjectId: null,
+  quickStarts: [],
+  favorites: [],
+  recents: [],
   todaySec: 0,
   syncStatus: getSyncStatus(),
 });
@@ -123,16 +136,19 @@ export async function buildState(): Promise<BackgroundState> {
   const tasksProjectId = getCachedTasksProjectId();
 
   const running = await softRead(resolveRunning, peekRunning());
-  const [email, projects, clients, tasks, todaySec] = await Promise.all([
-    softRead(resolveEmail, current.session.email),
-    softRead(() => fetchProjects(current.api), getCachedProjects() ?? []),
-    softRead(() => fetchClients(current.api), getCachedClients() ?? []),
-    softRead(
-      () => fetchTasks(current.api, tasksProjectId),
-      getCachedTasks(tasksProjectId) ?? [],
-    ),
-    softRead(() => fetchTodaySec(current.api), getCachedTodaySec() ?? 0),
-  ]);
+  const [email, projects, clients, tasks, todaySec, favorites, recents] =
+    await Promise.all([
+      softRead(resolveEmail, current.session.email),
+      softRead(() => fetchProjects(current.api), getCachedProjects() ?? []),
+      softRead(() => fetchClients(current.api), getCachedClients() ?? []),
+      softRead(
+        () => fetchTasks(current.api, tasksProjectId),
+        getCachedTasks(tasksProjectId) ?? [],
+      ),
+      softRead(() => fetchTodaySec(current.api), getCachedTodaySec() ?? 0),
+      softRead(() => fetchFavorites(current.api), getCachedFavorites() ?? []),
+      softRead(() => fetchRecents(current.api), getCachedRecents() ?? []),
+    ]);
 
   if (unauthorized) {
     // The token was revoked from Settings → Devices, or it simply expired.
@@ -154,6 +170,16 @@ export async function buildState(): Promise<BackgroundState> {
     clients,
     tasks,
     tasksProjectId,
+    // Merged here rather than in the popup: the worker owns all state, and
+    // the merge rule has to match the web app's or one browser disagrees
+    // with itself about what is pinned.
+    quickStarts: mergeQuickStarts({
+      favorites,
+      recents,
+      limit: QUICK_START_LIMIT,
+    }),
+    favorites,
+    recents,
     todaySec,
     syncStatus: getSyncStatus(),
   };

@@ -6,6 +6,7 @@
 // entry is a normal, representable state. The same holds one level up: a
 // project whose client is deleted keeps its time and becomes client-less.
 import { Client } from "../../models/Client.js";
+import { Favorite } from "../../models/Favorite.js";
 import { Project } from "../../models/Project.js";
 import { Task } from "../../models/Task.js";
 import { TimeEntry } from "../../models/TimeEntry.js";
@@ -21,12 +22,15 @@ export type CatalogRemoveResult = {
   tasksDeleted: number;
   /** Projects that kept their time but lost their client reference. */
   projectsDetached: number;
+  /** Pinned quick starts that lost a project/task reference. */
+  favoritesDetached: number;
 };
 
 const EMPTY_RESULT: CatalogRemoveResult = {
   entriesDetached: 0,
   tasksDeleted: 0,
   projectsDetached: 0,
+  favoritesDetached: 0,
 };
 
 /**
@@ -55,6 +59,21 @@ export async function cascadeDeleteProject(
     { $set: { projectId: null, taskId: null } },
   );
 
+  // Favorites are detached, not deleted, for the same reason entries are: a
+  // pin is a statement about work the user does, and losing the project it was
+  // filed under is no reason to silently unpin it. It degrades to a
+  // project-less pin, which every surface already renders.
+  const favorites = await Favorite.updateMany(
+    {
+      ownerId,
+      $or: [
+        { projectId },
+        ...(taskIds.length > 0 ? [{ taskId: { $in: taskIds } }] : []),
+      ],
+    },
+    { $set: { projectId: null, taskId: null } },
+  );
+
   await Task.deleteMany({ ownerId, projectId });
   await Project.deleteOne({ _id: projectId, ownerId });
 
@@ -62,6 +81,7 @@ export async function cascadeDeleteProject(
     ...EMPTY_RESULT,
     entriesDetached: detached.modifiedCount,
     tasksDeleted: taskIds.length,
+    favoritesDetached: favorites.modifiedCount,
   };
 }
 
@@ -77,9 +97,17 @@ export async function cascadeDeleteTask(
     { ownerId, taskId },
     { $set: { taskId: null } },
   );
+  const favorites = await Favorite.updateMany(
+    { ownerId, taskId },
+    { $set: { taskId: null } },
+  );
   await Task.deleteOne({ _id: taskId, ownerId });
 
-  return { ...EMPTY_RESULT, entriesDetached: detached.modifiedCount };
+  return {
+    ...EMPTY_RESULT,
+    entriesDetached: detached.modifiedCount,
+    favoritesDetached: favorites.modifiedCount,
+  };
 }
 
 /**

@@ -1,0 +1,243 @@
+// Pinned quick starts — the five things somebody tracks every day, kept where
+// a weekly task cannot fall off the end of the recents list.
+//
+// Invariants this file owns:
+//  - Every query/mutation is scoped by `ownerId`; another user's document is
+//    indistinguishable from a missing one (NOT_FOUND, never FORBIDDEN).
+//  - `order` is dense from 0 within an owner. `create` appends, `remove`
+//    closes the gap, `reorder` rewrites the whole list.
+//  - Pins are unique by (description, projectId, taskId, billable) — pinning
+//    the same job twice is always a mistake, never an intent.
+//  - Every mutation calls `publishSync(ctx.user.id, { kind:
+//    "favorites.changed" }, input.originId)`.
+//
+// There is no `start` procedure here on purpose. A favorite is started by
+// handing its four fields to `entries.start`, exactly as the tracker's Start
+// button does — see the note in @starter/shared's quick-start.ts.
+import { TRPCError } from "@trpc/server";
+import mongoose from "mongoose";
+import {
+  createFavoriteSchema,
+  idInputSchema,
+  quickStartKey,
+  reorderFavoritesSchema,
+  type DetailedFavorite,
+} from "@starter/shared";
+import { Favorite, toClientFavorite } from "../../models/Favorite.js";
+import { Project } from "../../models/Project.js";
+import { Task } from "../../models/Task.js";
+import { publishSync } from "../../ws/sync.js";
+import { protectedProcedure, router } from "../trpc.js";
+import { loadCatalogLookup } from "./catalog-lookup.js";
+import { resolveQuickStartLabels } from "./quick-start.js";
+
+/** How many pins one owner may keep. Past this the row stops being a shortcut. */
+const MAX_FAVORITES = 50;
+
+const notFound = (): TRPCError =>
+  new TRPCError({ code: "NOT_FOUND", message: "Favorite not found" });
+
+/** An id that cannot address a document reads as missing, never as a 500. */
+const requireObjectId = (id: string): string => {
+  if (!mongoose.isValidObjectId(id)) throw notFound();
+  return id;
+};
+
+/**
+ * Read the pins in their stored order, then attach catalog labels.
+ *
+ * Exported because the extension's snapshot and the Raycast command both want
+ * exactly this, and because `entries.recent` needs the same labelling — the
+ * two tiers must describe an archived project identically or the same pin
+ * reads differently depending on which list it came from.
+ */
+export async function listFavorites(
+  ownerId: string,
+): Promise<DetailedFavorite[]> {
+  const docs = await Favorite.find({ ownerId })
+    .sort({ order: 1, createdAt: 1 })
+    .lean();
+  if (docs.length === 0) return [];
+
+  const favorites = docs.map(toClientFavorite);
+  const catalog = await loadCatalogLookup(ownerId, favorites);
+
+  return favorites.map((favorite) => ({
+    ...favorite,
+    ...resolveQuickStartLabels(favorite, catalog),
+  }));
+}
+
+/**
+ * Rewrite `order` so it is dense from 0 in the given id order.
+ *
+ * Dense ordering is what makes "move one slot left" a client-side swap plus a
+ * single `reorder`, instead of a fractional-index scheme nobody can debug.
+ */
+const writeOrder = async (
+  ownerId: string,
+  ids: readonly string[],
+): Promise<void> => {
+  if (ids.length === 0) return;
+  await Favorite.bulkWrite(
+    ids.map((id, index) => ({
+      updateOne: {
+        filter: { _id: id, ownerId },
+        update: { $set: { order: index } },
+      },
+    })),
+  );
+};
+
+export const favoritesRouter = router({
+  list: protectedProcedure.query(
+    async ({ ctx }): Promise<DetailedFavorite[]> =>
+      listFavorites(ctx.user.id),
+  ),
+
+  create: protectedProcedure
+    .input(createFavoriteSchema)
+    .mutation(async ({ ctx, input }): Promise<DetailedFavorite> => {
+      const ownerId = ctx.user.id;
+      const description = input.description.trim();
+      const projectId = input.projectId ?? null;
+      const taskId = input.taskId ?? null;
+
+      // Same defaulting rule as `entries.start`, applied at pin time rather
+      // than at start time: a pin is a decision about what to track, and it
+      // must not silently change meaning later because the project's default
+      // was edited in between.
+      const project =
+        projectId !== null && mongoose.isValidObjectId(projectId)
+          ? await Project.findOne({ _id: projectId, ownerId }).lean()
+          : null;
+      if (projectId !== null && project === null) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Project not found",
+        });
+      }
+      const billable = input.billable ?? project?.billableDefault ?? false;
+
+      // Validated at pin time for the same reason `entries.start` validates at
+      // start time: a pin that cannot be started is worse than a rejected pin,
+      // because it fails later, on the surface built to be one click.
+      if (taskId !== null) {
+        const task = mongoose.isValidObjectId(taskId)
+          ? await Task.findOne({ _id: taskId, ownerId }).lean()
+          : null;
+        if (task === null) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+        }
+        if (projectId !== null && task.projectId !== projectId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Task does not belong to the given project",
+          });
+        }
+      }
+
+      const existing = await Favorite.find({ ownerId })
+        .sort({ order: 1 })
+        .lean();
+
+      // Pinning something already pinned is a no-op that returns the pin, not
+      // a duplicate and not an error: every surface offers a pin action, and
+      // two of them racing must not leave two identical chips behind.
+      const key = quickStartKey({ description, projectId, taskId, billable });
+      const clash = existing.find(
+        (candidate) =>
+          quickStartKey({
+            description: candidate.description.trim(),
+            projectId: candidate.projectId ?? null,
+            taskId: candidate.taskId ?? null,
+            billable: candidate.billable,
+          }) === key,
+      );
+      if (clash) {
+        const wire = toClientFavorite(clash);
+        const catalog = await loadCatalogLookup(ownerId, [wire]);
+        return { ...wire, ...resolveQuickStartLabels(wire, catalog) };
+      }
+
+      if (existing.length >= MAX_FAVORITES) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `You can pin at most ${MAX_FAVORITES} favorites.`,
+        });
+      }
+
+      const created = await Favorite.create({
+        ownerId,
+        description,
+        projectId,
+        taskId,
+        billable,
+        order: existing.length,
+      });
+
+      const wire = toClientFavorite(created);
+      const catalog = await loadCatalogLookup(ownerId, [wire]);
+
+      publishSync(ownerId, { kind: "favorites.changed" }, input.originId);
+      return { ...wire, ...resolveQuickStartLabels(wire, catalog) };
+    }),
+
+  remove: protectedProcedure
+    .input(idInputSchema)
+    .mutation(
+      async ({ ctx, input }): Promise<{ success: true; id: string }> => {
+        const ownerId = ctx.user.id;
+        const result = await Favorite.deleteOne({
+          _id: requireObjectId(input.id),
+          ownerId,
+        });
+        if (result.deletedCount === 0) throw notFound();
+
+        // Close the gap immediately. Leaving a hole works — the list is sorted,
+        // not indexed by order — but it makes every later `reorder` diff look
+        // like a reshuffle, and makes the stored data lie about position.
+        const remaining = await Favorite.find({ ownerId })
+          .sort({ order: 1, createdAt: 1 })
+          .select({ _id: 1 })
+          .lean();
+        await writeOrder(
+          ownerId,
+          remaining.map((favorite) => String(favorite._id)),
+        );
+
+        publishSync(ownerId, { kind: "favorites.changed" }, input.originId);
+        return { success: true, id: input.id };
+      },
+    ),
+
+  /**
+   * Set the whole order at once. Ids this owner does not have are ignored, and
+   * pins the caller left out keep their relative order after the ones it sent
+   * — a client working from a stale list reorders what it can see instead of
+   * hiding whatever it did not know about.
+   */
+  reorder: protectedProcedure
+    .input(reorderFavoritesSchema)
+    .mutation(async ({ ctx, input }): Promise<DetailedFavorite[]> => {
+      const ownerId = ctx.user.id;
+      const current = await Favorite.find({ ownerId })
+        .sort({ order: 1, createdAt: 1 })
+        .select({ _id: 1 })
+        .lean();
+
+      const owned = new Set(current.map((favorite) => String(favorite._id)));
+      // Deduplicated: a repeated id would otherwise consume two slots and
+      // push everything after it one position out.
+      const requested = [...new Set(input.ids.filter((id) => owned.has(id)))];
+      const seen = new Set(requested);
+      const rest = current
+        .map((favorite) => String(favorite._id))
+        .filter((id) => !seen.has(id));
+
+      await writeOrder(ownerId, [...requested, ...rest]);
+
+      publishSync(ownerId, { kind: "favorites.changed" }, input.originId);
+      return listFavorites(ownerId);
+    }),
+});

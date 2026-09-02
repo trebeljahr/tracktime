@@ -19,12 +19,14 @@ import {
   entryListSchema,
   continueEntrySchema,
   idInputSchema,
+  recentEntriesSchema,
   resolveHourlyRate,
   startTimerSchema,
   stopTimerSchema,
   updateEntrySchema,
   type DetailedEntry,
   type EntrySource,
+  type RecentEntry,
   type TimeEntry as TimeEntryWire,
   type WorkspaceSettings,
 } from "@starter/shared";
@@ -39,6 +41,8 @@ import {
 import { getOrCreateSettings } from "../../models/Settings.js";
 import { publishSync } from "../../ws/sync.js";
 import { protectedProcedure, router } from "../trpc.js";
+import { loadCatalogLookup } from "./catalog-lookup.js";
+import { collapseRecents, type RecentSourceEntry } from "./quick-start.js";
 
 /** `discard` drops an entry without keeping it; defaults to the running one. */
 export const discardTimerSchema = z.object({
@@ -47,6 +51,25 @@ export const discardTimerSchema = z.object({
 });
 
 const DEFAULT_LIST_LIMIT = 50;
+
+/** How many distinct combinations `recent` answers with by default. */
+const DEFAULT_RECENT_LIMIT = 8;
+
+/** How far back `recent` looks by default. */
+const DEFAULT_RECENT_DAYS = 30;
+
+/**
+ * How many entries `recent` reads before collapsing them.
+ *
+ * The dedup happens in this process rather than in a `$group` stage, because
+ * the rules worth getting right — which of several identical jobs supplies the
+ * timestamp, how an archived project is labelled, whether the running entry
+ * counts — are the rules worth unit-testing, and a pipeline stage cannot be
+ * tested without a database. The cap is what keeps that honest: a window this
+ * size is a page, not a table scan, and `limit` distinct rows almost always
+ * appear well inside it.
+ */
+const RECENT_SCAN_LIMIT = 400;
 
 const notFound = (message = "Entry not found"): TRPCError =>
   new TRPCError({ code: "NOT_FOUND", message });
@@ -469,6 +492,55 @@ export const entriesRouter = router({
         : { entries: page };
     },
   ),
+
+  /**
+   * The distinct things this owner has recently tracked, newest first.
+   *
+   * Tier one of the quick-start surfaces: derived, so it costs no new model
+   * and is never stale. Pinning something is what promotes it to a favorite,
+   * which is tier two.
+   */
+  recent: protectedProcedure
+    .input(recentEntriesSchema)
+    .query(async ({ ctx, input }): Promise<RecentEntry[]> => {
+      const ownerId = ctx.user.id;
+      const limit = input.limit ?? DEFAULT_RECENT_LIMIT;
+      const days = input.days ?? DEFAULT_RECENT_DAYS;
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+      const rows = await TimeEntry.find({
+        ownerId,
+        start: { $gte: since },
+        // Finished entries only. The running one is excluded again inside
+        // `collapseRecents`; matching on it here would only waste a slot in
+        // the scan window.
+        end: { $ne: null },
+      })
+        .sort({ start: -1, _id: -1 })
+        .limit(RECENT_SCAN_LIMIT)
+        .select({
+          description: 1,
+          projectId: 1,
+          taskId: 1,
+          billable: 1,
+          start: 1,
+          end: 1,
+        })
+        .lean();
+
+      const entries: RecentSourceEntry[] = rows.map((row) => ({
+        id: String(row._id),
+        description: row.description,
+        projectId: row.projectId ?? null,
+        taskId: row.taskId ?? null,
+        billable: row.billable,
+        start: row.start.toISOString(),
+        end: row.end === null ? null : row.end.toISOString(),
+      }));
+
+      const catalog = await loadCatalogLookup(ownerId, entries);
+      return collapseRecents(entries, catalog, limit);
+    }),
 
   get: protectedProcedure
     .input(idInputSchema)

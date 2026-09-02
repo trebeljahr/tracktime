@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from "react";
+import type { QuickStart } from "@starter/core";
 import {
   sendToBackground,
   type BackgroundResponse,
@@ -115,6 +116,17 @@ export function App(): JSX.Element {
     [send],
   );
 
+  const pinFavorite = useCallback(
+    (quick: QuickStart): Promise<boolean> =>
+      send({ type: "favorite:add", quick }),
+    [send],
+  );
+
+  const unpinFavorite = useCallback(
+    (id: string): Promise<boolean> => send({ type: "favorite:remove", id }),
+    [send],
+  );
+
   if (state === null) {
     return (
       <div className="popup">
@@ -151,10 +163,18 @@ export function App(): JSX.Element {
         <TrackerScreen
           state={state}
           error={error}
-          onStart={(description, projectId, taskId) =>
-            send({ type: "timer:start", description, projectId, taskId })
+          onStart={(description, projectId, taskId, billable) =>
+            send({
+              type: "timer:start",
+              description,
+              projectId,
+              taskId,
+              billable,
+            })
           }
           onStop={() => send({ type: "timer:stop" })}
+          onPinFavorite={pinFavorite}
+          onUnpinFavorite={unpinFavorite}
           onSignOut={() => send({ type: "auth:sign-out" })}
           onSaveApiUrl={saveApiUrl}
           onSelectProject={selectProject}

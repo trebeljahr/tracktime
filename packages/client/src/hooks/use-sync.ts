@@ -79,6 +79,9 @@ const invalidateFor = (utils: Utils, event: SyncEvent): void => {
       // entry event of its own.
       if (event.entriesTouched) void utils.entries.invalidate();
       return;
+    case "favorites.changed":
+      void utils.favorites.invalidate();
+      return;
     case "settings.changed":
       void utils.settings.invalidate();
       return;

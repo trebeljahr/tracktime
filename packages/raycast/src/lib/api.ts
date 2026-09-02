@@ -6,10 +6,15 @@
  * which speaks the same wire format with a bearer token instead.
  */
 import {
+  buildQuickStartInput,
   createApiClient,
+  deviceTimeZone,
   type ApiClient,
   type DetailedEntry,
+  type DetailedFavorite,
   type Project,
+  type QuickStart,
+  type RecentEntry,
   type Task,
   type TimeEntry,
   type WorkspaceSettings,
@@ -71,6 +76,18 @@ export type Tracktime = {
   discard(id?: string): Promise<{ success: true; id: string }>;
   /** Start a fresh timer with the same description/project/task/billable. */
   continue(id: string): Promise<TimeEntry>;
+  /**
+   * Start a favorite or a recent.
+   *
+   * Goes through `entries.start` like everything else — `buildQuickStartInput`
+   * is the same builder the web tracker and the extension use, so the entry a
+   * favorite opens is identical whichever client opened it.
+   */
+  startQuick(quick: QuickStart): Promise<TimeEntry>;
+  favorites(): Promise<DetailedFavorite[]>;
+  recents(input?: { limit?: number; days?: number }): Promise<RecentEntry[]>;
+  addFavorite(quick: QuickStart): Promise<DetailedFavorite>;
+  removeFavorite(id: string): Promise<{ success: true; id: string }>;
   list(input: ListInput): Promise<{
     entries: DetailedEntry[];
     nextCursor?: string;
@@ -102,6 +119,30 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
 
   continue: (id) =>
     client.mutate<TimeEntry>("entries.continue", { id, originId }),
+
+  startQuick: (quick) =>
+    client.mutate<TimeEntry>(
+      "entries.start",
+      buildQuickStartInput(quick, {
+        source: SOURCE,
+        timeZone: deviceTimeZone(),
+        originId,
+      }),
+    ),
+
+  favorites: () => client.query<DetailedFavorite[]>("favorites.list"),
+
+  recents: (input) =>
+    client.query<RecentEntry[]>("entries.recent", input ?? {}),
+
+  addFavorite: (quick) =>
+    client.mutate<DetailedFavorite>("favorites.create", { ...quick, originId }),
+
+  removeFavorite: (id) =>
+    client.mutate<{ success: true; id: string }>("favorites.remove", {
+      id,
+      originId,
+    }),
 
   list: (input) =>
     client.query<{ entries: DetailedEntry[]; nextCursor?: string }>(

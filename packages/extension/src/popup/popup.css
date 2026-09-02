@@ -391,6 +391,104 @@ body {
   border-radius: 8px;
 }
 
+/* ── quick start ───────────────────────────────────────────────────── */
+
+.quick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.quick__row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.quick__start {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick__start:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.quick__start:disabled,
+.quick__pin:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.quick__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  /* No project is a real state, not a missing colour — an outline says so
+     without inventing a hue the catalog never assigned. */
+  border: 1px solid var(--muted);
+}
+
+.quick__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.quick__label {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick__hint {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick__hint--broken {
+  color: var(--warn);
+}
+
+.quick__pin {
+  flex: none;
+  width: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.quick__pin[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.quick__start:focus-visible,
+.quick__pin:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ── inline creation panel ─────────────────────────────────────────── */
 
 .panel {

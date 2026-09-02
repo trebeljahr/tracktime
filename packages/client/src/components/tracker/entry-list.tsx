@@ -19,6 +19,7 @@ import {
   TRACKER_LIST_INPUT,
   useEntryMutations,
 } from "@/components/tracker/use-entry-mutations";
+import { useQuickStarts } from "@/hooks/use-favorites";
 import { useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 
@@ -82,6 +83,7 @@ function DayHeader({ group }: { group: DayGroup }): React.JSX.Element {
  */
 export function EntryList(): React.JSX.Element {
   const mutations = useEntryMutations();
+  const quickStarts = useQuickStarts();
   const [editing, setEditing] = React.useState<DetailedEntry | null>(null);
 
   const query = trpc.entries.list.useInfiniteQuery(TRACKER_LIST_INPUT, {
@@ -173,6 +175,7 @@ export function EntryList(): React.JSX.Element {
               key={entry.id}
               entry={entry}
               mutations={mutations}
+              quickStarts={quickStarts}
               onEdit={handleEdit}
             />
           ))}

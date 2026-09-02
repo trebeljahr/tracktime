@@ -12,6 +12,7 @@ import { DurationInput } from "@/components/duration-input";
 import { ProjectPicker } from "@/components/project-picker";
 import { TaskPicker } from "@/components/task-picker";
 import { BillableGlyph } from "@/components/tracker/billable-glyph";
+import { QuickStartRow } from "@/components/tracker/quick-start-row";
 import { TimeField } from "@/components/tracker/time-field";
 import {
   requestPomodoroPermission,
@@ -212,6 +213,11 @@ export function TrackerBar(): React.JSX.Element {
       className="sticky top-14 z-30 -mx-3 mb-6 border-b border-border bg-background/95 px-3 py-3 backdrop-blur md:-mx-6 md:px-6"
       data-testid="tracker-bar"
     >
+      {/* Above the fields on purpose: the whole point is to not have to fill
+          them in. Hidden while a timer runs, where the row would only offer to
+          stop this one and start another. */}
+      {isRunning ? null : <QuickStartRow mutations={mutations} />}
+
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={description}

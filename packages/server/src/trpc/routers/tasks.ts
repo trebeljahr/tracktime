@@ -255,6 +255,15 @@ export const tasksRouter = router({
         },
         input.originId,
       );
+      // A detached pin still points somewhere it did not a moment ago, and
+      // `catalog.changed` does not cover the favorites cache.
+      if (result.favoritesDetached > 0) {
+        publishSync(
+          ctx.user.id,
+          { kind: "favorites.changed" },
+          input.originId,
+        );
+      }
       return result;
     }),
 });

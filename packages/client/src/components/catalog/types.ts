@@ -50,6 +50,7 @@ export type RemoveResult = {
   entriesDetached: number;
   tasksDeleted: number;
   projectsDetached: number;
+  favoritesDetached: number;
 };
 
 // Mutation results are the bare documents — no joins, no rolled-up totals.

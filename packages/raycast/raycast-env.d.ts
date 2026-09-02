@@ -27,6 +27,10 @@ declare namespace Preferences {
 }
   /** Preferences accessible in the `start-timer` command */
   export type StartTimer = ExtensionPreferences & {}
+  /** Preferences accessible in the `start-favorite` command */
+  export type StartFavorite = ExtensionPreferences & {}
+  /** Preferences accessible in the `start-favorite` command */
+  export type StartFavorite = ExtensionPreferences & {}
   /** Preferences accessible in the `stop-timer` command */
   export type StopTimer = ExtensionPreferences & {}
   /** Preferences accessible in the `toggle-timer` command */
@@ -42,6 +46,10 @@ declare namespace Arguments {
   export type MenuBar = {}
   /** Arguments passed to the `start-timer` command */
   export type StartTimer = {}
+  /** Arguments passed to the `start-favorite` command */
+  export type StartFavorite = {}
+  /** Arguments passed to the `start-favorite` command */
+  export type StartFavorite = {}
   /** Arguments passed to the `stop-timer` command */
   export type StopTimer = {}
   /** Arguments passed to the `toggle-timer` command */

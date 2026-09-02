@@ -51,6 +51,13 @@
       "mode": "view"
     },
     {
+      "name": "start-favorite",
+      "title": "Start a Favorite",
+      "subtitle": "tracktime",
+      "description": "Start a pinned favorite or something you tracked recently.",
+      "mode": "view"
+    },
+    {
       "name": "stop-timer",
       "title": "Stop Timer",
       "subtitle": "tracktime",

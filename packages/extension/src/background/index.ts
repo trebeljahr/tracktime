@@ -27,6 +27,7 @@ import {
   selectProjectTasks,
 } from "./catalog";
 import { BackgroundError, toErrorResponse } from "./errors";
+import { addFavorite, removeFavorite } from "./favorites";
 import {
   adoptSession,
   ensureReady,
@@ -177,9 +178,19 @@ const apply = async (message: PopupToBackground): Promise<void> => {
     case "auth:sign-out":
       return signOut();
     case "timer:start":
-      return startTimer(message.description, message.projectId, message.taskId);
+      return startTimer(
+        message.description,
+        message.projectId,
+        message.taskId,
+        message.billable,
+      );
     case "timer:stop":
       return stopTimer();
+    case "favorite:add":
+      await addFavorite(message.quick);
+      return;
+    case "favorite:remove":
+      return removeFavorite(message.id);
     case "tasks:for-project":
       return selectProjectTasks(message.projectId);
     case "client:create":
@@ -195,7 +206,7 @@ const apply = async (message: PopupToBackground): Promise<void> => {
       return setApiUrl(message.apiUrl);
     default: {
       // `apply` returns void, so falling off the end of this switch would be
-      // valid TypeScript: a seventh message type added to the contract would
+      // valid TypeScript: a new message type added to the contract would
       // silently no-op and still answer `{ ok: true }`. Assigning to `never`
       // turns that into a compile error instead.
       const unhandled: never = message;

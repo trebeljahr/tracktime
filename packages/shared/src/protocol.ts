@@ -40,6 +40,15 @@ export type SyncEvent =
        */
       entriesTouched?: boolean;
     }
+  /**
+   * The pinned quick starts changed — added, removed or reordered.
+   *
+   * Its own kind rather than a `catalog.changed` scope: a favorite is not a
+   * catalog document (Client -> Project -> Task), and folding it in would make
+   * every client refetch the whole catalog and every report to learn that a
+   * chip moved one slot to the left.
+   */
+  | { kind: "favorites.changed" }
   | { kind: "settings.changed" };
 
 /** Room name every sync event for a given owner is published to. */

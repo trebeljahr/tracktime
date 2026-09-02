@@ -241,6 +241,43 @@ export const entryListSchema = z.object({
   limit: z.number().int().min(1).max(500).optional(),
 });
 
+// ── favorites & recents ──────────────────────────────────────────────
+
+/**
+ * The four fields that decide what a timer tracks. Shared by `favorites.create`
+ * and by whatever a client pins from, so the two cannot drift apart.
+ */
+const quickStartFields = {
+  description: entryDescription.default(""),
+  projectId: idString.nullish(),
+  taskId: idString.nullish(),
+  /** Omitted falls back to the project's `billableDefault`, as `start` does. */
+  billable: z.boolean().optional(),
+};
+
+export const createFavoriteSchema = z.object({ ...quickStartFields, originId });
+
+/**
+ * Reordering ships the whole list, not a from/to pair. A pair would need the
+ * server to trust the client's idea of the current order; a full list is
+ * idempotent and survives two devices reordering at once — last write wins on
+ * an order everyone can see, rather than on an offset nobody can verify.
+ */
+export const reorderFavoritesSchema = z.object({
+  ids: z.array(idString).max(200),
+  originId,
+});
+
+/**
+ * Recents look back over a window rather than all of history: a combination
+ * last tracked a year ago is not what "start the thing you do every day"
+ * means, and scanning the whole log to find it would cost more every month.
+ */
+export const recentEntriesSchema = z.object({
+  limit: z.number().int().min(1).max(50).optional(),
+  days: z.number().int().min(1).max(365).optional(),
+});
+
 // ── reports ──────────────────────────────────────────────────────────
 
 export const reportFiltersSchema = z.object({
@@ -340,6 +377,9 @@ export type ContinueEntryInput = z.infer<typeof continueEntrySchema>;
 export type CreateEntryInput = z.infer<typeof createEntrySchema>;
 export type UpdateEntryInput = z.infer<typeof updateEntrySchema>;
 export type EntryListInput = z.infer<typeof entryListSchema>;
+export type CreateFavoriteInput = z.infer<typeof createFavoriteSchema>;
+export type ReorderFavoritesInput = z.infer<typeof reorderFavoritesSchema>;
+export type RecentEntriesInput = z.infer<typeof recentEntriesSchema>;
 export type ReportFiltersInput = z.infer<typeof reportFiltersSchema>;
 export type SummaryReportSchemaInput = z.infer<typeof summaryReportSchema>;
 export type DetailedReportSchemaInput = z.infer<typeof detailedReportSchema>;

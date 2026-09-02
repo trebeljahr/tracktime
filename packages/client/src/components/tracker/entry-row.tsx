@@ -1,11 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { Copy, Ellipsis, Pencil, Play, Square, Trash2 } from "lucide-react";
+import {
+  Copy,
+  Ellipsis,
+  Pencil,
+  Pin,
+  PinOff,
+  Play,
+  Square,
+  Trash2,
+} from "lucide-react";
 import {
   isSameZone,
   rollEndAfterStart,
+  quickStartKey,
   spansDayBoundaryInZone,
+  toQuickStart,
   zoneLabel,
   type DetailedEntry,
 } from "@starter/shared";
@@ -25,6 +36,7 @@ import { BillableGlyph } from "@/components/tracker/billable-glyph";
 import { LiveDuration } from "@/components/tracker/live-duration";
 import { TimeField } from "@/components/tracker/time-field";
 import type { EntryMutations } from "@/components/tracker/use-entry-mutations";
+import type { QuickStarts } from "@/hooks/use-favorites";
 import { isTempId } from "@/lib/offline";
 import { useFormatSettings } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -34,6 +46,12 @@ const MINUTE_MS = 60_000;
 export type EntryRowProps = {
   entry: DetailedEntry;
   mutations: EntryMutations;
+  /**
+   * Threaded down rather than hooked per row: the list renders dozens of rows,
+   * and each `useQuickStarts()` would spin up its own mutation observers for a
+   * menu item that is usually never opened.
+   */
+  quickStarts: QuickStarts;
   onEdit: (entry: DetailedEntry) => void;
   /** Rendered inside an expanded collapse group. */
   nested?: boolean;
@@ -47,6 +65,7 @@ export type EntryRowProps = {
 export function EntryRow({
   entry,
   mutations,
+  quickStarts,
   onEdit,
   nested = false,
 }: EntryRowProps): React.JSX.Element {
@@ -104,6 +123,17 @@ export function EntryRow({
     },
     [entry.id, entry.start, mutations]
   );
+
+  // What pinning this row would pin, and whether that is already pinned. The
+  // id is the FAVORITE's, not the entry's — unpinning removes the pin, and
+  // leaves the tracked time exactly where it is.
+  const quick = toQuickStart(entry);
+  const quickKey = quickStartKey(quick);
+  const favoriteId =
+    quickStarts.favorites.find(
+      (favorite) => quickStartKey(favorite) === quickKey
+    )?.id ?? null;
+  const pinned = favoriteId !== null;
 
   const handleDurationCommit = React.useCallback(
     (seconds: number): void => {
@@ -328,6 +358,29 @@ export function EntryRow({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {/* Pinning is what promotes an entry from "recently tracked" to
+              "always one click away". A temp entry is excluded: its project
+              and task are real, but pinning something the server has not seen
+              invites a pin that outlives an entry the replay may still
+              reject. */}
+          {pinned ? (
+            <DropdownMenuItem
+              onSelect={() => {
+                if (favoriteId !== null) quickStarts.unpin(favoriteId);
+              }}
+              data-testid="entry-menu-unpin"
+            >
+              <PinOff /> Remove from favorites
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              disabled={syncing}
+              onSelect={() => quickStarts.pin(quick)}
+              data-testid="entry-menu-pin"
+            >
+              <Pin /> Add to favorites
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             onSelect={() => mutations.duplicateEntry(entry)}
             data-testid="entry-menu-duplicate"

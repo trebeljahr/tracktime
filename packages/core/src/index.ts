@@ -9,6 +9,7 @@ export * from "./storage.js";
 export * from "./timer-store.js";
 export * from "./offline-queue.js";
 export * from "./offline-ops.js";
+export * from "./quick-start.js";
 export * from "./sync-client.js";
 export * from "./sync-url.js";
 export * from "./api-client.js";

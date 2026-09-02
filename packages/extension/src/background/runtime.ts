@@ -20,11 +20,13 @@ import {
   OFFLINE_QUEUE_STORAGE_KEY,
   type ApiClient,
   type Client,
+  type DetailedFavorite,
   type KeyValueStorage,
   type OfflineOp,
   type OfflinePayloadMap,
   type OfflineQueue,
   type Project,
+  type RecentEntry,
   type StoredOfflinePayload,
   type SyncClient,
   type SyncEvent,
@@ -85,6 +87,8 @@ let runningLookup: Promise<TimeEntry | null> | null = null;
 let cachedProjects: Project[] | null = null;
 let cachedClients: Client[] | null = null;
 let cachedTodaySec: number | null = null;
+let cachedFavorites: DetailedFavorite[] | null = null;
+let cachedRecents: RecentEntry[] | null = null;
 
 /** Tasks are per-project, so the cache has to remember which project's. */
 let cachedTasks: { projectId: string; tasks: Task[] } | null = null;
@@ -270,6 +274,8 @@ export async function reload(): Promise<Runtime> {
   cachedClients = null;
   cachedTasks = null;
   cachedTodaySec = null;
+  cachedFavorites = null;
+  cachedRecents = null;
   cachedWebUrl = null;
   cachedEmail = null;
   return ensureReady();
@@ -294,6 +300,8 @@ const setSyncStatus = (next: SyncStatus): void => {
   cachedClients = null;
   cachedTasks = null;
   cachedTodaySec = null;
+  cachedFavorites = null;
+  cachedRecents = null;
 
   // A socket that just came up is the first reliable sign the network is back.
   // Nothing awaits this, so it must swallow its own failure — the next
@@ -318,9 +326,12 @@ const applyEvent = (event: SyncEvent): void => {
   switch (event.kind) {
     case "timer.started":
       cachedRunning = { entry: event.entry };
+      // What "recent" means changes with every entry another device closes.
+      cachedRecents = null;
       return;
     case "timer.stopped":
       cachedRunning = { entry: null };
+      cachedRecents = null;
       return;
     case "entry.upserted":
       if (event.entry.end === null) {
@@ -339,6 +350,12 @@ const applyEvent = (event: SyncEvent): void => {
       if (event.scope === "project") cachedProjects = null;
       if (event.scope === "client") cachedClients = null;
       if (event.scope === "task") cachedTasks = null;
+      // A renamed or deleted project changes what a pin is labelled with.
+      cachedFavorites = null;
+      cachedRecents = null;
+      return;
+    case "favorites.changed":
+      cachedFavorites = null;
       return;
     case "settings.changed":
       return;
@@ -409,6 +426,28 @@ export const setCachedTasks = (projectId: string, tasks: Task[]): void => {
 
 export const getCachedTasksProjectId = (): string | null =>
   cachedTasks?.projectId ?? null;
+
+export const getCachedFavorites = (): DetailedFavorite[] | null =>
+  cachedFavorites;
+
+export const setCachedFavorites = (favorites: DetailedFavorite[]): void => {
+  cachedFavorites = favorites;
+};
+
+export const getCachedRecents = (): RecentEntry[] | null => cachedRecents;
+
+export const setCachedRecents = (recents: RecentEntry[]): void => {
+  cachedRecents = recents;
+};
+
+/**
+ * Called after this worker writes an entry. Recents are derived from the entry
+ * log, so a start or a stop makes the cached list a claim about the past that
+ * is no longer true.
+ */
+export const invalidateRecents = (): void => {
+  cachedRecents = null;
+};
 
 /**
  * Where the web app lives, asked of the API rather than configured twice.

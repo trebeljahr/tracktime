@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { deviceTimeZone } from "@starter/core";
+import { buildQuickStartInput, deviceTimeZone } from "@starter/core";
 import {
   entryAmount,
   formatDurationShort,
   resolveHourlyRate,
+  toQuickStart,
   type DetailedEntry,
+  type QuickStart,
   type TimeEntry,
 } from "@starter/shared";
 
@@ -93,6 +95,11 @@ export type UpdateEntryArgs = {
 
 export type EntryMutations = {
   startTimer: (args: StartTimerArgs) => void;
+  /**
+   * Start a favorite or a recent. Deliberately the same call as `startTimer`
+   * underneath — a quick start is a start whose fields were chosen earlier.
+   */
+  startQuickStart: (quick: QuickStart) => void;
   stopTimer: () => void;
   continueEntry: (entry: DetailedEntry) => void;
   createManualEntry: (args: ManualEntryArgs) => void;
@@ -599,21 +606,31 @@ export const useEntryMutations = (): EntryMutations => {
 
   // ── public API ─────────────────────────────────────────────────────
 
+  const startQuickStart = React.useCallback(
+    (quick: QuickStart): void => {
+      // One builder for every start this app makes, shared with the extension
+      // and Raycast through core — so a favorite, a continued entry and the
+      // Start button produce byte-identical inputs, live or queued.
+      const input: OfflineStartInput = buildQuickStartInput(quick, {
+        source: "web",
+        timeZone: deviceTimeZone(),
+        originId: ORIGIN_ID,
+      });
+      startMutation.mutate(input);
+    },
+    [startMutation]
+  );
+
   const startTimer = React.useCallback(
     (args: StartTimerArgs): void => {
-      const input: OfflineStartInput = {
+      startQuickStart({
         description: args.description,
         projectId: args.projectId,
         taskId: args.taskId ?? null,
         billable: args.billable,
-        start: nowIso(),
-        source: "web",
-        timeZone: deviceTimeZone(),
-        originId: ORIGIN_ID,
-      };
-      startMutation.mutate(input);
+      });
     },
-    [startMutation]
+    [startQuickStart]
   );
 
   const stopTimer = React.useCallback((): void => {
@@ -631,14 +648,9 @@ export const useEntryMutations = (): EntryMutations => {
 
       // Deliberately `start`, not `continue`: every field is already in hand,
       // so this works offline where a server-side copy could not.
-      startTimer({
-        description: entry.description,
-        projectId: entry.projectId,
-        taskId: entry.taskId,
-        billable: entry.billable,
-      });
+      startQuickStart(toQuickStart(entry));
     },
-    [startTimer]
+    [startQuickStart]
   );
 
   const createManualEntry = React.useCallback(
@@ -708,6 +720,7 @@ export const useEntryMutations = (): EntryMutations => {
 
   return {
     startTimer,
+    startQuickStart,
     stopTimer,
     continueEntry,
     createManualEntry,
