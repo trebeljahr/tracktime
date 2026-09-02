@@ -14,6 +14,11 @@ import {
   type OfflineMutation,
 } from "@/lib/offline";
 import { useSyncStatus } from "@/hooks/use-sync";
+import {
+  replayOfflineMutation,
+  type OfflineReplayMutators,
+} from "@/hooks/replay-offline-mutation";
+import { idleWatcher } from "@/lib/idle-watcher";
 
 export type OfflineQueueState = {
   /** Number of mutations waiting to reach the server. */
@@ -80,29 +85,15 @@ export const useOfflineQueue = (): OfflineQueueState => {
   const removeMutation = trpc.entries.remove.useMutation();
   const discardMutation = trpc.entries.discard.useMutation();
 
-  const dispatch = React.useCallback(
-    async (mutation: OfflineMutation): Promise<void> => {
-      switch (mutation.op) {
-        case "entries.start":
-          await startMutation.mutateAsync(mutation.input);
-          return;
-        case "entries.stop":
-          await stopMutation.mutateAsync(mutation.input);
-          return;
-        case "entries.create":
-          await createMutation.mutateAsync(mutation.input);
-          return;
-        case "entries.update":
-          await updateMutation.mutateAsync(mutation.input);
-          return;
-        case "entries.remove":
-          await removeMutation.mutateAsync(mutation.input);
-          return;
-        case "entries.discard":
-          await discardMutation.mutateAsync(mutation.input);
-          return;
-      }
-    },
+  const mutators: OfflineReplayMutators = React.useMemo(
+    () => ({
+      "entries.start": (input) => startMutation.mutateAsync(input),
+      "entries.stop": (input) => stopMutation.mutateAsync(input),
+      "entries.create": (input) => createMutation.mutateAsync(input),
+      "entries.update": (input) => updateMutation.mutateAsync(input),
+      "entries.remove": (input) => removeMutation.mutateAsync(input),
+      "entries.discard": (input) => discardMutation.mutateAsync(input),
+    }),
     [
       startMutation,
       stopMutation,
@@ -111,6 +102,14 @@ export const useOfflineQueue = (): OfflineQueueState => {
       removeMutation,
       discardMutation,
     ]
+  );
+
+  const dispatch = React.useCallback(
+    // `idleWatcher` is the tab's module singleton, so it is stable across
+    // renders and deliberately not a dependency.
+    async (mutation: OfflineMutation): Promise<void> =>
+      replayOfflineMutation(mutators, idleWatcher, mutation),
+    [mutators]
   );
 
   // Listeners are registered once; they read the latest dispatch through refs
