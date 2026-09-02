@@ -8,10 +8,10 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 type ExtensionPreferences = {
-  /** API URL - Origin of the tracktime server, e.g. https://api.tracktime.example. */
-  "apiUrl": string,
-  /** Web App URL - Origin of the tracktime web app, used for the device-pairing page and Open in Browser. */
-  "webUrl": string
+  /** API URL - Origin of the tracktime server, e.g. https://api.tracktime.example. Empty means the deployed server, or the local dev server under `ray develop`. */
+  "apiUrl"?: string,
+  /** Web App URL - Origin of the tracktime web app, used for the device-pairing page and Open in Browser. Empty follows the API URL's default. */
+  "webUrl"?: string
 }
 
 /** Preferences accessible in all the extension's commands */
@@ -29,8 +29,6 @@ declare namespace Preferences {
   export type StartTimer = ExtensionPreferences & {}
   /** Preferences accessible in the `start-favorite` command */
   export type StartFavorite = ExtensionPreferences & {}
-  /** Preferences accessible in the `start-favorite` command */
-  export type StartFavorite = ExtensionPreferences & {}
   /** Preferences accessible in the `stop-timer` command */
   export type StopTimer = ExtensionPreferences & {}
   /** Preferences accessible in the `toggle-timer` command */
@@ -46,8 +44,6 @@ declare namespace Arguments {
   export type MenuBar = {}
   /** Arguments passed to the `start-timer` command */
   export type StartTimer = {}
-  /** Arguments passed to the `start-favorite` command */
-  export type StartFavorite = {}
   /** Arguments passed to the `start-favorite` command */
   export type StartFavorite = {}
   /** Arguments passed to the `stop-timer` command */

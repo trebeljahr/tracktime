@@ -271,8 +271,14 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   committed, so `pnpm typecheck` works without Raycast installed.
 - Menu bar commands only re-run on their interval (1 min) and when opened, so
   the clock is `h:mm`; mutations call `refreshMenuBar()` to avoid a stale value.
-- Server origin and web origin come from extension preferences, defaulting to
-  the deployed hosts. Point **API URL** at the dev API port for local work.
+- Server origin and web origin come from extension preferences. Empty follows
+  the build, the same convention as the browser extension's build targets:
+  `ray build` → the deployed hosts, `ray develop` → `localhost:5159` /
+  `localhost:6477`, the ports `pnpm run dev:fixed` pins. Neither preference
+  carries a `default` in `package.json`, because a default there is stored as a
+  real value and "untouched" would be indistinguishable from "typed the
+  production URL". Plain `pnpm run dev` randomizes the API port — set **API
+  URL** by hand for that.
 
 ### Deployment (two Coolify apps)
 

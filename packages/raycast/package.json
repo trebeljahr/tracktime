@@ -90,18 +90,18 @@
     {
       "name": "apiUrl",
       "title": "API URL",
-      "description": "Origin of the tracktime server, e.g. https://api.tracktime.example.",
+      "description": "Origin of the tracktime server, e.g. https://api.tracktime.example. Empty means the deployed server, or the local dev server under `ray develop`.",
       "type": "textfield",
       "required": false,
-      "default": "https://api.tracktime.trebeljahr.com"
+      "placeholder": "https://api.tracktime.trebeljahr.com"
     },
     {
       "name": "webUrl",
       "title": "Web App URL",
-      "description": "Origin of the tracktime web app, used for the device-pairing page and Open in Browser.",
+      "description": "Origin of the tracktime web app, used for the device-pairing page and Open in Browser. Empty follows the API URL's default.",
       "type": "textfield",
       "required": false,
-      "default": "https://tracktime.trebeljahr.com"
+      "placeholder": "https://tracktime.trebeljahr.com"
     }
   ],
   "dependencies": {

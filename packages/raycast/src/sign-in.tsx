@@ -21,7 +21,13 @@ import {
   signOut,
   storeSession,
 } from "./lib/auth.js";
-import { apiUrl, hostLabel, webLink, webUrl } from "./lib/preferences.js";
+import {
+  apiUrl,
+  hostLabel,
+  isDevBuild,
+  webLink,
+  webUrl,
+} from "./lib/preferences.js";
 import { describeFailure, refreshMenuBar } from "./lib/ui.js";
 
 /**
@@ -229,9 +235,21 @@ export default function SignIn(): React.JSX.Element {
         "",
         "---",
         "",
-        "**Running locally?** `pnpm dev` prints one port for the API and one for",
-        "the client. Put the API port in **API URL** and the client port in",
-        "**Web App URL**, then try again.",
+        ...(isDevBuild()
+          ? [
+              "This is a `ray develop` build, so it defaults to the local dev",
+              "server — `pnpm run dev:fixed` (API `5159`, client `6477`). Plain",
+              "`pnpm run dev` picks the API port at random and prints it; put",
+              "that port in **API URL** and the client port in **Web App URL**.",
+              "",
+              "Preferences override the default even here, so clear them to go",
+              "back to localhost.",
+            ]
+          : [
+              "**Running locally?** `pnpm dev` prints one port for the API and",
+              "one for the client. Put the API port in **API URL** and the",
+              "client port in **Web App URL**, then try again.",
+            ]),
       ].join("\n")}
       metadata={
         <Detail.Metadata>
