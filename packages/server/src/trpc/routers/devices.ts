@@ -16,7 +16,7 @@ import {
 import { fromNodeHeaders } from "better-auth/node";
 import { getAuth } from "../../auth/auth.js";
 import { describeClient, normalizeClientKind } from "../../auth/client-label.js";
-import { publishSync } from "../../ws/sync.js";
+import { publishToUser } from "../../ws/sync.js";
 import { protectedProcedure, router } from "../trpc.js";
 
 /** The shape better-auth's `listSessions` yields, narrowed to what we read. */
@@ -103,7 +103,7 @@ export const devicesRouter = router({
 
       await getAuth().api.revokeSession({ headers, body: { token } });
 
-      publishSync(ctx.user.id, { kind: "settings.changed" }, input.originId);
+      publishToUser(ctx.user.id, { kind: "settings.changed" }, input.originId);
       return { id: input.id };
     }),
 
@@ -116,7 +116,7 @@ export const devicesRouter = router({
 
       await getAuth().api.revokeOtherSessions({ headers });
 
-      publishSync(ctx.user.id, { kind: "settings.changed" }, input.originId);
+      publishToUser(ctx.user.id, { kind: "settings.changed" }, input.originId);
       return { revoked: Math.max(0, before.length - 1) };
     }),
 });

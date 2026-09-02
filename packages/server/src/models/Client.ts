@@ -4,7 +4,8 @@ import type { Client as ClientWire } from "@starter/shared";
 export const DEFAULT_CLIENT_COLOR = "#64748b";
 
 export interface IClient extends Document {
-  ownerId: string;
+  workspaceId: string;
+  createdBy: string;
   name: string;
   color: string;
   archived: boolean;
@@ -18,7 +19,8 @@ export interface IClient extends Document {
  */
 export type ClientDocLike = {
   _id?: unknown;
-  ownerId: string;
+  workspaceId: string;
+  createdBy: string;
   name: string;
   color: string;
   archived: boolean;
@@ -28,7 +30,8 @@ export type ClientDocLike = {
 
 const clientSchema = new Schema<IClient>(
   {
-    ownerId: { type: String, required: true, index: true },
+    workspaceId: { type: String, required: true, index: true },
+    createdBy: { type: String, required: true, default: "" },
     name: { type: String, required: true, maxlength: 120, trim: true },
     color: { type: String, required: true, default: DEFAULT_CLIENT_COLOR },
     archived: { type: Boolean, required: true, default: false },
@@ -36,7 +39,7 @@ const clientSchema = new Schema<IClient>(
   { timestamps: true },
 );
 
-clientSchema.index({ ownerId: 1, archived: 1 });
+clientSchema.index({ workspaceId: 1, archived: 1 });
 
 export const Client = mongoose.model<IClient>("Client", clientSchema);
 
@@ -44,7 +47,8 @@ export const Client = mongoose.model<IClient>("Client", clientSchema);
 export function toClientClient(doc: ClientDocLike): ClientWire {
   return {
     id: String(doc._id),
-    ownerId: doc.ownerId,
+    workspaceId: doc.workspaceId,
+    createdBy: doc.createdBy,
     name: doc.name,
     color: doc.color,
     archived: doc.archived,

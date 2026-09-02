@@ -27,7 +27,9 @@ export type QuickStart = {
 /** A pinned quick start. Ordered by the user; `order` is dense from 0. */
 export type Favorite = QuickStart & {
   id: string;
-  ownerId: string;
+  workspaceId: string;
+  /** Whose pin it is — favorites are personal, not shared. */
+  userId: string;
   order: number;
   createdAt: string;
   updatedAt: string;

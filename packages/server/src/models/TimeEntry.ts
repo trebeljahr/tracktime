@@ -2,7 +2,8 @@ import mongoose, { Schema, type Document } from "mongoose";
 import type { EntrySource, TimeEntry as TimeEntryWire } from "@starter/shared";
 
 export interface ITimeEntry extends Document {
-  ownerId: string;
+  workspaceId: string;
+  authorId: string;
   description: string;
   projectId: string | null;
   taskId: string | null;
@@ -28,7 +29,8 @@ export interface ITimeEntry extends Document {
  */
 export type TimeEntryDocLike = {
   _id?: unknown;
-  ownerId: string;
+  workspaceId: string;
+  authorId: string;
   description: string;
   projectId: string | null;
   taskId: string | null;
@@ -46,10 +48,11 @@ export type TimeEntryDocLike = {
 
 const timeEntrySchema = new Schema<ITimeEntry>(
   {
-    // No `index: true` here — the compound and partial-unique indexes declared
-    // below already cover ownerId, and declaring both makes mongoose warn about
-    // a duplicate index on {"ownerId":1}.
-    ownerId: { type: String, required: true },
+    // No `index: true` on either scope field — the compound and partial-unique
+    // indexes declared below already cover them, and declaring both makes
+    // mongoose warn about a duplicate index.
+    workspaceId: { type: String, required: true },
+    authorId: { type: String, required: true },
     // NOT `required` — an entry with no description is completely normal
     // ("just start the timer, name it later"), and mongoose's String required
     // validator rejects "" because it tests for a non-empty string. Pairing
@@ -78,13 +81,29 @@ const timeEntrySchema = new Schema<ITimeEntry>(
   { timestamps: true },
 );
 
-/** Range queries: "everything for this owner between two instants". */
-timeEntrySchema.index({ ownerId: 1, start: -1 });
-timeEntrySchema.index({ ownerId: 1, projectId: 1, start: -1 });
+/** Range queries: "everything in this workspace between two instants". */
+timeEntrySchema.index({ workspaceId: 1, start: -1 });
+timeEntrySchema.index({ workspaceId: 1, projectId: 1, start: -1 });
+/** Per-member reads: the `memberIds` report filter, and the visibility clause
+ * that restricts a member without `canViewOthersTime` to their own rows. */
+timeEntrySchema.index({ workspaceId: 1, authorId: 1, start: -1 });
 
-/** At most ONE running entry (`end === null`) per owner. */
+/**
+ * At most ONE running entry (`end === null`) per PERSON, across every
+ * workspace they belong to.
+ *
+ * Deliberately keyed on `authorId` alone and NOT compounded with
+ * `workspaceId`: a human has one body and cannot be working in two workspaces
+ * at once. The compound form would permit one running timer per workspace,
+ * which makes `entries.current` list-shaped and leaves the extension badge and
+ * the Raycast menu bar with no way to answer "what am I doing right now".
+ *
+ * Consequence, by design: starting a timer in one workspace stops the one
+ * running in another. Callers must surface that rather than let it happen
+ * silently.
+ */
 timeEntrySchema.index(
-  { ownerId: 1 },
+  { authorId: 1 },
   { unique: true, partialFilterExpression: { end: null } },
 );
 
@@ -97,7 +116,8 @@ export const TimeEntry = mongoose.model<ITimeEntry>(
 export function toClientTimeEntry(doc: TimeEntryDocLike): TimeEntryWire {
   return {
     id: String(doc._id),
-    ownerId: doc.ownerId,
+    workspaceId: doc.workspaceId,
+    authorId: doc.authorId,
     description: doc.description,
     projectId: doc.projectId ?? null,
     taskId: doc.taskId ?? null,

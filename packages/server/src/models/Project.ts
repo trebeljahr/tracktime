@@ -8,7 +8,8 @@ import {
 export const DEFAULT_PROJECT_COLOR = "#4f46e5";
 
 export interface IProject extends Document {
-  ownerId: string;
+  workspaceId: string;
+  createdBy: string;
   name: string;
   color: string;
   clientId: string | null;
@@ -30,7 +31,8 @@ export interface IProject extends Document {
  */
 export type ProjectDocLike = {
   _id?: unknown;
-  ownerId: string;
+  workspaceId: string;
+  createdBy: string;
   name: string;
   color: string;
   clientId: string | null;
@@ -47,7 +49,8 @@ export type ProjectDocLike = {
 
 const projectSchema = new Schema<IProject>(
   {
-    ownerId: { type: String, required: true, index: true },
+    workspaceId: { type: String, required: true, index: true },
+    createdBy: { type: String, required: true, default: "" },
     name: { type: String, required: true, maxlength: 120, trim: true },
     color: { type: String, required: true, default: DEFAULT_PROJECT_COLOR },
     clientId: { type: String, default: null },
@@ -72,8 +75,8 @@ const projectSchema = new Schema<IProject>(
   { timestamps: true },
 );
 
-projectSchema.index({ ownerId: 1, clientId: 1 });
-projectSchema.index({ ownerId: 1, archived: 1 });
+projectSchema.index({ workspaceId: 1, clientId: 1 });
+projectSchema.index({ workspaceId: 1, archived: 1 });
 
 export const Project = mongoose.model<IProject>("Project", projectSchema);
 
@@ -81,7 +84,8 @@ export const Project = mongoose.model<IProject>("Project", projectSchema);
 export function toClientProject(doc: ProjectDocLike): ProjectWire {
   return {
     id: String(doc._id),
-    ownerId: doc.ownerId,
+    workspaceId: doc.workspaceId,
+    createdBy: doc.createdBy,
     name: doc.name,
     color: doc.color,
     clientId: doc.clientId ?? null,

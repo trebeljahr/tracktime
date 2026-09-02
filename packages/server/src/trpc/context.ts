@@ -24,6 +24,12 @@ export type AuthMethod = "cookie" | "bearer" | null;
  * session before `getSession()` looks it up, so cookie clients and token
  * clients converge here with identical `session`/`user` shapes.
  */
+function readActiveWorkspaceId(session: unknown): string | null {
+  const value = (session as { session?: { activeOrganizationId?: unknown } })
+    ?.session?.activeOrganizationId;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
 export async function createContext({ req, res }: CreateExpressContextOptions) {
   const auth = getAuth();
   const session = await auth.api.getSession({
@@ -38,6 +44,14 @@ export async function createContext({ req, res }: CreateExpressContextOptions) {
       session,
       user: session.user,
       authMethod: (usedBearer ? "bearer" : "cookie") satisfies AuthMethod,
+      /**
+       * The workspace this session last switched to, written by the
+       * organization plugin. It is only ever a DEFAULT — an explicit
+       * `workspaceId` on a procedure's input wins, because a long-lived
+       * client (Raycast, the extension) cannot be relied on to have re-read
+       * this. See auth/workspace.ts.
+       */
+      activeWorkspaceId: readActiveWorkspaceId(session),
     };
   }
 
@@ -47,6 +61,7 @@ export async function createContext({ req, res }: CreateExpressContextOptions) {
     session: null,
     user: null,
     authMethod: null satisfies AuthMethod,
+    activeWorkspaceId: null,
   };
 }
 

@@ -2,7 +2,7 @@
 //
 // Reporting is the headline feature, so the numbers have to be exactly right.
 // The rules this file enforces:
-//  - Every query is scoped by `ownerId` — another user's data is simply not
+//  - Every query is scoped by `workspaceId` — another workspace's data is simply not
 //    there, never a FORBIDDEN.
 //  - Durations are integer seconds end to end. Floats only ever appear in
 //    money, and only through `entryAmount` / `sumAmounts`.
@@ -44,6 +44,7 @@ import {
   type SummaryGroup,
   type SummaryReportResult,
   type SummaryTimelinePoint,
+  type Visibility,
   type WeekStart,
   type WeeklyReportResult,
   type WeeklyReportRow,
@@ -56,9 +57,23 @@ import {
   toClientTimeEntry,
   type TimeEntryDocLike,
 } from "../../models/TimeEntry.js";
-import { getOrCreateSettings } from "../../models/Settings.js";
+import { getOrCreateWorkspaceSettings } from "../../models/Settings.js";
+import { authorScopeFilter } from "../../models/WorkspaceMember.js";
 import { csvFilename, toCsv, type CsvColumn, type CsvRow } from "../../services/csv.js";
-import { protectedProcedure, router } from "../trpc.js";
+import { workspaceProcedure, router } from "../trpc.js";
+
+/**
+ * Who is asking, and what they are allowed to see.
+ *
+ * Every report body takes this INSTEAD of a bare workspace id, so there is no
+ * way to call one without having answered the visibility question. That is
+ * deliberate: a report that forgets the filter does not throw, it silently
+ * discloses.
+ */
+type ReportScope = {
+  workspaceId: string;
+  visibility: Visibility;
+};
 
 const DEFAULT_DETAILED_LIMIT = 50;
 const EXPORT_PAGE_SIZE = 500;
@@ -173,20 +188,33 @@ type JoinedEntry = TimeEntryDocLike & {
  * that own no projects) so callers can short-circuit without a round trip.
  */
 const buildMatchConditions = async (
-  ownerId: string,
+  scope: ReportScope,
   filters: ReportFilters,
   range: Range,
 ): Promise<Record<string, unknown>[] | null> => {
+  const { workspaceId } = scope;
   const conditions: Record<string, unknown>[] = [
-    { ownerId },
+    { workspaceId },
     { start: { $lt: range.to } },
     { $or: [{ end: null }, { end: { $gt: range.from } }] },
   ];
 
+  // A member without `canViewOthersTime` is restricted to their own rows.
+  // This sits in the ONE function every report body funnels its `$match`
+  // through, so summary, detailed, weekly and the CSV export cannot disagree
+  // about it.
+  //
+  // NOT the whole story: a member WITH `canViewOthersTime` but WITHOUT
+  // `canViewOthersMoney` still receives amounts here. Zeroing those is Stage
+  // 5, and it has to happen in the result projection rather than the match,
+  // because the rows themselves are legitimately visible.
+  const authorScope = authorScopeFilter(scope.visibility);
+  if (authorScope) conditions.push(authorScope);
+
   let projectIds: string[] | null = filters.projectIds ?? null;
   if (filters.clientIds && filters.clientIds.length > 0) {
     const clientProjects = await Project.find({
-      ownerId,
+      workspaceId,
       clientId: { $in: filters.clientIds },
     })
       .select("_id")
@@ -305,13 +333,13 @@ const lookupStages = (): PipelineStage[] => [
  * dangling or cross-owner reference must read as "no project", never leak a
  * name belonging to somebody else.
  */
-const ownedBy = <T extends { ownerId: string }>(
+const inWorkspace = <T extends { workspaceId: string }>(
   doc: T | null | undefined,
-  ownerId: string,
-): T | null => (doc && doc.ownerId === ownerId ? doc : null);
+  workspaceId: string,
+): T | null => (doc && doc.workspaceId === workspaceId ? doc : null);
 
 const runJoinedQuery = async (
-  ownerId: string,
+  workspaceId: string,
   conditions: Record<string, unknown>[],
   extraStages: PipelineStage[] = [],
 ): Promise<JoinedEntry[]> => {
@@ -405,13 +433,13 @@ const NO_PROJECT: GroupIdentity = {
 const groupIdentity = (
   measured: MeasuredEntry,
   groupBy: ReportGroupBy,
-  ownerId: string,
+  workspaceId: string,
   calendar: Calendar,
 ): GroupIdentity => {
   const { doc } = measured;
-  const project = ownedBy(doc.project, ownerId);
-  const client = ownedBy(doc.client, ownerId);
-  const task = ownedBy(doc.task, ownerId);
+  const project = inWorkspace(doc.project, workspaceId);
+  const client = inWorkspace(doc.client, workspaceId);
+  const task = inWorkspace(doc.task, workspaceId);
 
   switch (groupBy) {
     case "project":
@@ -479,11 +507,12 @@ const emptySummary = (currency: string, range: Range, timeZone: string): Summary
 });
 
 const buildSummary = async (
-  ownerId: string,
+  scope: ReportScope,
   filters: ReportFilters,
   groupBy: ReportGroupBy,
 ): Promise<SummaryReportResult> => {
-  const settings = await getOrCreateSettings(ownerId);
+  const { workspaceId } = scope;
+  const settings = await getOrCreateWorkspaceSettings(workspaceId);
   const range = parseRange(filters);
   const nowMs = Date.now();
   const calendar: Calendar = {
@@ -491,11 +520,11 @@ const buildSummary = async (
     weekStartsOn: settings.weekStartsOn,
   };
 
-  const conditions = await buildMatchConditions(ownerId, filters, range);
+  const conditions = await buildMatchConditions(scope, filters, range);
   if (conditions === null)
     return emptySummary(settings.currency, range, calendar.timeZone);
 
-  const docs = await runJoinedQuery(ownerId, conditions);
+  const docs = await runJoinedQuery(workspaceId, conditions);
 
   const timeline = new Map<string, SummaryTimelinePoint>();
   for (const date of dayKeysInRange(range.fromMs, range.toMs, calendar.timeZone)) {
@@ -515,7 +544,7 @@ const buildSummary = async (
     billableSec += measured.billableSec;
     if (measured.amount !== 0) amounts.push(measured.amount);
 
-    const identity = groupIdentity(measured, groupBy, ownerId, calendar);
+    const identity = groupIdentity(measured, groupBy, workspaceId, calendar);
     const group = groups.get(identity.key) ?? {
       ...identity,
       seconds: 0,
@@ -575,12 +604,12 @@ const decodeCursor = (cursor: string): DecodedCursor | null => {
 
 const toDetailedEntry = (
   measured: MeasuredEntry,
-  ownerId: string,
+  workspaceId: string,
 ): DetailedEntry => {
   const { doc } = measured;
-  const project = ownedBy(doc.project, ownerId);
-  const client = ownedBy(doc.client, ownerId);
-  const task = ownedBy(doc.task, ownerId);
+  const project = inWorkspace(doc.project, workspaceId);
+  const client = inWorkspace(doc.client, workspaceId);
+  const task = inWorkspace(doc.task, workspaceId);
 
   return {
     ...toClientTimeEntry(doc),
@@ -593,7 +622,7 @@ const toDetailedEntry = (
 };
 
 const buildDetailed = async (
-  ownerId: string,
+  scope: ReportScope,
   filters: ReportFilters,
   page: { cursor?: string; limit?: number },
   /**
@@ -602,12 +631,13 @@ const buildDetailed = async (
    */
   withTotals = true,
 ): Promise<DetailedReportResult> => {
-  const settings = await getOrCreateSettings(ownerId);
+  const { workspaceId } = scope;
+  const settings = await getOrCreateWorkspaceSettings(workspaceId);
   const range = parseRange(filters);
   const nowMs = Date.now();
   const limit = page.limit ?? DEFAULT_DETAILED_LIMIT;
 
-  const conditions = await buildMatchConditions(ownerId, filters, range);
+  const conditions = await buildMatchConditions(scope, filters, range);
   if (conditions === null) {
     return {
       entries: [],
@@ -661,7 +691,7 @@ const buildDetailed = async (
     });
   }
 
-  const docs = await runJoinedQuery(ownerId, pageConditions, [
+  const docs = await runJoinedQuery(workspaceId, pageConditions, [
     { $limit: limit + 1 },
   ]);
 
@@ -674,7 +704,7 @@ const buildDetailed = async (
       }),
     )
     .filter((measured): measured is MeasuredEntry => measured !== null)
-    .map((measured) => toDetailedEntry(measured, ownerId));
+    .map((measured) => toDetailedEntry(measured, workspaceId));
 
   const lastDoc = window[window.length - 1];
   const nextCursor =
@@ -692,11 +722,12 @@ const buildDetailed = async (
 };
 
 const buildWeekly = async (
-  ownerId: string,
+  scope: ReportScope,
   filters: ReportFilters,
   weekStart: string,
 ): Promise<WeeklyReportResult> => {
-  const settings = await getOrCreateSettings(ownerId);
+  const { workspaceId } = scope;
+  const settings = await getOrCreateWorkspaceSettings(workspaceId);
   const nowMs = Date.now();
   const calendar: Calendar = {
     timeZone: resolveTimeZone(filters.timeZone),
@@ -731,12 +762,12 @@ const buildWeekly = async (
   const dayIndex = new Map(days.map((day, index) => [day, index]));
   const dayTotals = days.map(() => 0);
 
-  const conditions = await buildMatchConditions(ownerId, filters, range);
+  const conditions = await buildMatchConditions(scope, filters, range);
   if (conditions === null) {
     return { days, rows: [], dayTotals, totalSec: 0 };
   }
 
-  const docs = await runJoinedQuery(ownerId, conditions);
+  const docs = await runJoinedQuery(workspaceId, conditions);
 
   const rows = new Map<string, WeeklyReportRow>();
   let totalSec = 0;
@@ -745,8 +776,8 @@ const buildWeekly = async (
     const measured = measureEntry(doc, range, nowMs, calendar);
     if (!measured) continue;
 
-    const project = ownedBy(doc.project, ownerId);
-    const task = ownedBy(doc.task, ownerId);
+    const project = inWorkspace(doc.project, workspaceId);
+    const task = inWorkspace(doc.task, workspaceId);
     const projectId = project ? String(project._id) : null;
     const taskId = task ? String(task._id) : null;
     const rowKey = `${projectId ?? ""}::${taskId ?? ""}`;
@@ -890,42 +921,56 @@ type CsvExport = CsvExportResult & { mimeType: "text/csv" };
 
 // ── router ───────────────────────────────────────────────────────────
 
+/**
+ * Lift the request context into a report scope.
+ *
+ * Both fields come from the workspace middleware, which resolved them once.
+ * Nothing here re-derives visibility from a role or an input flag.
+ */
+const reportScope = (ctx: {
+  workspaceId: string;
+  visibility: Visibility;
+}): ReportScope => ({
+  workspaceId: ctx.workspaceId,
+  visibility: ctx.visibility,
+});
+
 export const reportsRouter = router({
   /** Totals, grouped breakdown and a zero-filled daily series for charts. */
-  summary: protectedProcedure
+  summary: workspaceProcedure
     .input(summaryReportSchema)
     .query(async ({ ctx, input }): Promise<SummaryReportResult> => {
-      return buildSummary(ctx.user.id, input, input.groupBy);
+      return buildSummary(reportScope(ctx), input, input.groupBy);
     }),
 
   /** Flat, paginated entry log; totals always span the full filtered range. */
-  detailed: protectedProcedure
+  detailed: workspaceProcedure
     .input(detailedReportSchema)
     .query(async ({ ctx, input }): Promise<DetailedReportResult> => {
-      return buildDetailed(ctx.user.id, input, {
+      return buildDetailed(reportScope(ctx), input, {
         ...(input.cursor ? { cursor: input.cursor } : {}),
         ...(input.limit ? { limit: input.limit } : {}),
       });
     }),
 
   /** Seven-day timesheet grid, one row per project+task combination. */
-  weekly: protectedProcedure
+  weekly: workspaceProcedure
     .input(weeklyReportSchema)
     .query(async ({ ctx, input }): Promise<WeeklyReportResult> => {
-      return buildWeekly(ctx.user.id, input, input.weekStart);
+      return buildWeekly(reportScope(ctx), input, input.weekStart);
     }),
 
   /** Runs the matching report and serializes it for download. */
-  exportCsv: protectedProcedure
+  exportCsv: workspaceProcedure
     .input(exportCsvSchema)
     .query(async ({ ctx, input }): Promise<CsvExport> => {
-      const ownerId = ctx.user.id;
+      const scope = reportScope(ctx);
       const range = parseRange(input);
       const exportZone = resolveTimeZone(input.timeZone);
 
       if (input.report === "summary") {
         const result = await buildSummary(
-          ownerId,
+          scope,
           input,
           input.groupBy ?? "project",
         );
@@ -939,7 +984,7 @@ export const reportsRouter = router({
       if (input.report === "weekly") {
         const weekStart =
           input.weekStart ?? dayKeyInZone(range.fromMs, exportZone);
-        const result = await buildWeekly(ownerId, input, weekStart);
+        const result = await buildWeekly(scope, input, weekStart);
         return {
           filename: exportFilename("weekly", range, exportZone),
           csv: toCsv(weeklyCsvRows(result), weeklyCsvColumns(result)),
@@ -956,7 +1001,7 @@ export const reportsRouter = router({
 
       do {
         const pageResult: DetailedReportResult = await buildDetailed(
-          ownerId,
+          scope,
           input,
           { limit: EXPORT_PAGE_SIZE, ...(cursor ? { cursor } : {}) },
           false,

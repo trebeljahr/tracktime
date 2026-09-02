@@ -10,12 +10,13 @@ import {
   type DurationFormat,
   type TimeFormat,
   type WeekStart,
-  type WorkspaceSettings,
+  type ResolvedSettings,
 } from "@starter/shared";
 import { trpc } from "@/lib/trpc";
 
 /** Used until `settings.get` resolves, so nothing renders blank on first paint. */
-export const FALLBACK_SETTINGS: WorkspaceSettings = {
+export const FALLBACK_SETTINGS: ResolvedSettings = {
+  workspaceId: "",
   userId: "",
   defaultHourlyRate: 0,
   currency: "EUR",
@@ -98,7 +99,7 @@ export const formatDayLabel = (iso: string): string => {
 };
 
 export type FormatSettings = {
-  settings: WorkspaceSettings;
+  settings: ResolvedSettings;
   /** False while `settings.get` is still in flight (fallbacks are in use). */
   isLoaded: boolean;
   currency: string;

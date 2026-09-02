@@ -21,9 +21,71 @@ export type UserProfile = {
 
 // ── tracktime domain ─────────────────────────────────────────────────
 //
-// Every document is scoped by `ownerId` so multi-user can be added later
-// without a migration. All ids are stringified Mongo ObjectIds and every
-// timestamp crosses the wire as an ISO string — never a Date object.
+// Every document is scoped by `workspaceId` — a better-auth organization id.
+// Scope ("who may see this") and authorship ("who tracked this") are separate
+// axes: `TimeEntry.authorId` is load-bearing, while the catalog's `createdBy`
+// is audit only. All ids are strings and every timestamp crosses the wire as
+// an ISO string — never a Date object.
+
+/**
+ * A workspace is one better-auth organization. Solo users get a personal
+ * workspace at signup, so there is never a "no workspace" state and never a
+ * solo-vs-team branch in a query.
+ */
+export type Workspace = {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+};
+
+/**
+ * Roles come from better-auth's organization plugin. They gate *membership*
+ * actions (invite, remove, delete). They deliberately do NOT gate what a
+ * member can see — that is the two flags on WorkspaceMember, so that
+ * "hours are transparent, rates are not" is representable.
+ */
+export type WorkspaceRole = "owner" | "admin" | "member";
+
+/**
+ * App-owned membership record, sibling to better-auth's `member` collection.
+ *
+ * Business data (a billing rate, visibility) lives here rather than as
+ * additional fields on the plugin's collection, so the plugin never becomes
+ * the schema owner for money.
+ */
+export type WorkspaceMember = {
+  workspaceId: string;
+  userId: string;
+  role: WorkspaceRole;
+  /** Display name, denormalized so reports can group by member without
+   * reaching into better-auth's user collection mid-aggregation. */
+  name: string;
+  /**
+   * Highest-priority rung of rate resolution, once Stage 7 wires it up.
+   * Present and nullable from the first migration so there is never a second
+   * one; until then the resolution stays project ?? workspace-default.
+   */
+  hourlyRate: number | null;
+  /** May see other members' entries at all. */
+  canViewOthersTime: boolean;
+  /** May see other members' hourlyRate and amounts. Strictly narrower. */
+  canViewOthersMoney: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * What one caller is allowed to see of one workspace, resolved once per
+ * request and threaded into every report builder, the entry list and the
+ * sync fan-out. Never re-derived at a call site.
+ */
+export type Visibility = {
+  /** The caller — always fully visible to themselves. */
+  userId: string;
+  canViewOthersTime: boolean;
+  canViewOthersMoney: boolean;
+};
 
 /**
  * Where a time entry was created. The browser extension is its own source
@@ -58,7 +120,9 @@ export type ReportGroupBy =
 /** A billable customer that projects belong to. */
 export type Client = {
   id: string;
-  ownerId: string;
+  workspaceId: string;
+  /** Audit only — never used for scoping. */
+  createdBy: string;
   name: string;
   /** Hex color, e.g. "#4f46e5". */
   color: string;
@@ -70,7 +134,9 @@ export type Client = {
 /** A project that time is tracked against. */
 export type Project = {
   id: string;
-  ownerId: string;
+  workspaceId: string;
+  /** Audit only — never used for scoping. */
+  createdBy: string;
   name: string;
   /** Hex color, e.g. "#4f46e5". */
   color: string;
@@ -100,7 +166,7 @@ export type Project = {
    */
   budgetCurrency: string | null;
   /**
-   * Overrides `WorkspaceSettings.idle.behavior` for entries on this project;
+   * Overrides `UserPreferences.idle.behavior` for entries on this project;
    * null inherits it. This is what "Meetings" and "Reading" are for — projects
    * where no keyboard input is the normal case, not a sign of absence.
    *
@@ -116,7 +182,9 @@ export type Project = {
 /** A unit of work inside a project. */
 export type Task = {
   id: string;
-  ownerId: string;
+  workspaceId: string;
+  /** Audit only — never used for scoping. */
+  createdBy: string;
   projectId: string;
   name: string;
   done: boolean;
@@ -128,7 +196,13 @@ export type Task = {
 /** A tracked block of time. `end === null` means the timer is running. */
 export type TimeEntry = {
   id: string;
-  ownerId: string;
+  workspaceId: string;
+  /**
+   * Who tracked this. Load-bearing, unlike the catalog's `createdBy`: it is
+   * the report grouping key, the money-visibility subject, and the key of the
+   * one-running-timer index.
+   */
+  authorId: string;
   description: string;
   projectId: string | null;
   taskId: string | null;
@@ -207,17 +281,46 @@ export type PomodoroSettings = {
   notify: boolean;
 };
 
-/** Per-user workspace preferences. */
+/**
+ * Money and calendar config, shared by everyone in a workspace.
+ *
+ * `currency` in particular CANNOT be per-user: every entry snapshots it
+ * (TimeEntry.currency) and a report carries exactly one currency for the whole
+ * result, so two members with different personal currencies would make that
+ * single field a lie.
+ */
 export type WorkspaceSettings = {
-  userId: string;
+  workspaceId: string;
   defaultHourlyRate: number;
   /** ISO 4217 code, e.g. "EUR". */
   currency: string;
   weekStartsOn: WeekStart;
+};
+
+/**
+ * Display preferences that belong to a person, not to a workspace.
+ *
+ * Idle detection lives here rather than on the workspace: how long a machine
+ * sits before its owner counts as away, and what should happen then, is a fact
+ * about that person's desk, not a policy their colleagues share.
+ */
+export type UserPreferences = {
+  userId: string;
   timeFormat: TimeFormat;
   durationFormat: DurationFormat;
   pomodoro: PomodoroSettings;
   idle: IdleSettings;
+};
+
+/**
+ * What `settings.get` returns: the two records above, merged.
+ *
+ * The storage split is the part that is expensive to change later, so it
+ * happens now; the wire shape stays merged so no client has to change yet.
+ * Splitting the procedure is a later, reversible step.
+ */
+export type ResolvedSettings = WorkspaceSettings & Omit<UserPreferences, "userId"> & {
+  userId: string;
 };
 
 /**

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import type { UpdateSettingsInput, WorkspaceSettings } from "@starter/shared";
+import type { UpdateSettingsInput, ResolvedSettings } from "@starter/shared";
 
 import { FALLBACK_SETTINGS } from "@/lib/format";
 import { ORIGIN_ID } from "@/hooks/use-sync";
@@ -24,9 +24,9 @@ const isDefined = <T,>(value: T | undefined): value is T => value !== undefined;
  * cache entry and the eventual server response agree.
  */
 export const applySettingsPatch = (
-  current: WorkspaceSettings,
+  current: ResolvedSettings,
   patch: SettingsPatch
-): WorkspaceSettings => {
+): ResolvedSettings => {
   // Keys are constrained by the settings types; the cast is the narrowest way
   // to write through an `Object.entries` loop without reaching for `any`.
   const mergeBlock = <T extends object>(
@@ -66,7 +66,7 @@ export const applySettingsPatch = (
 };
 
 export type WorkspaceSettingsController = {
-  settings: WorkspaceSettings;
+  settings: ResolvedSettings;
   /** False while `settings.get` is still in flight (fallbacks are in use). */
   isLoaded: boolean;
   saveState: SaveState;

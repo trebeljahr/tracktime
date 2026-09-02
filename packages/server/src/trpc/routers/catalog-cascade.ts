@@ -38,10 +38,10 @@ const EMPTY_RESULT: CatalogRemoveResult = {
  * either the project or one of those tasks is detached from both.
  */
 export async function cascadeDeleteProject(
-  ownerId: string,
+  workspaceId: string,
   projectId: string,
 ): Promise<CatalogRemoveResult> {
-  const tasks = await Task.find({ ownerId, projectId })
+  const tasks = await Task.find({ workspaceId, projectId })
     .select({ _id: 1 })
     .lean();
   const taskIds = tasks.map((task) => String(task._id));
@@ -50,7 +50,7 @@ export async function cascadeDeleteProject(
   // matching on both keeps the cascade correct even if that ever drifts.
   const detached = await TimeEntry.updateMany(
     {
-      ownerId,
+      workspaceId,
       $or: [
         { projectId },
         ...(taskIds.length > 0 ? [{ taskId: { $in: taskIds } }] : []),
@@ -65,7 +65,7 @@ export async function cascadeDeleteProject(
   // project-less pin, which every surface already renders.
   const favorites = await Favorite.updateMany(
     {
-      ownerId,
+      workspaceId,
       $or: [
         { projectId },
         ...(taskIds.length > 0 ? [{ taskId: { $in: taskIds } }] : []),
@@ -74,8 +74,8 @@ export async function cascadeDeleteProject(
     { $set: { projectId: null, taskId: null } },
   );
 
-  await Task.deleteMany({ ownerId, projectId });
-  await Project.deleteOne({ _id: projectId, ownerId });
+  await Task.deleteMany({ workspaceId, projectId });
+  await Project.deleteOne({ _id: projectId, workspaceId });
 
   return {
     ...EMPTY_RESULT,
@@ -90,18 +90,18 @@ export async function cascadeDeleteProject(
  * "no task".
  */
 export async function cascadeDeleteTask(
-  ownerId: string,
+  workspaceId: string,
   taskId: string,
 ): Promise<CatalogRemoveResult> {
   const detached = await TimeEntry.updateMany(
-    { ownerId, taskId },
+    { workspaceId, taskId },
     { $set: { taskId: null } },
   );
   const favorites = await Favorite.updateMany(
-    { ownerId, taskId },
+    { workspaceId, taskId },
     { $set: { taskId: null } },
   );
-  await Task.deleteOne({ _id: taskId, ownerId });
+  await Task.deleteOne({ _id: taskId, workspaceId });
 
   return {
     ...EMPTY_RESULT,
@@ -115,14 +115,14 @@ export async function cascadeDeleteTask(
  * no tracked time is orphaned by removing a grouping level above it.
  */
 export async function cascadeDeleteClient(
-  ownerId: string,
+  workspaceId: string,
   clientId: string,
 ): Promise<CatalogRemoveResult> {
   const detached = await Project.updateMany(
-    { ownerId, clientId },
+    { workspaceId, clientId },
     { $set: { clientId: null } },
   );
-  await Client.deleteOne({ _id: clientId, ownerId });
+  await Client.deleteOne({ _id: clientId, workspaceId });
 
   return { ...EMPTY_RESULT, projectsDetached: detached.modifiedCount };
 }

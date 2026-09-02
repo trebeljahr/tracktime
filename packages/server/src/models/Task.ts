@@ -2,7 +2,8 @@ import mongoose, { Schema, type Document } from "mongoose";
 import type { Task as TaskWire } from "@starter/shared";
 
 export interface ITask extends Document {
-  ownerId: string;
+  workspaceId: string;
+  createdBy: string;
   projectId: string;
   name: string;
   done: boolean;
@@ -17,7 +18,8 @@ export interface ITask extends Document {
  */
 export type TaskDocLike = {
   _id?: unknown;
-  ownerId: string;
+  workspaceId: string;
+  createdBy: string;
   projectId: string;
   name: string;
   done: boolean;
@@ -28,7 +30,8 @@ export type TaskDocLike = {
 
 const taskSchema = new Schema<ITask>(
   {
-    ownerId: { type: String, required: true, index: true },
+    workspaceId: { type: String, required: true, index: true },
+    createdBy: { type: String, required: true, default: "" },
     projectId: { type: String, required: true },
     name: { type: String, required: true, maxlength: 200, trim: true },
     done: { type: Boolean, required: true, default: false },
@@ -37,7 +40,7 @@ const taskSchema = new Schema<ITask>(
   { timestamps: true },
 );
 
-taskSchema.index({ ownerId: 1, projectId: 1 });
+taskSchema.index({ workspaceId: 1, projectId: 1 });
 
 export const Task = mongoose.model<ITask>("Task", taskSchema);
 
@@ -45,7 +48,8 @@ export const Task = mongoose.model<ITask>("Task", taskSchema);
 export function toClientTask(doc: TaskDocLike): TaskWire {
   return {
     id: String(doc._id),
-    ownerId: doc.ownerId,
+    workspaceId: doc.workspaceId,
+    createdBy: doc.createdBy,
     projectId: doc.projectId,
     name: doc.name,
     done: doc.done,

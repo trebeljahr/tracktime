@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "better-auth/adapters/mongodb";
 import { bearer } from "better-auth/plugins/bearer";
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
+import { organization } from "better-auth/plugins/organization";
 import { MongoClient } from "mongodb";
 import { env, getTrustedOrigins } from "../config/env.js";
 import { sendEmail } from "../services/email.js";
@@ -10,6 +11,7 @@ import {
   clientKindFromHeaders,
   normalizeClientKind,
 } from "./client-label.js";
+import { createPersonalWorkspace } from "./personal-workspace.js";
 
 /**
  * better-auth instance. Must be initialized AFTER mongoose.connect() because
@@ -115,6 +117,47 @@ export async function initAuth(): Promise<void> {
        * Raycast and the CLI show a short code, the user approves it at
        * /device in an already-signed-in browser.
        */
+      /**
+       * Workspaces. One organization IS one tracktime workspace — the plugin
+       * owns identity, membership, invitations and roles, while `workspaceId`
+       * on the domain collections is what actually scopes data.
+       *
+       * `teams` stays OFF deliberately. The plugin's teams are a SECOND
+       * nesting level inside an organization; tracktime's ownership scope is
+       * one level deep. Enabling it would put two scope ids in every query and
+       * two pickers in every UI — including a 360px extension popup — for a
+       * grouping nobody has asked for. `teamId` is additive if that changes.
+       */
+      organization({
+        // Personal workspaces are created for their owner by the signup hook
+        // below, so the creator is always "owner".
+        creatorRole: "owner",
+        async sendInvitationEmail({
+          email,
+          invitation,
+          organization: org,
+          inviter,
+        }: {
+          email: string;
+          invitation: { id: string };
+          organization: { name: string };
+          inviter: { user: { name?: string; email: string } };
+        }) {
+          const url = `${env.FRONTEND_URL.replace(/\/$/, "")}/invite/${invitation.id}`;
+          const who = inviter.user.name || inviter.user.email;
+          if (!env.LISTMONK_URL || !env.LISTMONK_TX_TEMPLATE_ID) {
+            console.log(`[auth] Invitation URL for ${email}: ${url}`);
+            return;
+          }
+          await sendEmail({
+            to: email,
+            subject: `${who} invited you to ${org.name}`,
+            text: `${who} invited you to join ${org.name} on tracktime: ${url}`,
+            html: `<p>${who} invited you to join <strong>${org.name}</strong> on tracktime.</p><p><a href="${url}">Accept the invitation</a></p>`,
+          });
+        },
+      }),
+
       deviceAuthorization({
         expiresIn: "10m",
         interval: "5s",
@@ -131,6 +174,23 @@ export async function initAuth(): Promise<void> {
     ],
 
     databaseHooks: {
+      user: {
+        create: {
+          /**
+           * Give every new user their personal workspace immediately, so the
+           * "user with no workspace" state never exists and no resolver needs
+           * a branch for it.
+           *
+           * Deliberately non-fatal: a signup must not fail because the
+           * workspace could not be created. `ensurePersonalWorkspace` repairs
+           * the gap on the next read.
+           */
+          after: async (user: { id: string; name?: string; email?: string }) => {
+            await createPersonalWorkspace(getAuth().api, user);
+          },
+        },
+      },
+
       session: {
         create: {
           /**

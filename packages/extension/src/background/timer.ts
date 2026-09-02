@@ -53,10 +53,14 @@ const billableDefaultFor = (projectId: string | null): boolean => {
 const optimisticEntry = (
   input: OfflineStartInput,
   id: string,
-  ownerId: string,
+  authorId: string,
 ): TimeEntry => ({
   id,
-  ownerId,
+  // The workspace is resolved server-side from the session, so an offline
+  // start cannot know it. It is overwritten by the real entry on flush, and
+  // nothing in the popup reads it in the meantime.
+  workspaceId: "",
+  authorId,
   description: input.description,
   projectId: input.projectId,
   taskId: input.taskId,
@@ -134,11 +138,11 @@ export async function startTimer(
 
 const queueStart = async (
   input: OfflineStartInput,
-  ownerId: string,
+  authorId: string,
 ): Promise<TimeEntry> => {
   const tempId = createTempId();
   await enqueueOffline("entries.start", input, tempId);
-  const entry = optimisticEntry(input, tempId, ownerId);
+  const entry = optimisticEntry(input, tempId, authorId);
   setCachedRunning(entry);
   // On disk as well as in memory: the queued row outlives this worker, so the
   // running timer it implies has to outlive it too.

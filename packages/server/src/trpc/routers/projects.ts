@@ -17,9 +17,9 @@ import {
   toClientProject,
   type ProjectDocLike,
 } from "../../models/Project.js";
-import { getOrCreateSettings } from "../../models/Settings.js";
+import { getOrCreateWorkspaceSettings } from "../../models/Settings.js";
 import { publishSync } from "../../ws/sync.js";
-import { protectedProcedure, router } from "../trpc.js";
+import { workspaceProcedure, router } from "../trpc.js";
 import {
   cascadeDeleteProject,
   type CatalogRemoveResult,
@@ -61,12 +61,12 @@ type ProjectAggregateRow = ProjectDocLike & {
 };
 
 async function assertUniqueProjectName(
-  ownerId: string,
+  workspaceId: string,
   name: string,
   excludeId?: string,
 ): Promise<void> {
   const clash = await Project.exists({
-    ownerId,
+    workspaceId,
     name: exactNameRegExp(name),
     ...(excludeId ? { _id: { $ne: excludeId } } : {}),
   });
@@ -80,27 +80,27 @@ async function assertUniqueProjectName(
 
 /** Throws NOT_FOUND when the client is missing or owned by somebody else. */
 async function assertClientOwned(
-  ownerId: string,
+  workspaceId: string,
   clientId: string,
 ): Promise<void> {
   assertObjectId(clientId);
-  const exists = await Client.exists({ _id: clientId, ownerId });
+  const exists = await Client.exists({ _id: clientId, workspaceId });
   if (!exists) {
     throw new TRPCError({ code: "NOT_FOUND", message: "Client not found" });
   }
 }
 
 export const projectsRouter = router({
-  list: protectedProcedure
+  list: workspaceProcedure
     .input(projectListSchema)
     .query(async ({ ctx, input }): Promise<ProjectWithStats[]> => {
-      const ownerId = ctx.user.id;
+      const workspaceId = ctx.workspaceId;
       if (typeof input.clientId === "string") assertObjectId(input.clientId);
 
       const rows = await Project.aggregate<ProjectAggregateRow>([
         {
           $match: {
-            ownerId,
+            workspaceId,
             ...(input.includeArchived ? {} : { archived: false }),
             ...(input.clientId !== undefined
               ? { clientId: input.clientId ?? null }
@@ -132,7 +132,7 @@ export const projectsRouter = router({
                 $match: {
                   $expr: {
                     $and: [
-                      { $eq: ["$ownerId", ownerId] },
+                      { $eq: ["$workspaceId", workspaceId] },
                       { $eq: ["$projectId", "$$pid"] },
                     ],
                   },
@@ -169,7 +169,7 @@ export const projectsRouter = router({
       // Costs nothing until a project actually carries a target, and archived
       // projects keep reporting: their history is still the answer to
       // "did that job come in under budget?".
-      const progress = await loadBudgetProgress(ownerId, projects);
+      const progress = await loadBudgetProgress(workspaceId, projects);
 
       return projects.map((project) => ({
         ...project,
@@ -177,21 +177,24 @@ export const projectsRouter = router({
       }));
     }),
 
-  create: protectedProcedure
+  create: workspaceProcedure
     .input(createProjectSchema)
     .mutation(async ({ ctx, input }): Promise<ProjectWire> => {
       const name = input.name.trim();
-      await assertUniqueProjectName(ctx.user.id, name);
-      if (input.clientId) await assertClientOwned(ctx.user.id, input.clientId);
+      await assertUniqueProjectName(ctx.workspaceId, name);
+      if (input.clientId) await assertClientOwned(ctx.workspaceId, input.clientId);
 
-      const existing = await Project.countDocuments({ ownerId: ctx.user.id });
+      const existing = await Project.countDocuments({
+        workspaceId: ctx.workspaceId,
+      });
       // Only read settings when a money budget is actually being set — every
       // other create stays a single write.
       const workspaceCurrency = needsCurrency(input)
-        ? (await getOrCreateSettings(ctx.user.id)).currency
+        ? (await getOrCreateWorkspaceSettings(ctx.workspaceId)).currency
         : "";
       const created = await Project.create({
-        ownerId: ctx.user.id,
+        workspaceId: ctx.workspaceId,
+        createdBy: ctx.user.id,
         name,
         color: input.color ?? pickCatalogColor(existing, PROJECT_COLOR_OFFSET),
         clientId: input.clientId ?? null,
@@ -205,22 +208,22 @@ export const projectsRouter = router({
         archived: false,
       });
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "project" },
         input.originId,
       );
       return toClientProject(created);
     }),
 
-  update: protectedProcedure
+  update: workspaceProcedure
     .input(updateProjectSchema)
     .mutation(async ({ ctx, input }): Promise<ProjectWire> => {
       assertObjectId(input.id);
       if (input.name !== undefined) {
-        await assertUniqueProjectName(ctx.user.id, input.name, input.id);
+        await assertUniqueProjectName(ctx.workspaceId, input.name, input.id);
       }
-      if (input.clientId) await assertClientOwned(ctx.user.id, input.clientId);
+      if (input.clientId) await assertClientOwned(ctx.workspaceId, input.clientId);
 
       // Changing a budget's amount must keep the currency it was agreed in,
       // so the existing snapshot is read before it is overwritten. An
@@ -229,8 +232,8 @@ export const projectsRouter = router({
       if (touchesBudget(input)) {
         if (needsCurrency(input)) {
           const [settings, existing] = await Promise.all([
-            getOrCreateSettings(ctx.user.id),
-            Project.findOne({ _id: input.id, ownerId: ctx.user.id })
+            getOrCreateWorkspaceSettings(ctx.workspaceId),
+            Project.findOne({ _id: input.id, workspaceId: ctx.workspaceId })
               .select("budgetAmount budgetCurrency")
               .lean(),
           ]);
@@ -244,7 +247,7 @@ export const projectsRouter = router({
       }
 
       const updated = await Project.findOneAndUpdate(
-        { _id: input.id, ownerId: ctx.user.id },
+        { _id: input.id, workspaceId: ctx.workspaceId },
         {
           $set: {
             ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -274,21 +277,21 @@ export const projectsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
       }
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "project" },
         input.originId,
       );
       return toClientProject(updated);
     }),
 
-  archive: protectedProcedure
+  archive: workspaceProcedure
     .input(archiveInputSchema)
     .mutation(async ({ ctx, input }): Promise<ProjectWire> => {
       assertObjectId(input.id);
 
       const updated = await Project.findOneAndUpdate(
-        { _id: input.id, ownerId: ctx.user.id },
+        { _id: input.id, workspaceId: ctx.workspaceId },
         { $set: { archived: input.archived ?? true } },
         { returnDocument: "after" },
       ).lean();
@@ -297,8 +300,8 @@ export const projectsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
       }
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "project" },
         input.originId,
       );
@@ -310,14 +313,14 @@ export const projectsRouter = router({
    * their tracked time and become project-less. Use `archive` to keep the
    * project around instead.
    */
-  remove: protectedProcedure
+  remove: workspaceProcedure
     .input(idInputSchema)
     .mutation(async ({ ctx, input }): Promise<CatalogRemoveResult> => {
       assertObjectId(input.id);
 
       const project = await Project.findOne({
         _id: input.id,
-        ownerId: ctx.user.id,
+        workspaceId: ctx.workspaceId,
       }).lean();
       if (!project) {
         throw new TRPCError({
@@ -326,10 +329,10 @@ export const projectsRouter = router({
         });
       }
 
-      const result = await cascadeDeleteProject(ctx.user.id, input.id);
+      const result = await cascadeDeleteProject(ctx.workspaceId, input.id);
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         {
           kind: "catalog.changed",
           scope: "project",
@@ -340,8 +343,8 @@ export const projectsRouter = router({
       // A detached pin still points somewhere it did not a moment ago, and
       // `catalog.changed` does not cover the favorites cache.
       if (result.favoritesDetached > 0) {
-        publishSync(
-          ctx.user.id,
+        void publishSync(
+          ctx.workspaceId,
           { kind: "favorites.changed" },
           input.originId,
         );

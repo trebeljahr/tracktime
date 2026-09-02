@@ -17,7 +17,7 @@ import {
   type RecentEntry,
   type Task,
   type TimeEntry,
-  type WorkspaceSettings,
+  type ResolvedSettings,
 } from "@starter/core";
 import { CLIENT_ID, getOriginId, getStoredSession } from "./auth.js";
 import { apiUrl } from "./preferences.js";
@@ -96,7 +96,7 @@ export type Tracktime = {
   remove(id: string): Promise<{ success: true; id: string }>;
   projects(): Promise<ProjectWithStats[]>;
   tasks(projectId: string): Promise<TaskWithStats[]>;
-  settings(): Promise<WorkspaceSettings>;
+  settings(): Promise<ResolvedSettings>;
 };
 
 const wrap = (client: ApiClient, originId: string): Tracktime => ({
@@ -168,7 +168,7 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
       includeArchived: false,
     }),
 
-  settings: () => client.query<WorkspaceSettings>("settings.get"),
+  settings: () => client.query<ResolvedSettings>("settings.get"),
 });
 
 /**

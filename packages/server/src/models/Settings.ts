@@ -1,18 +1,34 @@
+// Settings live in two collections, because they answer to two different
+// owners.
+//
+//  - WorkspaceSettings — money and calendar. Shared by everyone in the
+//    workspace. `currency` CANNOT be per-user: every entry snapshots it and a
+//    report carries exactly one currency for the whole result, so two members
+//    with different personal currencies would make that field a lie.
+//  - UserPreferences — how a person likes things rendered. Follows the human
+//    across every workspace they belong to.
+//
+// The wire shape stays merged for now (see `getResolvedSettings`), so the
+// storage split — the expensive-to-change part — lands without any client
+// having to change. Splitting the procedure is a later, reversible step.
 import mongoose, { Schema, type Document } from "mongoose";
 import {
   DEFAULT_IDLE_SETTINGS,
   IDLE_BEHAVIORS,
   MAX_IDLE_THRESHOLD_MINUTES,
   MIN_IDLE_THRESHOLD_MINUTES,
-  type DurationFormat,
-  type IdleSettings,
-  type PomodoroSettings,
-  type TimeFormat,
-  type WeekStart,
-  type WorkspaceSettings,
+} from "@starter/shared";
+import type {
+  DurationFormat,
+  IdleSettings,
+  PomodoroSettings,
+  ResolvedSettings,
+  TimeFormat,
+  UserPreferences,
+  WeekStart,
+  WorkspaceSettings,
 } from "@starter/shared";
 
-/** Defaults applied to a workspace the first time its settings are read. */
 export const DEFAULT_POMODORO: PomodoroSettings = {
   enabled: false,
   workMinutes: 25,
@@ -22,47 +38,74 @@ export const DEFAULT_POMODORO: PomodoroSettings = {
   notify: true,
 };
 
-/** Re-exported under the model's naming so the two defaults read alike. */
-export const DEFAULT_IDLE: IdleSettings = DEFAULT_IDLE_SETTINGS;
-
-export const DEFAULT_SETTINGS: Omit<WorkspaceSettings, "userId"> = {
+export const DEFAULT_WORKSPACE_SETTINGS: Omit<WorkspaceSettings, "workspaceId"> = {
   defaultHourlyRate: 0,
   currency: "EUR",
   weekStartsOn: 1,
+};
+
+/** Re-exported under the model's naming so the two defaults read alike. */
+export const DEFAULT_IDLE: IdleSettings = DEFAULT_IDLE_SETTINGS;
+
+export const DEFAULT_USER_PREFERENCES: Omit<UserPreferences, "userId"> = {
   timeFormat: "24h",
   durationFormat: "hms",
   pomodoro: DEFAULT_POMODORO,
   idle: DEFAULT_IDLE,
 };
 
-export interface ISettings extends Document {
-  userId: string;
+// ── workspace settings ───────────────────────────────────────────────
+
+export interface IWorkspaceSettings extends Document {
+  workspaceId: string;
   defaultHourlyRate: number;
   currency: string;
   weekStartsOn: WeekStart;
-  timeFormat: TimeFormat;
-  durationFormat: DurationFormat;
-  pomodoro: PomodoroSettings;
-  idle: IdleSettings;
   createdAt: Date;
   updatedAt: Date;
 }
 
-/**
- * Structural shape accepted by {@link toClientSettings} — satisfied by both a
- * `.lean()` result and a hydrated document.
- */
-export type SettingsDocLike = {
+const workspaceSettingsSchema = new Schema<IWorkspaceSettings>(
+  {
+    workspaceId: { type: String, required: true, unique: true },
+    defaultHourlyRate: {
+      type: Number,
+      required: true,
+      default: DEFAULT_WORKSPACE_SETTINGS.defaultHourlyRate,
+      min: 0,
+    },
+    currency: {
+      type: String,
+      required: true,
+      default: DEFAULT_WORKSPACE_SETTINGS.currency,
+    },
+    weekStartsOn: {
+      type: Number,
+      enum: [0, 1],
+      required: true,
+      default: DEFAULT_WORKSPACE_SETTINGS.weekStartsOn,
+    },
+  },
+  { timestamps: true },
+);
+
+export const WorkspaceSettingsModel = mongoose.model<IWorkspaceSettings>(
+  "WorkspaceSettings",
+  workspaceSettingsSchema,
+);
+
+// ── user preferences ─────────────────────────────────────────────────
+
+export interface IUserPreferences extends Document {
   userId: string;
-  defaultHourlyRate: number;
-  currency: string;
-  weekStartsOn: WeekStart;
   timeFormat: TimeFormat;
   durationFormat: DurationFormat;
   pomodoro: PomodoroSettings;
   /** Absent on documents written before idle detection existed. */
   idle?: IdleSettings | null;
-};
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 const idleSchema = new Schema<IdleSettings>(
   {
@@ -119,33 +162,20 @@ const pomodoroSchema = new Schema<PomodoroSettings>(
   { _id: false },
 );
 
-const settingsSchema = new Schema<ISettings>(
+const userPreferencesSchema = new Schema<IUserPreferences>(
   {
     userId: { type: String, required: true, unique: true },
-    defaultHourlyRate: {
-      type: Number,
-      required: true,
-      default: DEFAULT_SETTINGS.defaultHourlyRate,
-      min: 0,
-    },
-    currency: { type: String, required: true, default: DEFAULT_SETTINGS.currency },
-    weekStartsOn: {
-      type: Number,
-      enum: [0, 1],
-      required: true,
-      default: DEFAULT_SETTINGS.weekStartsOn,
-    },
     timeFormat: {
       type: String,
       enum: ["12h", "24h"],
       required: true,
-      default: DEFAULT_SETTINGS.timeFormat,
+      default: DEFAULT_USER_PREFERENCES.timeFormat,
     },
     durationFormat: {
       type: String,
       enum: ["hms", "decimal"],
       required: true,
-      default: DEFAULT_SETTINGS.durationFormat,
+      default: DEFAULT_USER_PREFERENCES.durationFormat,
     },
     pomodoro: {
       type: pomodoroSchema,
@@ -161,63 +191,116 @@ const settingsSchema = new Schema<ISettings>(
   { timestamps: true },
 );
 
-export const Settings = mongoose.model<ISettings>("Settings", settingsSchema);
+export const UserPreferencesModel = mongoose.model<IUserPreferences>(
+  "UserPreferences",
+  userPreferencesSchema,
+);
 
-/** Convert a Settings document into the exact wire shape. */
-export function toClientSettings(doc: SettingsDocLike): WorkspaceSettings {
-  return {
-    userId: doc.userId,
-    defaultHourlyRate: doc.defaultHourlyRate,
-    currency: doc.currency,
-    weekStartsOn: doc.weekStartsOn,
-    timeFormat: doc.timeFormat,
-    durationFormat: doc.durationFormat,
-    pomodoro: {
-      enabled: doc.pomodoro.enabled,
-      workMinutes: doc.pomodoro.workMinutes,
-      breakMinutes: doc.pomodoro.breakMinutes,
-      longBreakMinutes: doc.pomodoro.longBreakMinutes,
-      cyclesBeforeLongBreak: doc.pomodoro.cyclesBeforeLongBreak,
-      notify: doc.pomodoro.notify,
-    },
-    // A settings document written before idle detection existed has no `idle`
-    // subdocument, and Mongoose does not backfill defaults on read. Falling
-    // back here keeps the wire shape whole for those users; the next write
-    // persists it.
-    idle: {
-      enabled: doc.idle?.enabled ?? DEFAULT_IDLE.enabled,
-      thresholdMinutes:
-        doc.idle?.thresholdMinutes ?? DEFAULT_IDLE.thresholdMinutes,
-      behavior: doc.idle?.behavior ?? DEFAULT_IDLE.behavior,
-      lockIsImmediate:
-        doc.idle?.lockIsImmediate ?? DEFAULT_IDLE.lockIsImmediate,
-    },
-  };
-}
+// ── reads ────────────────────────────────────────────────────────────
 
 /**
- * Read a user's workspace settings, creating them with defaults on first use.
- * Every rate/currency snapshot in the app funnels through this.
+ * Workspace money/calendar config, seeded on first use.
+ *
+ * Every rate and currency snapshot in the app funnels through this, so it is
+ * scoped by workspace and never by caller: two members stopping a timer in the
+ * same workspace must snapshot the same currency.
  */
-export async function getOrCreateSettings(
-  userId: string,
+export async function getOrCreateWorkspaceSettings(
+  workspaceId: string,
 ): Promise<WorkspaceSettings> {
-  const existing = await Settings.findOne({ userId }).lean();
-  if (existing) return toClientSettings(existing);
+  const existing = await WorkspaceSettingsModel.findOne({ workspaceId }).lean();
+  if (existing) {
+    return {
+      workspaceId,
+      defaultHourlyRate: existing.defaultHourlyRate,
+      currency: existing.currency,
+      weekStartsOn: existing.weekStartsOn,
+    };
+  }
 
-  await Settings.updateOne(
-    { userId },
-    { $setOnInsert: { userId, ...DEFAULT_SETTINGS } },
+  await WorkspaceSettingsModel.updateOne(
+    { workspaceId },
+    { $setOnInsert: { workspaceId, ...DEFAULT_WORKSPACE_SETTINGS } },
     { upsert: true },
   );
 
-  const created = await Settings.findOne({ userId }).lean();
+  const created = await WorkspaceSettingsModel.findOne({ workspaceId }).lean();
   return created
-    ? toClientSettings(created)
+    ? {
+        workspaceId,
+        defaultHourlyRate: created.defaultHourlyRate,
+        currency: created.currency,
+        weekStartsOn: created.weekStartsOn,
+      }
+    : { workspaceId, ...DEFAULT_WORKSPACE_SETTINGS };
+}
+
+/** A person's display preferences, seeded on first use. */
+export async function getOrCreateUserPreferences(
+  userId: string,
+): Promise<UserPreferences> {
+  const existing = await UserPreferencesModel.findOne({ userId }).lean();
+  if (existing) {
+    return {
+      userId,
+      timeFormat: existing.timeFormat,
+      durationFormat: existing.durationFormat,
+      pomodoro: { ...existing.pomodoro },
+      // A preferences document written before idle detection existed has no
+      // `idle` sub-document; fall back field by field rather than dropping it.
+      idle: {
+        enabled: existing.idle?.enabled ?? DEFAULT_IDLE.enabled,
+        thresholdMinutes:
+          existing.idle?.thresholdMinutes ?? DEFAULT_IDLE.thresholdMinutes,
+        behavior: existing.idle?.behavior ?? DEFAULT_IDLE.behavior,
+        lockIsImmediate:
+          existing.idle?.lockIsImmediate ?? DEFAULT_IDLE.lockIsImmediate,
+      },
+    };
+  }
+
+  await UserPreferencesModel.updateOne(
+    { userId },
+    { $setOnInsert: { userId, ...DEFAULT_USER_PREFERENCES } },
+    { upsert: true },
+  );
+
+  const created = await UserPreferencesModel.findOne({ userId }).lean();
+  return created
+    ? {
+        userId,
+        timeFormat: created.timeFormat,
+        durationFormat: created.durationFormat,
+        pomodoro: { ...created.pomodoro },
+        idle: { ...DEFAULT_IDLE, ...(created.idle ?? {}) },
+      }
     : {
         userId,
-        ...DEFAULT_SETTINGS,
+        ...DEFAULT_USER_PREFERENCES,
         pomodoro: { ...DEFAULT_POMODORO },
         idle: { ...DEFAULT_IDLE },
       };
+}
+
+/** The two records above, merged — exactly what `settings.get` returns. */
+export async function getResolvedSettings(
+  workspaceId: string,
+  userId: string,
+): Promise<ResolvedSettings> {
+  const [workspace, user] = await Promise.all([
+    getOrCreateWorkspaceSettings(workspaceId),
+    getOrCreateUserPreferences(userId),
+  ]);
+
+  return {
+    workspaceId: workspace.workspaceId,
+    userId: user.userId,
+    defaultHourlyRate: workspace.defaultHourlyRate,
+    currency: workspace.currency,
+    weekStartsOn: workspace.weekStartsOn,
+    timeFormat: user.timeFormat,
+    durationFormat: user.durationFormat,
+    pomodoro: user.pomodoro,
+    idle: user.idle,
+  };
 }

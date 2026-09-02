@@ -39,7 +39,8 @@ const favorite = (
   overrides: Partial<DetailedFavorite> = {},
 ): DetailedFavorite => ({
   id: "fav-1",
-  ownerId: "owner",
+  workspaceId: "w1",
+  userId: "owner",
   ...quick(),
   order: 0,
   createdAt: "2026-08-01T00:00:00.000Z",

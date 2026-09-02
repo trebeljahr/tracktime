@@ -24,8 +24,15 @@ export type BudgetedProject = ProjectBudget & { id: string };
  * Projects with no estimate and no budget are skipped entirely, so a workspace
  * that never sets one pays nothing: no entries are read at all.
  */
+/*
+ * Deliberately spans every member's entries: a project budget is the
+ * project's, not one person's. That makes it a money-visibility surface —
+ * Stage 5 must decide whether a member without `canViewOthersMoney` sees
+ * budget progress at all, since a spent-amount total discloses colleagues'
+ * earnings in aggregate even though no individual entry is exposed.
+ */
 export async function loadBudgetProgress(
-  ownerId: string,
+  workspaceId: string,
   projects: BudgetedProject[],
 ): Promise<Map<string, BudgetProgress>> {
   const progress = new Map<string, BudgetProgress>();
@@ -33,7 +40,7 @@ export async function loadBudgetProgress(
   if (targeted.length === 0) return progress;
 
   const docs = await TimeEntry.find({
-    ownerId,
+    workspaceId,
     projectId: { $in: targeted.map((project) => project.id) },
   })
     .select("projectId start end durationSec billable hourlyRate currency")

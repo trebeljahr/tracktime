@@ -197,7 +197,8 @@ export const useCalendarActions = (
       const durationSec = durationOf(variables.start, variables.end);
       const optimistic: DetailedEntry = {
         id: `optimistic-${now}`,
-        ownerId: "",
+        workspaceId: "",
+        authorId: "",
         description: variables.description ?? "",
         projectId,
         taskId: variables.taskId ?? null,

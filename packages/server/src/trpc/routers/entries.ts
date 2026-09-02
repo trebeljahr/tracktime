@@ -1,15 +1,20 @@
 // IMPLEMENTED BY: timer / entries agent
 //
 // Invariants this file owns:
-//  - At most ONE running entry (`end === null`) per ownerId. `start` stops the
-//    running one first (the partial unique index in models/TimeEntry.ts is the
-//    backstop, not the strategy).
+//  - At most ONE running entry (`end === null`) per PERSON, across every
+//    workspace they belong to. `start` stops the running one first (the partial
+//    unique index on `authorId` in models/TimeEntry.ts is the backstop, not the
+//    strategy). The running entry may live in a DIFFERENT workspace than the
+//    request — every running-timer helper below is therefore author-scoped and
+//    deliberately carries no workspace filter.
 //  - Rate snapshot on stop and on manual create/update: when billable,
 //    `hourlyRate = project.hourlyRate ?? settings.defaultHourlyRate`, else null.
-//    `currency` is snapshotted from settings.
-//  - Every mutation calls `publishSync(ctx.user.id, <event>, input.originId)`.
-//  - Every query/mutation is scoped by `ownerId` — another user's document is
-//    indistinguishable from a missing one (NOT_FOUND, never FORBIDDEN).
+//    `currency` is snapshotted from the WORKSPACE's settings, never the
+//    caller's — two members stopping a timer in one workspace must agree.
+//  - Every mutation publishes into the workspace the affected entry belongs to.
+//  - Every query/mutation is scoped by `ctx.workspaceId` — a document in
+//    another workspace is indistinguishable from a missing one (NOT_FOUND,
+//    never FORBIDDEN).
 import { TRPCError } from "@trpc/server";
 import mongoose, { Types, type PipelineStage } from "mongoose";
 import { z } from "zod";
@@ -38,9 +43,10 @@ import {
   toClientTimeEntry,
   type TimeEntryDocLike,
 } from "../../models/TimeEntry.js";
-import { getOrCreateSettings } from "../../models/Settings.js";
+import { getOrCreateWorkspaceSettings } from "../../models/Settings.js";
+import { authorScopeFilter } from "../../models/WorkspaceMember.js";
 import { publishSync } from "../../ws/sync.js";
-import { protectedProcedure, router } from "../trpc.js";
+import { router, workspaceProcedure } from "../trpc.js";
 import { loadCatalogLookup } from "./catalog-lookup.js";
 import { collapseRecents, type RecentSourceEntry } from "./quick-start.js";
 
@@ -104,12 +110,12 @@ type ResolvedRefs = {
 };
 
 const loadProject = async (
-  ownerId: string,
+  workspaceId: string,
   projectId: string,
 ): Promise<ProjectDocLike> => {
   const project = await Project.findOne({
     _id: requireObjectId(projectId, "Project not found"),
-    ownerId,
+    workspaceId,
   }).lean();
   if (!project) throw notFound("Project not found");
   return project;
@@ -120,13 +126,13 @@ const loadProject = async (
  * with each other. A task given without a project adopts the task's project.
  */
 const resolveRefs = async (
-  ownerId: string,
+  workspaceId: string,
   projectId: string | null,
   taskId: string | null,
 ): Promise<ResolvedRefs> => {
   let effectiveProjectId = projectId;
   let project = effectiveProjectId
-    ? await loadProject(ownerId, effectiveProjectId)
+    ? await loadProject(workspaceId, effectiveProjectId)
     : null;
 
   if (!taskId) {
@@ -135,7 +141,7 @@ const resolveRefs = async (
 
   const task = await Task.findOne({
     _id: requireObjectId(taskId, "Task not found"),
-    ownerId,
+    workspaceId,
   }).lean();
   if (!task) throw notFound("Task not found");
 
@@ -145,7 +151,7 @@ const resolveRefs = async (
 
   if (!effectiveProjectId) {
     effectiveProjectId = task.projectId;
-    project = await loadProject(ownerId, effectiveProjectId);
+    project = await loadProject(workspaceId, effectiveProjectId);
   }
 
   return { projectId: effectiveProjectId, taskId, project };
@@ -176,27 +182,34 @@ const durationBetween = (start: Date, end: Date): number =>
 /**
  * Write the stop of one running entry: end, duration and the rate snapshot.
  * Returns `null` when the entry was already stopped by a concurrent request.
+ *
+ * Takes the entry itself rather than a scope id, because the entry being
+ * stopped is not necessarily in the workspace the request is addressed to —
+ * see `stopRunningEntry`. Its rate snapshot must come from ITS workspace.
  */
 const finalizeStop = async (
-  ownerId: string,
-  entryId: string,
-  start: Date,
-  projectId: string | null,
-  billable: boolean,
+  running: TimeEntryDocLike,
   end: Date,
 ): Promise<TimeEntryWire | null> => {
-  const settings = await getOrCreateSettings(ownerId);
-  const project = projectId
-    ? await Project.findOne({ _id: projectId, ownerId }).lean()
+  const settings = await getOrCreateWorkspaceSettings(running.workspaceId);
+  const project = running.projectId
+    ? await Project.findOne({
+        _id: running.projectId,
+        workspaceId: running.workspaceId,
+      }).lean()
     : null;
-  const { hourlyRate, currency } = snapshotRate(billable, project, settings);
+  const { hourlyRate, currency } = snapshotRate(
+    running.billable,
+    project,
+    settings,
+  );
 
   const stopped = await TimeEntry.findOneAndUpdate(
-    { _id: entryId, ownerId, end: null },
+    { _id: String(running._id), authorId: running.authorId, end: null },
     {
       $set: {
         end,
-        durationSec: durationBetween(start, end),
+        durationSec: durationBetween(running.start, end),
         hourlyRate,
         currency,
       },
@@ -207,31 +220,37 @@ const finalizeStop = async (
   return stopped ? toClientTimeEntry(stopped) : null;
 };
 
-/** Stop whatever is running for this owner, at `at` (never before its start). */
+/**
+ * Stop whatever this PERSON has running, at `at` (never before its start).
+ *
+ * Deliberately not workspace-scoped: the invariant is one running timer per
+ * human across every workspace, so starting a timer in one workspace stops the
+ * one running in another. The stop event is published into the stopped entry's
+ * own workspace, which may not be the one the request came in for — otherwise
+ * the colleagues watching that other workspace would never see it stop.
+ */
 const stopRunningEntry = async (
-  ownerId: string,
+  authorId: string,
   at: Date,
   originId?: string,
 ): Promise<void> => {
-  const running = await TimeEntry.findOne({ ownerId, end: null }).lean();
+  const running = await TimeEntry.findOne({ authorId, end: null }).lean();
   if (!running) return;
 
   const endMs = Math.max(at.getTime(), running.start.getTime());
-  const stopped = await finalizeStop(
-    ownerId,
-    String(running._id),
-    running.start,
-    running.projectId,
-    running.billable,
-    new Date(endMs),
-  );
+  const stopped = await finalizeStop(running, new Date(endMs));
   if (stopped) {
-    publishSync(ownerId, { kind: "timer.stopped", entry: stopped }, originId);
+    void publishSync(
+      running.workspaceId,
+      { kind: "timer.stopped", entry: stopped },
+      originId,
+    );
   }
 };
 
 type StartArgs = {
-  ownerId: string;
+  workspaceId: string;
+  authorId: string;
   description: string;
   projectId: string | null;
   taskId: string | null;
@@ -249,10 +268,10 @@ type StartArgs = {
  * `continue` so both go through exactly one code path.
  */
 const startNewEntry = async (args: StartArgs): Promise<TimeEntryWire> => {
-  const refs = await resolveRefs(args.ownerId, args.projectId, args.taskId);
+  const refs = await resolveRefs(args.workspaceId, args.projectId, args.taskId);
   const billable =
     args.billable ?? refs.project?.billableDefault ?? false;
-  const settings = await getOrCreateSettings(args.ownerId);
+  const settings = await getOrCreateWorkspaceSettings(args.workspaceId);
   const { hourlyRate, currency } = snapshotRate(
     billable,
     refs.project,
@@ -261,7 +280,8 @@ const startNewEntry = async (args: StartArgs): Promise<TimeEntryWire> => {
 
   const insert = async (): Promise<TimeEntryWire> => {
     const created = await TimeEntry.create({
-      ownerId: args.ownerId,
+      workspaceId: args.workspaceId,
+      authorId: args.authorId,
       description: args.description,
       projectId: refs.projectId,
       taskId: refs.taskId,
@@ -277,14 +297,14 @@ const startNewEntry = async (args: StartArgs): Promise<TimeEntryWire> => {
     return toClientTimeEntry(created);
   };
 
-  await stopRunningEntry(args.ownerId, args.start, args.originId);
+  await stopRunningEntry(args.authorId, args.start, args.originId);
 
   try {
     return await insert();
   } catch (error) {
     if (!isDuplicateKeyError(error)) throw error;
     // A concurrent start slipped in between our stop and our insert.
-    await stopRunningEntry(args.ownerId, args.start, args.originId);
+    await stopRunningEntry(args.authorId, args.start, args.originId);
     try {
       return await insert();
     } catch (retryError) {
@@ -324,7 +344,7 @@ const encodeCursor = (entry: DetailedEntry): string =>
 type DecodedCursor = { start: Date; id: Types.ObjectId };
 
 const decodeCursor = async (
-  ownerId: string,
+  workspaceId: string,
   cursor: string,
 ): Promise<DecodedCursor | null> => {
   const separator = cursor.lastIndexOf("|");
@@ -337,19 +357,19 @@ const decodeCursor = async (
     if (Number.isFinite(startMs)) return { start: new Date(startMs), id };
   }
 
-  const doc = await TimeEntry.findOne({ _id: id, ownerId })
+  const doc = await TimeEntry.findOne({ _id: id, workspaceId })
     .select("start")
     .lean();
   return doc ? { start: doc.start, id } : null;
 };
 
 export const entriesRouter = router({
-  list: protectedProcedure.input(entryListSchema).query(
+  list: workspaceProcedure.input(entryListSchema).query(
     async ({
       ctx,
       input,
     }): Promise<{ entries: DetailedEntry[]; nextCursor?: string }> => {
-      const ownerId = ctx.user.id;
+      const workspaceId = ctx.workspaceId;
       const from = new Date(input.from);
       const to = new Date(input.to);
       if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
@@ -357,17 +377,23 @@ export const entriesRouter = router({
       }
 
       const conditions: Record<string, unknown>[] = [
-        { ownerId },
+        { workspaceId },
         // Overlap: the entry starts before the window ends and either is
         // still running or ended after the window began.
         { start: { $lt: to } },
         { $or: [{ end: null }, { end: { $gt: from } }] },
       ];
 
+      // A member without `canViewOthersTime` sees only their own rows. Applied
+      // here rather than in the UI, and to the same `$match` the aggregation
+      // runs on, so there is no shape of this query that forgets it.
+      const authorScope = authorScopeFilter(ctx.visibility);
+      if (authorScope) conditions.push(authorScope);
+
       let projectIds: string[] | null = input.projectIds ?? null;
       if (input.clientIds && input.clientIds.length > 0) {
         const clientProjects = await Project.find({
-          ownerId,
+          workspaceId,
           clientId: { $in: input.clientIds },
         })
           .select("_id")
@@ -392,7 +418,7 @@ export const entriesRouter = router({
       }
 
       if (input.cursor) {
-        const cursor = await decodeCursor(ownerId, input.cursor);
+        const cursor = await decodeCursor(workspaceId, input.cursor);
         if (!cursor) return { entries: [] };
         conditions.push({
           $or: [
@@ -494,22 +520,26 @@ export const entriesRouter = router({
   ),
 
   /**
-   * The distinct things this owner has recently tracked, newest first.
+   * The distinct things this person has recently tracked, newest first.
    *
    * Tier one of the quick-start surfaces: derived, so it costs no new model
    * and is never stale. Pinning something is what promotes it to a favorite,
    * which is tier two.
    */
-  recent: protectedProcedure
+  recent: workspaceProcedure
     .input(recentEntriesSchema)
     .query(async ({ ctx, input }): Promise<RecentEntry[]> => {
-      const ownerId = ctx.user.id;
+      const workspaceId = ctx.workspaceId;
       const limit = input.limit ?? DEFAULT_RECENT_LIMIT;
       const days = input.days ?? DEFAULT_RECENT_DAYS;
       const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
       const rows = await TimeEntry.find({
-        ownerId,
+        workspaceId,
+        // "What have *I* recently tracked" — a quick-start list is about the
+        // caller's own habits, so it is author-scoped regardless of whether
+        // they may see colleagues' entries.
+        authorId: ctx.user.id,
         start: { $gte: since },
         // Finished entries only. The running one is excluded again inside
         // `collapseRecents`; matching on it here would only waste a slot in
@@ -538,40 +568,50 @@ export const entriesRouter = router({
         end: row.end === null ? null : row.end.toISOString(),
       }));
 
-      const catalog = await loadCatalogLookup(ownerId, entries);
+      const catalog = await loadCatalogLookup(workspaceId, entries);
       return collapseRecents(entries, catalog, limit);
     }),
 
-  get: protectedProcedure
+  get: workspaceProcedure
     .input(idInputSchema)
     .query(async ({ ctx, input }): Promise<TimeEntryWire> => {
       const entry = await TimeEntry.findOne({
         _id: requireObjectId(input.id, "Entry not found"),
-        ownerId: ctx.user.id,
+        workspaceId: ctx.workspaceId,
+        ...(authorScopeFilter(ctx.visibility) ?? {}),
       }).lean();
       if (!entry) throw notFound();
       return toClientTimeEntry(entry);
     }),
 
-  /** The running entry (`end === null`), or null when the timer is stopped. */
-  current: protectedProcedure.query(
+  /**
+   * The running entry (`end === null`), or null when the timer is stopped.
+   *
+   * Deliberately NOT workspace-scoped. The invariant is one running timer per
+   * person across every workspace, so this must answer "what am I doing right
+   * now" wherever that timer lives — which is exactly what the extension badge
+   * and the Raycast menu bar render. The entry carries its own `workspaceId`
+   * so a caller can say "running in Acme".
+   */
+  current: workspaceProcedure.query(
     async ({ ctx }): Promise<TimeEntryWire | null> => {
       const running = await TimeEntry.findOne({
-        ownerId: ctx.user.id,
+        authorId: ctx.user.id,
         end: null,
       }).lean();
       return running ? toClientTimeEntry(running) : null;
     },
   ),
 
-  start: protectedProcedure
+  start: workspaceProcedure
     .input(startTimerSchema)
     .mutation(async ({ ctx, input }): Promise<TimeEntryWire> => {
       const start = input.start ? new Date(input.start) : new Date();
       if (Number.isNaN(start.getTime())) throw badRequest("Invalid start");
 
       const entry = await startNewEntry({
-        ownerId: ctx.user.id,
+        workspaceId: ctx.workspaceId,
+        authorId: ctx.user.id,
         description: input.description ?? "",
         projectId: input.projectId ?? null,
         taskId: input.taskId ?? null,
@@ -582,24 +622,27 @@ export const entriesRouter = router({
         originId: input.originId,
       });
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "timer.started", entry },
         input.originId,
       );
       return entry;
     }),
 
-  stop: protectedProcedure
+  stop: workspaceProcedure
     .input(stopTimerSchema)
     .mutation(async ({ ctx, input }): Promise<TimeEntryWire> => {
-      const ownerId = ctx.user.id;
+      // Author-scoped, not workspace-scoped: you may always stop your own
+      // timer, including from a client currently pointed at a different
+      // workspace. Stopping somebody else's is not a thing that exists.
+      const authorId = ctx.user.id;
       const running = input.id
         ? await TimeEntry.findOne({
             _id: requireObjectId(input.id, "Entry not found"),
-            ownerId,
+            authorId,
           }).lean()
-        : await TimeEntry.findOne({ ownerId, end: null }).lean();
+        : await TimeEntry.findOne({ authorId, end: null }).lean();
 
       if (!running) throw notFound("No running timer");
       if (running.end !== null) throw badRequest("Entry is not running");
@@ -610,18 +653,11 @@ export const entriesRouter = router({
         throw badRequest("End must be after start");
       }
 
-      const stopped = await finalizeStop(
-        ownerId,
-        String(running._id),
-        running.start,
-        running.projectId,
-        running.billable,
-        end,
-      );
+      const stopped = await finalizeStop(running, end);
       if (!stopped) throw badRequest("Entry is not running");
 
-      publishSync(
-        ownerId,
+      void publishSync(
+        running.workspaceId,
         { kind: "timer.stopped", entry: stopped },
         input.originId,
       );
@@ -629,41 +665,48 @@ export const entriesRouter = router({
     }),
 
   /** Delete the running entry instead of keeping it. */
-  discard: protectedProcedure
+  discard: workspaceProcedure
     .input(discardTimerSchema)
     .mutation(
       async ({ ctx, input }): Promise<{ success: true; id: string }> => {
-        const ownerId = ctx.user.id;
+        // Author-scoped for the same reason as `stop`.
+        const authorId = ctx.user.id;
         const running = input.id
           ? await TimeEntry.findOne({
               _id: requireObjectId(input.id, "Entry not found"),
-              ownerId,
+              authorId,
               end: null,
             }).lean()
-          : await TimeEntry.findOne({ ownerId, end: null }).lean();
+          : await TimeEntry.findOne({ authorId, end: null }).lean();
 
         if (!running) throw notFound("No running timer");
 
         const id = String(running._id);
-        await TimeEntry.deleteOne({ _id: id, ownerId });
-        publishSync(ownerId, { kind: "entry.deleted", id }, input.originId);
+        await TimeEntry.deleteOne({ _id: id, authorId });
+        void publishSync(
+          running.workspaceId,
+          { kind: "entry.deleted", id },
+          input.originId,
+        );
         return { success: true, id };
       },
     ),
 
   /** Start a new timer with the same description/project/task/billable. */
-  continue: protectedProcedure
+  continue: workspaceProcedure
     .input(continueEntrySchema)
     .mutation(async ({ ctx, input }): Promise<TimeEntryWire> => {
-      const ownerId = ctx.user.id;
+      const workspaceId = ctx.workspaceId;
       const source = await TimeEntry.findOne({
         _id: requireObjectId(input.id, "Entry not found"),
-        ownerId,
+        workspaceId,
+        ...(authorScopeFilter(ctx.visibility) ?? {}),
       }).lean();
       if (!source) throw notFound();
 
       const entry = await startNewEntry({
-        ownerId,
+        workspaceId,
+        authorId: ctx.user.id,
         description: source.description,
         projectId: source.projectId,
         taskId: source.taskId,
@@ -676,15 +719,19 @@ export const entriesRouter = router({
         originId: input.originId,
       });
 
-      publishSync(ownerId, { kind: "timer.started", entry }, input.originId);
+      void publishSync(
+        workspaceId,
+        { kind: "timer.started", entry },
+        input.originId,
+      );
       return entry;
     }),
 
   /** Manual entry with an explicit start and end. */
-  create: protectedProcedure
+  create: workspaceProcedure
     .input(createEntrySchema)
     .mutation(async ({ ctx, input }): Promise<TimeEntryWire> => {
-      const ownerId = ctx.user.id;
+      const workspaceId = ctx.workspaceId;
       const start = new Date(input.start);
       const end = new Date(input.end);
       if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
@@ -695,13 +742,13 @@ export const entriesRouter = router({
       }
 
       const refs = await resolveRefs(
-        ownerId,
+        workspaceId,
         input.projectId ?? null,
         input.taskId ?? null,
       );
       const billable =
         input.billable ?? refs.project?.billableDefault ?? false;
-      const settings = await getOrCreateSettings(ownerId);
+      const settings = await getOrCreateWorkspaceSettings(workspaceId);
       const { hourlyRate, currency } = snapshotRate(
         billable,
         refs.project,
@@ -709,7 +756,8 @@ export const entriesRouter = router({
       );
 
       const created = await TimeEntry.create({
-        ownerId,
+        workspaceId,
+        authorId: ctx.user.id,
         description: input.description,
         projectId: refs.projectId,
         taskId: refs.taskId,
@@ -724,17 +772,25 @@ export const entriesRouter = router({
       });
 
       const entry = toClientTimeEntry(created);
-      publishSync(ownerId, { kind: "entry.upserted", entry }, input.originId);
+      void publishSync(
+        workspaceId,
+        { kind: "entry.upserted", entry },
+        input.originId,
+      );
       return entry;
     }),
 
-  update: protectedProcedure
+  update: workspaceProcedure
     .input(updateEntrySchema)
     .mutation(async ({ ctx, input }): Promise<TimeEntryWire> => {
-      const ownerId = ctx.user.id;
+      const workspaceId = ctx.workspaceId;
+      // Editing is author-only, independent of viewing: `canViewOthersTime`
+      // grants sight of a colleague's entries, never the right to rewrite
+      // them. Somebody else's entry reads as missing.
       const existing = await TimeEntry.findOne({
         _id: requireObjectId(input.id, "Entry not found"),
-        ownerId,
+        workspaceId,
+        authorId: ctx.user.id,
       }).lean();
       if (!existing) throw notFound();
 
@@ -746,7 +802,7 @@ export const entriesRouter = router({
       const refs =
         projectChanged || taskChanged
           ? await resolveRefs(
-              ownerId,
+              workspaceId,
               projectChanged ? input.projectId ?? null : existing.projectId,
               taskChanged ? input.taskId ?? null : existing.taskId,
             )
@@ -756,7 +812,7 @@ export const entriesRouter = router({
               project: existing.projectId
                 ? await Project.findOne({
                     _id: existing.projectId,
-                    ownerId,
+                    workspaceId,
                   }).lean()
                 : null,
             };
@@ -789,7 +845,7 @@ export const entriesRouter = router({
       let hourlyRate = existing.hourlyRate;
       let currency = existing.currency;
       if (resnapshot) {
-        const settings = await getOrCreateSettings(ownerId);
+        const settings = await getOrCreateWorkspaceSettings(workspaceId);
         const snapshot = snapshotRate(billable, refs.project, settings);
         hourlyRate = snapshot.hourlyRate;
         currency = snapshot.currency;
@@ -800,7 +856,7 @@ export const entriesRouter = router({
       let updated;
       try {
         updated = await TimeEntry.findOneAndUpdate(
-          { _id: String(existing._id), ownerId },
+          { _id: String(existing._id), workspaceId, authorId: ctx.user.id },
           {
             $set: {
               description: input.description ?? existing.description,
@@ -828,23 +884,28 @@ export const entriesRouter = router({
       if (!updated) throw notFound();
 
       const entry = toClientTimeEntry(updated);
-      publishSync(ownerId, { kind: "entry.upserted", entry }, input.originId);
+      void publishSync(
+        workspaceId,
+        { kind: "entry.upserted", entry },
+        input.originId,
+      );
       return entry;
     }),
 
-  remove: protectedProcedure
+  remove: workspaceProcedure
     .input(idInputSchema)
     .mutation(
       async ({ ctx, input }): Promise<{ success: true; id: string }> => {
-        const ownerId = ctx.user.id;
+        // Author-only, for the same reason as `update`.
         const result = await TimeEntry.deleteOne({
           _id: requireObjectId(input.id, "Entry not found"),
-          ownerId,
+          workspaceId: ctx.workspaceId,
+          authorId: ctx.user.id,
         });
         if (result.deletedCount === 0) throw notFound();
 
-        publishSync(
-          ownerId,
+        void publishSync(
+          ctx.workspaceId,
           { kind: "entry.deleted", id: input.id },
           input.originId,
         );

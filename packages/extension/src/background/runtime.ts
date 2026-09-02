@@ -33,7 +33,7 @@ import {
   type SyncStatus,
   type Task,
   type TimeEntry,
-  type WorkspaceSettings,
+  type ResolvedSettings,
 } from "@starter/core";
 import { chromeStorage, localStorageArea } from "../lib/chrome-storage";
 import type { SessionSource } from "../lib/messaging";
@@ -93,8 +93,8 @@ let cachedFavorites: DetailedFavorite[] | null = null;
 let cachedRecents: RecentEntry[] | null = null;
 
 /** Workspace settings, for the idle policy. Dropped on `settings.changed`. */
-let cachedSettings: WorkspaceSettings | null = null;
-let settingsLookup: Promise<WorkspaceSettings | null> | null = null;
+let cachedSettings: ResolvedSettings | null = null;
+let settingsLookup: Promise<ResolvedSettings | null> | null = null;
 
 /** Tasks are per-project, so the cache has to remember which project's. */
 let cachedTasks: { projectId: string; tasks: Task[] } | null = null;
@@ -417,7 +417,7 @@ export const setCachedProjects = (projects: Project[]): void => {
   cachedProjects = projects;
 };
 
-export const getCachedSettings = (): WorkspaceSettings | null => cachedSettings;
+export const getCachedSettings = (): ResolvedSettings | null => cachedSettings;
 
 /**
  * Workspace settings, fetched once per worker and kept until a
@@ -427,14 +427,14 @@ export const getCachedSettings = (): WorkspaceSettings | null => cachedSettings;
  * settings read that fails must leave the timer alone rather than take a
  * decision on a guess.
  */
-export async function resolveSettings(): Promise<WorkspaceSettings | null> {
+export async function resolveSettings(): Promise<ResolvedSettings | null> {
   const current = await ensureReady();
   if (!current.session) return null;
   if (cachedSettings) return cachedSettings;
   if (settingsLookup) return settingsLookup;
 
   const lookup = current.api
-    .query<WorkspaceSettings>("settings.get")
+    .query<ResolvedSettings>("settings.get")
     .then((settings) => {
       cachedSettings = settings;
       return settings;

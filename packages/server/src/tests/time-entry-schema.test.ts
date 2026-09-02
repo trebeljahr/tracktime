@@ -8,7 +8,8 @@ import { TimeEntry } from "../models/TimeEntry.js";
 
 test("an entry with no description at all is valid", () => {
   const entry = new TimeEntry({
-    ownerId: "owner-1",
+    workspaceId: "workspace-1",
+    authorId: "user-1",
     start: new Date(),
     end: null,
     durationSec: 0,
@@ -28,7 +29,8 @@ test("an entry with no description at all is valid", () => {
 
 test("an entry with an explicitly empty description is valid", () => {
   const entry = new TimeEntry({
-    ownerId: "owner-1",
+    workspaceId: "workspace-1",
+    authorId: "user-1",
     description: "",
     start: new Date(),
     end: null,
@@ -44,7 +46,8 @@ test("an entry with an explicitly empty description is valid", () => {
 
 test("a described entry still validates and keeps its description", () => {
   const entry = new TimeEntry({
-    ownerId: "owner-1",
+    workspaceId: "workspace-1",
+    authorId: "user-1",
     description: "Writing the bug report",
     start: new Date(),
     end: null,
@@ -58,7 +61,7 @@ test("a described entry still validates and keeps its description", () => {
   assert.equal(entry.description, "Writing the bug report");
 });
 
-test("ownerId is still required", () => {
+test("workspaceId is still required", () => {
   const entry = new TimeEntry({
     description: "no owner",
     start: new Date(),
@@ -69,13 +72,14 @@ test("ownerId is still required", () => {
   });
 
   const err = entry.validateSync();
-  assert.ok(err, "expected a validation error for the missing ownerId");
-  assert.ok("ownerId" in err.errors);
+  assert.ok(err, "expected a validation error for the missing workspaceId");
+  assert.ok("workspaceId" in err.errors);
 });
 
 test("a description longer than the 500 character cap is rejected", () => {
   const entry = new TimeEntry({
-    ownerId: "owner-1",
+    workspaceId: "workspace-1",
+    authorId: "user-1",
     description: "x".repeat(501),
     start: new Date(),
     durationSec: 0,

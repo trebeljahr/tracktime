@@ -34,7 +34,7 @@ const objectIds = (ids: Iterable<string>): string[] =>
  * owner does not have at all come back missing.
  */
 export async function loadCatalogLookup(
-  ownerId: string,
+  workspaceId: string,
   refs: readonly QuickStartRefs[],
 ): Promise<CatalogLookup> {
   const projectIds = new Set<string>();
@@ -48,12 +48,12 @@ export async function loadCatalogLookup(
   const [projectDocs, taskDocs] = await Promise.all([
     projectIds.size === 0
       ? []
-      : Project.find({ ownerId, _id: { $in: objectIds(projectIds) } })
+      : Project.find({ workspaceId, _id: { $in: objectIds(projectIds) } })
           .select({ name: 1, color: 1, clientId: 1, archived: 1 })
           .lean(),
     taskIds.size === 0
       ? []
-      : Task.find({ ownerId, _id: { $in: objectIds(taskIds) } })
+      : Task.find({ workspaceId, _id: { $in: objectIds(taskIds) } })
           .select({ name: 1, projectId: 1 })
           .lean(),
   ]);
@@ -86,7 +86,7 @@ export async function loadCatalogLookup(
   const clientDocs =
     clientIds.size === 0
       ? []
-      : await Client.find({ ownerId, _id: { $in: objectIds(clientIds) } })
+      : await Client.find({ workspaceId, _id: { $in: objectIds(clientIds) } })
           .select({ name: 1 })
           .lean();
 

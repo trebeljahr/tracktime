@@ -79,7 +79,8 @@ const provisionalEntry = (
   const now = new Date().toISOString();
   return {
     id: createId(),
-    ownerId: "",
+    workspaceId: "",
+    authorId: "",
     description,
     projectId,
     taskId,

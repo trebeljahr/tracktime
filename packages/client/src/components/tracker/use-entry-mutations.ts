@@ -296,7 +296,8 @@ export const useEntryMutations = (): EntryMutations => {
 
       return {
         id: args.id,
-        ownerId: settings?.userId ?? "",
+        workspaceId: settings?.workspaceId ?? "",
+        authorId: settings?.userId ?? "",
         description: args.description,
         projectId: args.projectId,
         taskId: args.taskId,

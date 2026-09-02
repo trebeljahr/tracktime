@@ -1,7 +1,7 @@
 // IMPLEMENTED BY: catalog agent (clients / projects / tasks)
 //
 // Clients are the top of the catalog: Client → Project → Task. Every
-// procedure is scoped by `ownerId`, so a document owned by somebody else is
+// procedure is scoped by `workspaceId`, so a document owned by somebody else is
 // indistinguishable from a missing one (NOT_FOUND, never FORBIDDEN).
 //
 // This file also owns the small helpers the sibling catalog routers reuse:
@@ -19,7 +19,7 @@ import {
 } from "@starter/shared";
 import { Client, toClientClient } from "../../models/Client.js";
 import { publishSync } from "../../ws/sync.js";
-import { protectedProcedure, router } from "../trpc.js";
+import { workspaceProcedure, router } from "../trpc.js";
 import {
   cascadeDeleteClient,
   type CatalogRemoveResult,
@@ -85,12 +85,12 @@ export const archiveInputSchema = idInputSchema.extend({
 });
 
 async function assertUniqueClientName(
-  ownerId: string,
+  workspaceId: string,
   name: string,
   excludeId?: string,
 ): Promise<void> {
   const clash = await Client.exists({
-    ownerId,
+    workspaceId,
     name: exactNameRegExp(name),
     ...(excludeId ? { _id: { $ne: excludeId } } : {}),
   });
@@ -103,11 +103,11 @@ async function assertUniqueClientName(
 }
 
 export const clientsRouter = router({
-  list: protectedProcedure
+  list: workspaceProcedure
     .input(clientListSchema)
     .query(async ({ ctx, input }): Promise<ClientWire[]> => {
       const docs = await Client.find({
-        ownerId: ctx.user.id,
+        workspaceId: ctx.workspaceId,
         ...(input.includeArchived ? {} : { archived: false }),
       })
         .collation({ locale: "en", strength: 2 })
@@ -117,38 +117,39 @@ export const clientsRouter = router({
       return docs.map(toClientClient);
     }),
 
-  create: protectedProcedure
+  create: workspaceProcedure
     .input(createClientSchema)
     .mutation(async ({ ctx, input }): Promise<ClientWire> => {
       const name = input.name.trim();
-      await assertUniqueClientName(ctx.user.id, name);
+      await assertUniqueClientName(ctx.workspaceId, name);
 
-      const existing = await Client.countDocuments({ ownerId: ctx.user.id });
+      const existing = await Client.countDocuments({ workspaceId: ctx.workspaceId });
       const created = await Client.create({
-        ownerId: ctx.user.id,
+        workspaceId: ctx.workspaceId,
+        createdBy: ctx.user.id,
         name,
         color: input.color ?? pickCatalogColor(existing),
         archived: false,
       });
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "client" },
         input.originId,
       );
       return toClientClient(created);
     }),
 
-  update: protectedProcedure
+  update: workspaceProcedure
     .input(updateClientSchema)
     .mutation(async ({ ctx, input }): Promise<ClientWire> => {
       assertObjectId(input.id);
       if (input.name !== undefined) {
-        await assertUniqueClientName(ctx.user.id, input.name, input.id);
+        await assertUniqueClientName(ctx.workspaceId, input.name, input.id);
       }
 
       const updated = await Client.findOneAndUpdate(
-        { _id: input.id, ownerId: ctx.user.id },
+        { _id: input.id, workspaceId: ctx.workspaceId },
         {
           $set: {
             ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -165,21 +166,21 @@ export const clientsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Client not found" });
       }
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "client" },
         input.originId,
       );
       return toClientClient(updated);
     }),
 
-  archive: protectedProcedure
+  archive: workspaceProcedure
     .input(archiveInputSchema)
     .mutation(async ({ ctx, input }): Promise<ClientWire> => {
       assertObjectId(input.id);
 
       const updated = await Client.findOneAndUpdate(
-        { _id: input.id, ownerId: ctx.user.id },
+        { _id: input.id, workspaceId: ctx.workspaceId },
         { $set: { archived: input.archived ?? true } },
         { returnDocument: "after" },
       ).lean();
@@ -188,8 +189,8 @@ export const clientsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Client not found" });
       }
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "client" },
         input.originId,
       );
@@ -200,14 +201,14 @@ export const clientsRouter = router({
    * Always deletes. Its projects survive as client-less projects, so no
    * tracked time is lost. Use `archive` to keep the client around instead.
    */
-  remove: protectedProcedure
+  remove: workspaceProcedure
     .input(idInputSchema)
     .mutation(async ({ ctx, input }): Promise<CatalogRemoveResult> => {
       assertObjectId(input.id);
 
       const client = await Client.findOne({
         _id: input.id,
-        ownerId: ctx.user.id,
+        workspaceId: ctx.workspaceId,
       }).lean();
       if (!client) {
         throw new TRPCError({
@@ -216,10 +217,10 @@ export const clientsRouter = router({
         });
       }
 
-      const result = await cascadeDeleteClient(ctx.user.id, input.id);
+      const result = await cascadeDeleteClient(ctx.workspaceId, input.id);
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "client" },
         input.originId,
       );

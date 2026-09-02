@@ -176,7 +176,8 @@ export function useProjectMutations(
       };
       const optimistic: ProjectRow = {
         id: `optimistic-${createId()}`,
-        ownerId: "",
+        workspaceId: "",
+        createdBy: "",
         name: vars.name.trim(),
         color: vars.color ?? DEFAULT_COLOR,
         clientId: vars.clientId ?? null,
@@ -373,7 +374,8 @@ export function useClientMutations(
       const now = new Date().toISOString();
       const optimistic: ClientRow = {
         id: `optimistic-${createId()}`,
-        ownerId: "",
+        workspaceId: "",
+        createdBy: "",
         name: vars.name.trim(),
         color: vars.color ?? DEFAULT_COLOR,
         archived: false,
@@ -525,7 +527,8 @@ export function useTaskMutations(
       const project = findProject(vars.projectId);
       const optimistic: TaskRow = {
         id: `optimistic-${createId()}`,
-        ownerId: "",
+        workspaceId: "",
+        createdBy: "",
         projectId: vars.projectId,
         name: vars.name.trim(),
         done: false,

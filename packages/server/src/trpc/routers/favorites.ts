@@ -2,14 +2,17 @@
 // a weekly task cannot fall off the end of the recents list.
 //
 // Invariants this file owns:
-//  - Every query/mutation is scoped by `ownerId`; another user's document is
-//    indistinguishable from a missing one (NOT_FOUND, never FORBIDDEN).
-//  - `order` is dense from 0 within an owner. `create` appends, `remove`
+//  - Every query/mutation is scoped by BOTH `workspaceId` and `userId`: a pin
+//    is one person's shortcut, and it points at a project that exists in one
+//    workspace. A pin outside that pair is indistinguishable from a missing
+//    one (NOT_FOUND, never FORBIDDEN).
+//  - `order` is dense from 0 within that pair. `create` appends, `remove`
 //    closes the gap, `reorder` rewrites the whole list.
 //  - Pins are unique by (description, projectId, taskId, billable) — pinning
 //    the same job twice is always a mistake, never an intent.
-//  - Every mutation calls `publishSync(ctx.user.id, { kind:
-//    "favorites.changed" }, input.originId)`.
+//  - Every mutation calls `publishToUser(ctx.user.id, { kind:
+//    "favorites.changed" }, input.originId)` — a pin change reaches that
+//    person's own devices and nobody else's.
 //
 // There is no `start` procedure here on purpose. A favorite is started by
 // handing its four fields to `entries.start`, exactly as the tracker's Start
@@ -26,8 +29,17 @@ import {
 import { Favorite, toClientFavorite } from "../../models/Favorite.js";
 import { Project } from "../../models/Project.js";
 import { Task } from "../../models/Task.js";
-import { publishSync } from "../../ws/sync.js";
-import { protectedProcedure, router } from "../trpc.js";
+import { publishToUser } from "../../ws/sync.js";
+import { router, workspaceProcedure } from "../trpc.js";
+
+/**
+ * A pin is personal AND workspace-bound: it is one person's shortcut, and it
+ * references a project that only exists in one workspace.
+ */
+const favoriteScope = (ctx: {
+  workspaceId: string;
+  user: { id: string };
+}): FavoriteScope => ({ workspaceId: ctx.workspaceId, userId: ctx.user.id });
 import { loadCatalogLookup } from "./catalog-lookup.js";
 import { resolveQuickStartLabels } from "./quick-start.js";
 
@@ -51,16 +63,18 @@ const requireObjectId = (id: string): string => {
  * two tiers must describe an archived project identically or the same pin
  * reads differently depending on which list it came from.
  */
+export type FavoriteScope = { workspaceId: string; userId: string };
+
 export async function listFavorites(
-  ownerId: string,
+  scope: FavoriteScope,
 ): Promise<DetailedFavorite[]> {
-  const docs = await Favorite.find({ ownerId })
+  const docs = await Favorite.find(scope)
     .sort({ order: 1, createdAt: 1 })
     .lean();
   if (docs.length === 0) return [];
 
   const favorites = docs.map(toClientFavorite);
-  const catalog = await loadCatalogLookup(ownerId, favorites);
+  const catalog = await loadCatalogLookup(scope.workspaceId, favorites);
 
   return favorites.map((favorite) => ({
     ...favorite,
@@ -75,14 +89,14 @@ export async function listFavorites(
  * single `reorder`, instead of a fractional-index scheme nobody can debug.
  */
 const writeOrder = async (
-  ownerId: string,
+  scope: FavoriteScope,
   ids: readonly string[],
 ): Promise<void> => {
   if (ids.length === 0) return;
   await Favorite.bulkWrite(
     ids.map((id, index) => ({
       updateOne: {
-        filter: { _id: id, ownerId },
+        filter: { _id: id, ...scope },
         update: { $set: { order: index } },
       },
     })),
@@ -90,15 +104,15 @@ const writeOrder = async (
 };
 
 export const favoritesRouter = router({
-  list: protectedProcedure.query(
+  list: workspaceProcedure.query(
     async ({ ctx }): Promise<DetailedFavorite[]> =>
-      listFavorites(ctx.user.id),
+      listFavorites(favoriteScope(ctx)),
   ),
 
-  create: protectedProcedure
+  create: workspaceProcedure
     .input(createFavoriteSchema)
     .mutation(async ({ ctx, input }): Promise<DetailedFavorite> => {
-      const ownerId = ctx.user.id;
+      const scope = favoriteScope(ctx);
       const description = input.description.trim();
       const projectId = input.projectId ?? null;
       const taskId = input.taskId ?? null;
@@ -109,7 +123,7 @@ export const favoritesRouter = router({
       // was edited in between.
       const project =
         projectId !== null && mongoose.isValidObjectId(projectId)
-          ? await Project.findOne({ _id: projectId, ownerId }).lean()
+          ? await Project.findOne({ _id: projectId, workspaceId: ctx.workspaceId }).lean()
           : null;
       if (projectId !== null && project === null) {
         throw new TRPCError({
@@ -124,7 +138,7 @@ export const favoritesRouter = router({
       // because it fails later, on the surface built to be one click.
       if (taskId !== null) {
         const task = mongoose.isValidObjectId(taskId)
-          ? await Task.findOne({ _id: taskId, ownerId }).lean()
+          ? await Task.findOne({ _id: taskId, workspaceId: ctx.workspaceId }).lean()
           : null;
         if (task === null) {
           throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
@@ -137,7 +151,7 @@ export const favoritesRouter = router({
         }
       }
 
-      const existing = await Favorite.find({ ownerId })
+      const existing = await Favorite.find(scope)
         .sort({ order: 1 })
         .lean();
 
@@ -156,7 +170,7 @@ export const favoritesRouter = router({
       );
       if (clash) {
         const wire = toClientFavorite(clash);
-        const catalog = await loadCatalogLookup(ownerId, [wire]);
+        const catalog = await loadCatalogLookup(ctx.workspaceId, [wire]);
         return { ...wire, ...resolveQuickStartLabels(wire, catalog) };
       }
 
@@ -168,7 +182,7 @@ export const favoritesRouter = router({
       }
 
       const created = await Favorite.create({
-        ownerId,
+        ...scope,
         description,
         projectId,
         taskId,
@@ -177,36 +191,44 @@ export const favoritesRouter = router({
       });
 
       const wire = toClientFavorite(created);
-      const catalog = await loadCatalogLookup(ownerId, [wire]);
+      const catalog = await loadCatalogLookup(ctx.workspaceId, [wire]);
 
-      publishSync(ownerId, { kind: "favorites.changed" }, input.originId);
+      publishToUser(
+        ctx.user.id,
+        { kind: "favorites.changed" },
+        input.originId,
+      );
       return { ...wire, ...resolveQuickStartLabels(wire, catalog) };
     }),
 
-  remove: protectedProcedure
+  remove: workspaceProcedure
     .input(idInputSchema)
     .mutation(
       async ({ ctx, input }): Promise<{ success: true; id: string }> => {
-        const ownerId = ctx.user.id;
+        const scope = favoriteScope(ctx);
         const result = await Favorite.deleteOne({
           _id: requireObjectId(input.id),
-          ownerId,
+          ...scope,
         });
         if (result.deletedCount === 0) throw notFound();
 
         // Close the gap immediately. Leaving a hole works — the list is sorted,
         // not indexed by order — but it makes every later `reorder` diff look
         // like a reshuffle, and makes the stored data lie about position.
-        const remaining = await Favorite.find({ ownerId })
+        const remaining = await Favorite.find(scope)
           .sort({ order: 1, createdAt: 1 })
           .select({ _id: 1 })
           .lean();
         await writeOrder(
-          ownerId,
+          scope,
           remaining.map((favorite) => String(favorite._id)),
         );
 
-        publishSync(ownerId, { kind: "favorites.changed" }, input.originId);
+        publishToUser(
+        ctx.user.id,
+        { kind: "favorites.changed" },
+        input.originId,
+      );
         return { success: true, id: input.id };
       },
     ),
@@ -217,11 +239,11 @@ export const favoritesRouter = router({
    * — a client working from a stale list reorders what it can see instead of
    * hiding whatever it did not know about.
    */
-  reorder: protectedProcedure
+  reorder: workspaceProcedure
     .input(reorderFavoritesSchema)
     .mutation(async ({ ctx, input }): Promise<DetailedFavorite[]> => {
-      const ownerId = ctx.user.id;
-      const current = await Favorite.find({ ownerId })
+      const scope = favoriteScope(ctx);
+      const current = await Favorite.find(scope)
         .sort({ order: 1, createdAt: 1 })
         .select({ _id: 1 })
         .lean();
@@ -235,9 +257,13 @@ export const favoritesRouter = router({
         .map((favorite) => String(favorite._id))
         .filter((id) => !seen.has(id));
 
-      await writeOrder(ownerId, [...requested, ...rest]);
+      await writeOrder(scope, [...requested, ...rest]);
 
-      publishSync(ownerId, { kind: "favorites.changed" }, input.originId);
-      return listFavorites(ownerId);
+      publishToUser(
+        ctx.user.id,
+        { kind: "favorites.changed" },
+        input.originId,
+      );
+      return listFavorites(scope);
     }),
 });

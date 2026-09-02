@@ -13,7 +13,7 @@ import {
 import { Project } from "../../models/Project.js";
 import { Task, toClientTask, type TaskDocLike } from "../../models/Task.js";
 import { publishSync } from "../../ws/sync.js";
-import { protectedProcedure, router } from "../trpc.js";
+import { workspaceProcedure, router } from "../trpc.js";
 import {
   cascadeDeleteTask,
   type CatalogRemoveResult,
@@ -35,13 +35,13 @@ type TaskAggregateRow = TaskDocLike & {
 };
 
 async function assertUniqueTaskName(
-  ownerId: string,
+  workspaceId: string,
   projectId: string,
   name: string,
   excludeId?: string,
 ): Promise<void> {
   const clash = await Task.exists({
-    ownerId,
+    workspaceId,
     projectId,
     name: exactNameRegExp(name),
     ...(excludeId ? { _id: { $ne: excludeId } } : {}),
@@ -56,20 +56,20 @@ async function assertUniqueTaskName(
 
 /** Throws NOT_FOUND when the project is missing or owned by somebody else. */
 async function assertProjectOwned(
-  ownerId: string,
+  workspaceId: string,
   projectId: string,
 ): Promise<void> {
   assertObjectId(projectId);
-  const exists = await Project.exists({ _id: projectId, ownerId });
+  const exists = await Project.exists({ _id: projectId, workspaceId });
   if (!exists) {
     throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
   }
 }
 
 /** Loads a task scoped to its owner, or throws NOT_FOUND. */
-async function findOwnedTask(ownerId: string, id: string): Promise<TaskDocLike> {
+async function findOwnedTask(workspaceId: string, id: string): Promise<TaskDocLike> {
   assertObjectId(id);
-  const task = await Task.findOne({ _id: id, ownerId }).lean();
+  const task = await Task.findOne({ _id: id, workspaceId }).lean();
   if (!task) {
     throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
   }
@@ -77,16 +77,16 @@ async function findOwnedTask(ownerId: string, id: string): Promise<TaskDocLike> 
 }
 
 export const tasksRouter = router({
-  list: protectedProcedure
+  list: workspaceProcedure
     .input(taskListSchema)
     .query(async ({ ctx, input }): Promise<TaskWithStats[]> => {
-      const ownerId = ctx.user.id;
+      const workspaceId = ctx.workspaceId;
       if (typeof input.projectId === "string") assertObjectId(input.projectId);
 
       const rows = await Task.aggregate<TaskAggregateRow>([
         {
           $match: {
-            ownerId,
+            workspaceId,
             ...(input.projectId ? { projectId: input.projectId } : {}),
             ...(input.includeArchived ? {} : { archived: false }),
           },
@@ -112,7 +112,7 @@ export const tasksRouter = router({
                 $match: {
                   $expr: {
                     $and: [
-                      { $eq: ["$ownerId", ownerId] },
+                      { $eq: ["$workspaceId", workspaceId] },
                       { $eq: ["$taskId", "$$tid"] },
                     ],
                   },
@@ -150,36 +150,37 @@ export const tasksRouter = router({
       });
     }),
 
-  create: protectedProcedure
+  create: workspaceProcedure
     .input(createTaskSchema)
     .mutation(async ({ ctx, input }): Promise<TaskWire> => {
       const name = input.name.trim();
-      await assertProjectOwned(ctx.user.id, input.projectId);
-      await assertUniqueTaskName(ctx.user.id, input.projectId, name);
+      await assertProjectOwned(ctx.workspaceId, input.projectId);
+      await assertUniqueTaskName(ctx.workspaceId, input.projectId, name);
 
       const created = await Task.create({
-        ownerId: ctx.user.id,
+        workspaceId: ctx.workspaceId,
+        createdBy: ctx.user.id,
         projectId: input.projectId,
         name,
         done: false,
         archived: false,
       });
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "task" },
         input.originId,
       );
       return toClientTask(created);
     }),
 
-  update: protectedProcedure
+  update: workspaceProcedure
     .input(updateTaskSchema)
     .mutation(async ({ ctx, input }): Promise<TaskWire> => {
-      const existing = await findOwnedTask(ctx.user.id, input.id);
+      const existing = await findOwnedTask(ctx.workspaceId, input.id);
       if (input.name !== undefined) {
         await assertUniqueTaskName(
-          ctx.user.id,
+          ctx.workspaceId,
           existing.projectId,
           input.name,
           input.id,
@@ -187,7 +188,7 @@ export const tasksRouter = router({
       }
 
       const updated = await Task.findOneAndUpdate(
-        { _id: input.id, ownerId: ctx.user.id },
+        { _id: input.id, workspaceId: ctx.workspaceId },
         {
           $set: {
             ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -204,21 +205,21 @@ export const tasksRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
       }
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "task" },
         input.originId,
       );
       return toClientTask(updated);
     }),
 
-  archive: protectedProcedure
+  archive: workspaceProcedure
     .input(archiveInputSchema)
     .mutation(async ({ ctx, input }): Promise<TaskWire> => {
       assertObjectId(input.id);
 
       const updated = await Task.findOneAndUpdate(
-        { _id: input.id, ownerId: ctx.user.id },
+        { _id: input.id, workspaceId: ctx.workspaceId },
         { $set: { archived: input.archived ?? true } },
         { returnDocument: "after" },
       ).lean();
@@ -227,8 +228,8 @@ export const tasksRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
       }
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         { kind: "catalog.changed", scope: "task" },
         input.originId,
       );
@@ -239,15 +240,15 @@ export const tasksRouter = router({
    * Always deletes. Entries booked on the task keep their tracked time and
    * their project, and simply fall back to "no task".
    */
-  remove: protectedProcedure
+  remove: workspaceProcedure
     .input(idInputSchema)
     .mutation(async ({ ctx, input }): Promise<CatalogRemoveResult> => {
-      await findOwnedTask(ctx.user.id, input.id);
+      await findOwnedTask(ctx.workspaceId, input.id);
 
-      const result = await cascadeDeleteTask(ctx.user.id, input.id);
+      const result = await cascadeDeleteTask(ctx.workspaceId, input.id);
 
-      publishSync(
-        ctx.user.id,
+      void publishSync(
+        ctx.workspaceId,
         {
           kind: "catalog.changed",
           scope: "task",

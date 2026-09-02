@@ -22,7 +22,8 @@ const entry = (overrides: Partial<DetailedEntry> = {}): DetailedEntry => {
   const start = overrides.start ?? localIso(2026, 7, 21, 9, 0);
   return {
     id: `e${seq}`,
-    ownerId: "u1",
+    workspaceId: "w1",
+    authorId: "u1",
     description: "Wrote tests",
     projectId: "p1",
     taskId: null,
