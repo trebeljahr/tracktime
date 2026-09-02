@@ -45,6 +45,14 @@ export function setupWebSocket(server: Server): WebSocketServer {
       const trusted = getTrustedOrigins();
       const origin = req.headers.origin;
       if (origin && trusted.length > 0 && !trusted.includes(origin)) {
+        // Answered rather than dropped, and logged with the origin: a silent
+        // destroy reaches a browser as a bare close with no code, which is
+        // indistinguishable from a network failure. That is how a client can
+        // end up looking "offline" while its HTTP requests — which extensions
+        // make outside CORS — keep working perfectly. The line below names the
+        // exact value to add to TRUSTED_ORIGINS.
+        console.warn(`[ws] upgrade refused: untrusted origin ${origin}`);
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
         socket.destroy();
         return;
       }

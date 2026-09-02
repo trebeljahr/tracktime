@@ -101,7 +101,21 @@ export type BackgroundState = {
   /** The derived tier, kept separate so a stale merge can be recomputed. */
   recents: RecentEntry[];
   todaySec: number;
+  /** The live-update socket alone — see {@link BackgroundState.serverReachable}. */
   syncStatus: SyncStatus;
+  /**
+   * Whether the server answered the last read that reached a verdict.
+   *
+   * Reported separately from `syncStatus` because the two really are separate,
+   * and collapsing them is what made a working toolbar say "Offline": every
+   * read and write goes over plain HTTP, which keeps working when the
+   * WebSocket upgrade is the only thing that failed. In that state the popup
+   * is behind on other devices' changes, but nothing the user does here is
+   * lost — a very different thing to tell them.
+   */
+  serverReachable: boolean;
+  /** Mutations waiting to be replayed. Zero on a healthy connection. */
+  pendingSync: number;
   /**
    * An idle span waiting to be explained, or null.
    *

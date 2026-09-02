@@ -81,8 +81,29 @@ export const ORIGIN_ID: string = createId();
 let runtime: Runtime | null = null;
 let building: Promise<Runtime> | null = null;
 
+/**
+ * Bumped by every {@link reload}. A build that started before the bump was
+ * reading a session or an API URL that has since been replaced, so its result
+ * is thrown away rather than installed over the newer one.
+ */
+let generation = 0;
+
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "closed";
+
+/** Floor between {@link ensureSyncConnected} nudges. */
+const SYNC_NUDGE_INTERVAL_MS = 15_000;
+let lastSyncNudgeAt = 0;
+
+/**
+ * Whether the last request to reach a verdict got an answer from the server.
+ *
+ * Distinct from {@link syncStatus} on purpose: the socket being down does not
+ * mean the machine is offline, and conflating the two is what made a working
+ * toolbar report "Offline" while every read and write was going through over
+ * plain HTTP.
+ */
+let serverReachable = true;
 
 /**
  * `null` means "we have never looked"; `{ entry: null }` means "we looked and
@@ -90,7 +111,27 @@ let syncStatus: SyncStatus = "closed";
  * fetching every 30 seconds — see {@link resolveRunning}.
  */
 let cachedRunning: { entry: TimeEntry | null } | null = null;
+/** When {@link cachedRunning} was last filled, for the staleness rule below. */
+let cachedRunningAt = 0;
 let runningLookup: Promise<TimeEntry | null> | null = null;
+
+/**
+ * How long the cached running entry may be trusted while the sync socket is
+ * down. Short enough that the 30-second badge alarm always re-reads, which is
+ * what keeps a socket-less worker in step with the web app and Raycast.
+ */
+const RUNNING_CACHE_TTL_MS = 10_000;
+
+const rememberRunning = (entry: TimeEntry | null): void => {
+  cachedRunning = { entry };
+  cachedRunningAt = Date.now();
+};
+
+const forgetRunning = (): void => {
+  cachedRunning = null;
+  cachedRunningAt = 0;
+  runningLookup = null;
+};
 
 let cachedProjects: Project[] | null = null;
 let cachedClients: Client[] | null = null;
@@ -210,12 +251,13 @@ const rehydrateOptimisticRunning = async (): Promise<void> => {
     return;
   }
   const stored = await loadOptimisticRunning();
-  if (stored !== null) cachedRunning = stored;
+  if (stored !== null) rememberRunning(stored.entry);
 };
 
 // ── rebuilding ───────────────────────────────────────────────────────
 
 const buildRuntime = async (): Promise<Runtime> => {
+  const mine = generation;
   const [apiUrl, stored] = await Promise.all([loadApiUrl(), loadSession()]);
 
   // The web app's cookie wins when the extension has nothing of its own: that
@@ -244,6 +286,13 @@ const buildRuntime = async (): Promise<Runtime> => {
       clientId: EXTENSION_CLIENT_ID,
     }),
   };
+
+  // A reload landed while this build was reading storage, so `next` was built
+  // from a session or an API URL that has already been replaced. Installing it
+  // would point the api client and the socket at the old one — and because
+  // `reload` cleared `building` before starting its own, the newer build is
+  // what `ensureReady` now hands back.
+  if (mine !== generation) return ensureReady();
 
   runtime = next;
   // A queued mutation outlives the worker that made it, so the optimistic view
@@ -279,10 +328,18 @@ export function ensureReady(): Promise<Runtime> {
  * api client and the socket at construction time.
  */
 export async function reload(): Promise<Runtime> {
+  // Ordered, and both halves matter: the bump makes any in-flight build
+  // discard its result, and dropping `building` stops `ensureReady` below from
+  // handing that same stale build back as if it were the new one.
+  generation += 1;
+  building = null;
+
   closeSync();
+  // A reload is a deliberate retarget, so the next connect must not be held
+  // back by a nudge made against the runtime being thrown away.
+  lastSyncNudgeAt = 0;
   runtime = null;
-  cachedRunning = null;
-  runningLookup = null;
+  forgetRunning();
   cachedProjects = null;
   cachedClients = null;
   cachedTags = null;
@@ -310,8 +367,7 @@ const setSyncStatus = (next: SyncStatus): void => {
   // few-second wifi blip keeps counting up here until the worker happens to be
   // evicted — and pressing Stop then fails against a server with nothing
   // running. One `entries.current` per reconnect buys a self-healing gap.
-  cachedRunning = null;
-  runningLookup = null;
+  forgetRunning();
   cachedProjects = null;
   cachedClients = null;
   cachedTags = null;
@@ -344,26 +400,26 @@ const closeSync = (): void => {
 const applyEvent = (event: SyncEvent): void => {
   switch (event.kind) {
     case "timer.started":
-      cachedRunning = { entry: event.entry };
+      rememberRunning(event.entry);
       // What "recent" means changes with every entry another device closes.
       cachedRecents = null;
       return;
     case "timer.stopped":
-      cachedRunning = { entry: null };
+      rememberRunning(null);
       cachedRecents = null;
       return;
     case "entry.upserted":
       if (event.entry.end === null) {
-        cachedRunning = { entry: event.entry };
+        rememberRunning(event.entry);
         return;
       }
       // An edit that closed the entry we thought was running stops the timer.
       if (cachedRunning?.entry?.id === event.entry.id) {
-        cachedRunning = { entry: null };
+        rememberRunning(null);
       }
       return;
     case "entry.deleted":
-      if (cachedRunning?.entry?.id === event.id) cachedRunning = { entry: null };
+      if (cachedRunning?.entry?.id === event.id) rememberRunning(null);
       return;
     case "catalog.changed":
       if (event.scope === "project") cachedProjects = null;
@@ -412,12 +468,59 @@ const connectSync = (current: Runtime): void => {
 
 export const getSyncStatus = (): SyncStatus => syncStatus;
 
+/**
+ * Make sure a socket exists and is at least trying.
+ *
+ * The sync client reconnects itself on a backoff `setTimeout`, and a timer is
+ * precisely what this worker cannot rely on: MV3 evicts it mid-backoff and the
+ * pending reconnect dies with it, while a worker kept awake by the badge alarm
+ * never rebuilds — so `connectSync` is never reached again either. Between the
+ * two, a socket could stay down indefinitely with the popup reporting
+ * "Offline" against a server that was answering every HTTP request.
+ *
+ * Called from the 30-second badge alarm, which is the one scheduler Chrome
+ * revives a dead worker for. `connect()` is a no-op on a socket that is
+ * already open or opening, so nudging it costs nothing when all is well.
+ */
+export async function ensureSyncConnected(): Promise<void> {
+  const current = await ensureReady();
+  if (!current.session) return;
+  if (sync === null) {
+    lastSyncNudgeAt = Date.now();
+    connectSync(current);
+    return;
+  }
+  // Already up, or already mid-handshake: leave it alone.
+  if (syncStatus !== "closed") return;
+  // The popup asks for a snapshot every three seconds while it is open, and a
+  // nudge bypasses the client's own backoff — so without a floor here, a
+  // server that refuses the upgrade would be re-dialled twenty times a minute
+  // for as long as somebody had the popup open.
+  if (Date.now() - lastSyncNudgeAt < SYNC_NUDGE_INTERVAL_MS) return;
+  lastSyncNudgeAt = Date.now();
+  sync.connect();
+}
+
+/**
+ * Record whether the server answered. Called from every read that reaches a
+ * verdict, so the popup can tell "the live socket is down" apart from "this
+ * machine has no network" — two states that used to render identically.
+ */
+export const noteServerReachable = (reachable: boolean): void => {
+  serverReachable = reachable;
+};
+
+export const isServerReachable = (): boolean => serverReachable;
+
+/** How many mutations are waiting to be replayed. */
+export const pendingSyncCount = (): Promise<number> => getOfflineQueue().size();
+
 // ── caches ───────────────────────────────────────────────────────────
 
 export const peekRunning = (): TimeEntry | null => cachedRunning?.entry ?? null;
 
 export const setCachedRunning = (entry: TimeEntry | null): void => {
-  cachedRunning = { entry };
+  rememberRunning(entry);
   runningLookup = null;
 };
 
@@ -575,24 +678,51 @@ export async function resolveWebUrl(): Promise<string | null> {
 }
 
 /**
- * The running entry, fetched only when the cache has never been filled.
+ * Whether the cached running entry may still be believed.
  *
- * After a cold start that is one request; from then on the sync socket keeps
- * the cache honest, so the 30-second badge alarm costs nothing on the wire.
+ * An open socket is what normally keeps it honest — every start and stop from
+ * another device arrives as an event — so while the socket is up the cache
+ * never expires and the 30-second badge alarm costs nothing on the wire.
+ *
+ * With the socket down the cache is only a guess, and a guess that never
+ * expires is exactly the "signed in, but showing the wrong timer" state: the
+ * toolbar kept counting an entry Raycast had stopped, or offered Start for one
+ * the web app had already opened, until the worker happened to be evicted.
+ *
+ * A non-empty queue is the one exception. Its optimistic entry is the truth
+ * the server has not been told about yet, so re-reading would replace it with
+ * a stale answer and un-do a start the user can see running.
+ */
+const runningCacheIsUsable = async (): Promise<boolean> => {
+  if (cachedRunning === null) return false;
+  if (syncStatus === "open") return true;
+  if (Date.now() - cachedRunningAt < RUNNING_CACHE_TTL_MS) return true;
+  return (await getOfflineQueue().size()) > 0;
+};
+
+/**
+ * The running entry, fetched when the cache is empty or — with the sync socket
+ * down — no longer fresh enough to trust.
+ *
  * The in-flight promise is shared because a wake-up commonly triggers the
  * badge refresh and a popup `state:get` at the same instant.
  */
 export async function resolveRunning(): Promise<TimeEntry | null> {
   const current = await ensureReady();
   if (!current.session) return null;
-  if (cachedRunning) return cachedRunning.entry;
+  if (await runningCacheIsUsable()) return cachedRunning?.entry ?? null;
   if (runningLookup) return runningLookup;
 
   const lookup = current.api
     .query<TimeEntry | null>("entries.current")
     .then((entry) => {
-      cachedRunning = { entry };
+      noteServerReachable(true);
+      rememberRunning(entry);
       return entry;
+    })
+    .catch((error: unknown) => {
+      if (isTransportFailure(error)) noteServerReachable(false);
+      throw error;
     });
 
   runningLookup = lookup;
@@ -751,8 +881,7 @@ export async function flushQueue(): Promise<number> {
     // Replay moved the server on in ways we never modelled locally; re-read
     // the running entry rather than trust a cache built from optimistic
     // guesses about what each queued mutation would do.
-    cachedRunning = null;
-    runningLookup = null;
+    forgetRunning();
   }
   return result.remaining;
 }

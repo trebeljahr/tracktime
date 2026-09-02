@@ -335,7 +335,9 @@ button.tag:hover .tag__x {
   background: var(--ok);
 }
 
-.status__dot--connecting {
+.status__dot--connecting,
+.status__dot--polling,
+.status__dot--pending {
   background: var(--warn);
 }
 

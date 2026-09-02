@@ -91,6 +91,29 @@ smoothly even while the worker is asleep.
 
 The message contract lives in `src/lib/messaging.ts`.
 
+### The socket is an optimisation, not the transport
+
+Every read and write goes over HTTP. The WebSocket only delivers *other*
+devices' changes, so it is treated as something that may simply not be there —
+a refused upgrade, a proxy that will not upgrade, an origin missing from
+`TRUSTED_ORIGINS`, or an MV3 eviction that took the reconnect timer with it.
+
+Three rules keep a socket-less worker honest, and the footer says which state
+it is in:
+
+- The cached running entry expires after ten seconds while the socket is down
+  (it never expires while it is up — the events keep it true), so the
+  30-second badge alarm re-reads `entries.current` and the toolbar stays in
+  step with the web app and Raycast. A non-empty offline queue overrides this:
+  its optimistic entry is the truth the server has not been told yet.
+- That same alarm nudges the socket back up and drains the offline queue.
+  Queued work used to wait for the socket to open, which never came for a
+  client whose upgrade was being refused.
+- `serverReachable` is reported separately from `syncStatus`. **Offline** now
+  means the server did not answer; a socket that is down while HTTP is fine
+  reads **Polling**, because nothing is being lost — other devices' changes
+  just arrive on the next poll instead of instantly.
+
 ## Build and load
 
 ```bash

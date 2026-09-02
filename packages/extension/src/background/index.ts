@@ -38,6 +38,7 @@ import {
 import {
   adoptSession,
   ensureReady,
+  ensureSyncConnected,
   flushQueue,
   forgetSession,
   isUnauthorized,
@@ -90,6 +91,17 @@ const refreshBadge = async (): Promise<void> => {
     await renderBadge(null);
     return;
   }
+
+  // The socket is the only thing that pushes another device's work here, and
+  // its own reconnect is a `setTimeout` that an evicted worker loses. This
+  // alarm is the one scheduler Chrome revives a dead worker for, so it is the
+  // only place a permanently-down socket can be picked back up.
+  await ensureSyncConnected().catch(() => undefined);
+
+  // Queued mutations used to wait for the socket to come up. When the socket
+  // is the broken part — a refused upgrade, a proxy that will not upgrade —
+  // HTTP still works, and the queue must not sit there unsent forever.
+  await flushQueue().catch(() => undefined);
 
   // Re-checked on every badge tick: Chrome only reports idle *transitions*, so
   // one missed while the worker was gone would otherwise never be acted on.

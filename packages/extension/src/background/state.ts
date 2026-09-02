@@ -18,7 +18,9 @@ import { fetchFavorites, fetchRecents } from "./favorites";
 import { pendingIdle } from "./idle-state";
 import {
   ensureReady,
+  ensureSyncConnected,
   forgetSession,
+  isServerReachable,
   getCachedClients,
   getCachedFavorites,
   getCachedProjects,
@@ -28,7 +30,10 @@ import {
   getCachedTasksProjectId,
   getCachedTodaySec,
   getSyncStatus,
+  isTransportFailure,
   isUnauthorized,
+  noteServerReachable,
+  pendingSyncCount,
   peekRunning,
   resolveEmail,
   resolveRunning,
@@ -66,6 +71,8 @@ const signedOutState = (
   recents: [],
   todaySec: 0,
   syncStatus: getSyncStatus(),
+  serverReachable: isServerReachable(),
+  pendingSync: 0,
   pendingIdle: null,
 });
 
@@ -122,11 +129,18 @@ export async function buildState(): Promise<BackgroundState> {
   const webUrl = await resolveWebUrl();
   if (!current.session) return signedOutState(current.apiUrl, webUrl);
 
+  // Opening the popup is the moment someone is looking at the status, so it is
+  // the moment a dead socket should be retried — waiting up to 30 seconds for
+  // the badge alarm would leave them watching "Polling" with no way to prod it.
+  // A no-op when the socket is already up.
+  await ensureSyncConnected().catch(() => undefined);
+
   // Set by any read that came back 401. Collected rather than thrown so the
   // reads below can settle instead of leaving sibling rejections unhandled.
   let unauthorized = false;
 
-  const softRead = async <T>(read: () => Promise<T>, fallback: T): Promise<T> => {
+  /** Falls back without judging whether the server is up — see below. */
+  const localRead = async <T>(read: () => Promise<T>, fallback: T): Promise<T> => {
     try {
       return await read();
     } catch (error) {
@@ -135,11 +149,39 @@ export async function buildState(): Promise<BackgroundState> {
     }
   };
 
+  // Whether this snapshot's reads reached the server at all. A read that never
+  // got a response is what "offline" actually means here — a socket that is
+  // down while these all succeed is a different, much less alarming state, and
+  // the popup is told them apart so it stops crying wolf.
+  //
+  // Only reads that genuinely go to the network may set these. `pendingIdle`
+  // reads `chrome.storage`, `resolveEmail` swallows its own failure, and
+  // `resolveRunning` can answer from cache — count any of them as evidence and
+  // the extension would call itself online with the cable pulled out.
+  let answered = false;
+  let unreachable = false;
+
+  const softRead = async <T>(read: () => Promise<T>, fallback: T): Promise<T> => {
+    try {
+      const value = await read();
+      answered = true;
+      return value;
+    } catch (error) {
+      if (isUnauthorized(error)) unauthorized = true;
+      // A refusal is still an answer: the server was reached, it just said no.
+      if (isTransportFailure(error)) unreachable = true;
+      else answered = true;
+      return fallback;
+    }
+  };
+
   // Whichever project the popup last asked about — carried through so a
   // rebuild of the snapshot does not silently empty the task picker under it.
   const tasksProjectId = getCachedTasksProjectId();
 
-  const running = await softRead(resolveRunning, peekRunning());
+  // `resolveRunning` reports its own reachability from inside the runtime,
+  // where it can tell a real request apart from a cache hit.
+  const running = await localRead(resolveRunning, peekRunning());
   const [
     email,
     projects,
@@ -151,19 +193,26 @@ export async function buildState(): Promise<BackgroundState> {
     recents,
     idle,
   ] = await Promise.all([
-    softRead(resolveEmail, current.session.email),
+    localRead(resolveEmail, current.session.email),
     softRead(() => fetchProjects(current.api), getCachedProjects() ?? []),
     softRead(() => fetchClients(current.api), getCachedClients() ?? []),
     softRead(() => fetchTags(current.api), getCachedTags() ?? []),
-    softRead(
+    // Also a local read as far as reachability goes: it answers from cache,
+    // and from nothing at all when no project is selected.
+    localRead(
       () => fetchTasks(current.api, tasksProjectId),
       getCachedTasks(tasksProjectId) ?? [],
     ),
     softRead(() => fetchTodaySec(current.api), getCachedTodaySec() ?? 0),
     softRead(() => fetchFavorites(current.api), getCachedFavorites() ?? []),
     softRead(() => fetchRecents(current.api), getCachedRecents() ?? []),
-    softRead(pendingIdle, null),
+    localRead(pendingIdle, null),
   ]);
+
+  // One read answering is enough to call the server reachable; only a snapshot
+  // where nothing got through and something failed in transport is "offline".
+  // A snapshot served entirely from cache changes nothing either way.
+  if (answered || unreachable) noteServerReachable(answered);
 
   if (unauthorized) {
     // The token was revoked from Settings → Devices, or it simply expired.
@@ -198,6 +247,8 @@ export async function buildState(): Promise<BackgroundState> {
     recents,
     todaySec,
     syncStatus: getSyncStatus(),
+    serverReachable: isServerReachable(),
+    pendingSync: await pendingSyncCount(),
     // Dropped once the entry it refers to is no longer the running one: the
     // question "what were those 40 minutes?" is meaningless against an entry
     // somebody has since stopped, and answering it would edit the wrong row.
