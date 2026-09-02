@@ -16,6 +16,7 @@
   "s3Provider": "r2",
   "deployTarget": "existing",
   "deploymentMode": "coolify",
+  "topology": "split",
   "surfaces": "fullstack",
   "publicService": "client",
   "ports": {
