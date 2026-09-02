@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { SummaryGroup } from "@starter/shared";
 
+import { BudgetMeterCell } from "@/components/budget-meter";
 import {
   Table,
   TableBody,
@@ -13,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { colorForGroup } from "@/components/reports/summary-charts";
+import type { BudgetView } from "@/lib/budget-view";
 
 export type SummaryTableProps = {
   groups: SummaryGroup[];
@@ -23,6 +25,12 @@ export type SummaryTableProps = {
   money: (amount: number) => string;
   /** Column heading for the group key, e.g. "Project". */
   dimensionLabel: string;
+  /**
+   * Lifetime budget progress for a group, when the dimension has one.
+   * Omitted entirely for dimensions that cannot carry a budget (day, client,
+   * …), which is what hides the column.
+   */
+  budgetFor?: (groupKey: string) => BudgetView | null;
 };
 
 /** Grouped totals, biggest first, with an inline share-of-total bar. */
@@ -34,6 +42,7 @@ export function SummaryTable({
   duration,
   money,
   dimensionLabel,
+  budgetFor,
 }: SummaryTableProps): React.JSX.Element {
   const rows = React.useMemo(
     () => [...groups].sort((a, b) => b.seconds - a.seconds),
@@ -51,6 +60,14 @@ export function SummaryTable({
           <TableHead className="text-right">Billable</TableHead>
           <TableHead className="text-right">Duration</TableHead>
           <TableHead className="text-right">Amount</TableHead>
+          {budgetFor ? (
+            <TableHead className="w-52">
+              Budget
+              <span className="ml-1 font-normal text-muted-foreground">
+                (lifetime)
+              </span>
+            </TableHead>
+          ) : null}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -97,6 +114,21 @@ export function SummaryTable({
               <TableCell className="text-right tabular-nums">
                 {money(group.amount)}
               </TableCell>
+              {budgetFor ? (
+                <TableCell data-testid={`summary-budget-${group.key}`}>
+                  {/*
+                   * A budget is a lifetime target while these totals are
+                   * range-scoped, so the meter deliberately reports the whole
+                   * project rather than the filtered slice — hence the column
+                   * heading saying so.
+                   */}
+                  <BudgetMeterCell
+                    view={budgetFor(group.key)}
+                    emptyLabel="—"
+                    testId={`summary-budget-meter-${group.key}`}
+                  />
+                </TableCell>
+              ) : null}
             </TableRow>
           );
         })}
@@ -120,6 +152,7 @@ export function SummaryTable({
           >
             {money(totalAmount)}
           </TableCell>
+          {budgetFor ? <TableCell /> : null}
         </TableRow>
       </TableFooter>
     </Table>

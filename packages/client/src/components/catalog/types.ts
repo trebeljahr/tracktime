@@ -1,4 +1,5 @@
 import type {
+  BudgetProgress,
   Client,
   CreateClientInput,
   CreateProjectInput,
@@ -23,6 +24,12 @@ export type ProjectRow = Project & {
   entryCount: number;
   /** Sum of `durationSec` across those entries. */
   totalSec: number;
+  /**
+   * Lifetime progress against the estimate/budget, or null when the project
+   * has neither. Null is what makes an empty budget cell possible — a project
+   * without a target must never render as "0% of 0".
+   */
+  progress: BudgetProgress | null;
 };
 
 /** A bare client, as returned by `clients.list`. */

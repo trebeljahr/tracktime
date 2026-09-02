@@ -10,6 +10,9 @@ export interface IProject extends Document {
   clientId: string | null;
   billableDefault: boolean;
   hourlyRate: number | null;
+  estimatedHours: number | null;
+  budgetAmount: number | null;
+  budgetCurrency: string | null;
   archived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -27,6 +30,9 @@ export type ProjectDocLike = {
   clientId: string | null;
   billableDefault: boolean;
   hourlyRate: number | null;
+  estimatedHours: number | null;
+  budgetAmount: number | null;
+  budgetCurrency: string | null;
   archived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -40,6 +46,11 @@ const projectSchema = new Schema<IProject>(
     clientId: { type: String, default: null },
     billableDefault: { type: Boolean, required: true, default: true },
     hourlyRate: { type: Number, default: null },
+    // Null, not 0: "no target" and "a target of zero" are different answers,
+    // and only the first may render as "no budget set".
+    estimatedHours: { type: Number, default: null, min: 0 },
+    budgetAmount: { type: Number, default: null, min: 0 },
+    budgetCurrency: { type: String, default: null },
     archived: { type: Boolean, required: true, default: false },
   },
   { timestamps: true },
@@ -60,6 +71,9 @@ export function toClientProject(doc: ProjectDocLike): ProjectWire {
     clientId: doc.clientId ?? null,
     billableDefault: doc.billableDefault,
     hourlyRate: doc.hourlyRate ?? null,
+    estimatedHours: doc.estimatedHours ?? null,
+    budgetAmount: doc.budgetAmount ?? null,
+    budgetCurrency: doc.budgetCurrency ?? null,
     archived: doc.archived,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),

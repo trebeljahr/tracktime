@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { BudgetMeterCell } from "@/components/budget-meter";
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useFormatSettings } from "@/lib/format";
+import { budgetView } from "@/lib/budget-view";
+import { formatMoney, useFormatSettings } from "@/lib/format";
 import { ConfirmDialog } from "./confirm-dialog";
 import { ProjectFormDialog } from "./project-form-dialog";
 import { TaskPanel } from "./task-panel";
@@ -49,7 +51,7 @@ export type ProjectsTableProps = {
   onCreate: () => void;
 };
 
-const COLUMN_COUNT = 8;
+const COLUMN_COUNT = 9;
 
 function ColorDot({ color }: { color: string }): React.JSX.Element {
   return (
@@ -71,6 +73,17 @@ export function ProjectsTable({
 }: ProjectsTableProps): React.JSX.Element {
   const format = useFormatSettings();
   const { setProjectArchived, removeProject } = useProjectMutations();
+
+  // A budget carries its own currency, so the meter formats money with that
+  // one rather than through `format.money`, which is bound to the workspace.
+  const budgetFormat = React.useMemo(
+    () => ({
+      durationShort: format.durationShort,
+      money: formatMoney,
+      fallbackCurrency: format.currency,
+    }),
+    [format.durationShort, format.currency],
+  );
 
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [editing, setEditing] = React.useState<ProjectRow | null>(null);
@@ -123,6 +136,7 @@ export function ProjectsTable({
               <TableHead>Billable</TableHead>
               <TableHead className="text-right">Rate</TableHead>
               <TableHead className="text-right">Tracked</TableHead>
+              <TableHead className="w-56">Budget</TableHead>
               <TableHead className="text-right">Entries</TableHead>
               <TableHead className="w-10" />
             </TableRow>
@@ -214,6 +228,14 @@ export function ProjectsTable({
                       data-testid={`project-tracked-${project.id}`}
                     >
                       {format.duration(project.totalSec)}
+                    </TableCell>
+
+                    <TableCell data-testid={`project-budget-${project.id}`}>
+                      <BudgetMeterCell
+                        view={budgetView(project.progress, budgetFormat)}
+                        emptyLabel="No budget"
+                        testId={`project-budget-meter-${project.id}`}
+                      />
                     </TableCell>
 
                     <TableCell

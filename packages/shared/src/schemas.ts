@@ -28,6 +28,18 @@ export const isoDateOrDateTimeSchema = z.union([
 ]);
 
 export const hourlyRateSchema = z.number().min(0).max(1_000_000);
+
+/** ISO 4217 code, e.g. "EUR". */
+export const currencyCodeSchema = z
+  .string()
+  .regex(/^[A-Za-z]{3}$/, "Currency must be a 3-letter ISO 4217 code")
+  .transform((value) => value.toUpperCase());
+
+/** Lifetime hours a project is estimated at. 0 is a real estimate; null is not. */
+export const estimatedHoursSchema = z.number().min(0).max(100_000);
+
+/** Lifetime money budget for a project. */
+export const budgetAmountSchema = z.number().min(0).max(1_000_000_000);
 export const entrySourceSchema = z.enum([
   "web",
   "desktop",
@@ -98,12 +110,25 @@ export const projectListSchema = z.object({
   clientId: idString.nullish(),
 });
 
+/**
+ * Budget fields are `nullish` on purpose: absent leaves the target alone,
+ * explicit null clears it. A budget of 0 is neither — it is a real target the
+ * project is already over.
+ */
+const projectBudgetFields = {
+  estimatedHours: estimatedHoursSchema.nullish(),
+  budgetAmount: budgetAmountSchema.nullish(),
+  /** Defaults to the workspace currency when a budget is set without one. */
+  budgetCurrency: currencyCodeSchema.nullish(),
+};
+
 export const createProjectSchema = z.object({
   name: z.string().min(1, "Name is required").max(120),
   color: hexColorSchema.optional(),
   clientId: idString.nullish(),
   billableDefault: z.boolean().optional(),
   hourlyRate: hourlyRateSchema.nullish(),
+  ...projectBudgetFields,
   originId,
 });
 
@@ -114,6 +139,7 @@ export const updateProjectSchema = z.object({
   clientId: idString.nullish(),
   billableDefault: z.boolean().optional(),
   hourlyRate: hourlyRateSchema.nullish(),
+  ...projectBudgetFields,
   archived: z.boolean().optional(),
   originId,
 });

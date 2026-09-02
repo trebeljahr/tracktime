@@ -1,6 +1,13 @@
 "use client";
 
 import { createId } from "@starter/core";
+import {
+  EMPTY_ROLLUP,
+  budgetProgress,
+  hasBudgetTarget,
+  rollupOf,
+  type ProjectBudget,
+} from "@starter/shared";
 
 import { toast } from "@/components/ui/sonner";
 import { ORIGIN_ID } from "@/hooks/use-sync";
@@ -36,6 +43,21 @@ export type CatalogErrorHandlers = {
 };
 
 const DEFAULT_COLOR = "#4f46e5";
+
+/**
+ * Re-target a row's progress without re-reading its entries.
+ *
+ * Editing a budget changes only what the tracked time is compared against, so
+ * the roll-up carries over untouched and the optimistic row shows the right
+ * meter — including no meter at all when the target was just cleared.
+ */
+function retarget(row: ProjectRow, budget: ProjectBudget): ProjectRow["progress"] {
+  if (!hasBudgetTarget(budget)) return null;
+  return budgetProgress(
+    budget,
+    row.progress === null ? EMPTY_ROLLUP : rollupOf(row.progress),
+  );
+}
 
 function reportError(
   error: unknown,
@@ -137,6 +159,16 @@ export function useProjectMutations(
       const context = await beginProjectWrite();
       const now = new Date().toISOString();
       const client = findClient(vars.clientId);
+      const budget: ProjectBudget = {
+        estimatedHours: vars.estimatedHours ?? null,
+        budgetAmount: vars.budgetAmount ?? null,
+        // The server snapshots the workspace currency; the refetch replaces
+        // this guess with whatever it actually stored.
+        budgetCurrency:
+          vars.budgetAmount === undefined || vars.budgetAmount === null
+            ? null
+            : (vars.budgetCurrency ?? null),
+      };
       const optimistic: ProjectRow = {
         id: `optimistic-${createId()}`,
         ownerId: "",
@@ -145,6 +177,9 @@ export function useProjectMutations(
         clientId: vars.clientId ?? null,
         billableDefault: vars.billableDefault ?? true,
         hourlyRate: vars.hourlyRate ?? null,
+        estimatedHours: budget.estimatedHours,
+        budgetAmount: budget.budgetAmount,
+        budgetCurrency: budget.budgetCurrency,
         archived: false,
         createdAt: now,
         updatedAt: now,
@@ -152,6 +187,11 @@ export function useProjectMutations(
         clientColor: client?.color ?? null,
         entryCount: 0,
         totalSec: 0,
+        // A brand-new project has tracked nothing, so its progress is its
+        // target and zero spend — never a stale roll-up.
+        progress: hasBudgetTarget(budget)
+          ? budgetProgress(budget, EMPTY_ROLLUP)
+          : null,
       };
       writeProjects((rows) => sortByName([...rows, optimistic]));
       return context;
@@ -172,8 +212,24 @@ export function useProjectMutations(
         sortByName(
           rows.map((row) => {
             if (row.id !== vars.id) return row;
+            const budget: ProjectBudget = {
+              estimatedHours:
+                vars.estimatedHours === undefined
+                  ? row.estimatedHours
+                  : (vars.estimatedHours ?? null),
+              budgetAmount:
+                vars.budgetAmount === undefined
+                  ? row.budgetAmount
+                  : (vars.budgetAmount ?? null),
+              budgetCurrency:
+                vars.budgetAmount === null
+                  ? null
+                  : (vars.budgetCurrency ?? row.budgetCurrency),
+            };
             return {
               ...row,
+              ...budget,
+              progress: retarget(row, budget),
               ...(vars.name !== undefined ? { name: vars.name.trim() } : {}),
               ...(vars.color !== undefined ? { color: vars.color } : {}),
               ...(vars.clientId !== undefined

@@ -43,6 +43,21 @@ export type ProjectFormDialogProps = {
 
 const FALLBACK_COLOR = COLOR_PALETTE[0] ?? "#4f46e5";
 
+/** Sentinel for a field that was filled in with something unusable. */
+const INVALID = Symbol("invalid");
+
+/**
+ * An optional numeric target: empty means "no target" (null), anything else
+ * must parse to a number of 0 or more. Zero is a legitimate target and must
+ * survive the round trip as 0, never as null.
+ */
+function parseTarget(raw: string): number | null | typeof INVALID {
+  if (raw.trim() === "") return null;
+  const parsed = Number(raw.trim().replace(",", "."));
+  if (!Number.isFinite(parsed) || parsed < 0) return INVALID;
+  return parsed;
+}
+
 /**
  * Create/edit dialog. The body is only mounted while `open`, so every field
  * re-initialises from props on each open without an effect syncing state.
@@ -100,9 +115,25 @@ function ProjectForm({
       ? ""
       : String(project.hourlyRate),
   );
+  const [estimate, setEstimate] = React.useState(
+    project?.estimatedHours === null || project?.estimatedHours === undefined
+      ? ""
+      : String(project.estimatedHours),
+  );
+  const [budget, setBudget] = React.useState(
+    project?.budgetAmount === null || project?.budgetAmount === undefined
+      ? ""
+      : String(project.budgetAmount),
+  );
   const [pendingTasks, setPendingTasks] = React.useState<string[]>([]);
   const [nameError, setNameError] = React.useState<string | null>(null);
   const [rateError, setRateError] = React.useState<string | null>(null);
+  const [estimateError, setEstimateError] = React.useState<string | null>(null);
+  const [budgetError, setBudgetError] = React.useState<string | null>(null);
+
+  // A budget keeps the currency it was agreed in. Only a project without one
+  // yet picks up today's workspace currency.
+  const budgetCurrency = project?.budgetCurrency ?? currency;
 
   const { createProject, updateProject, isSaving } = useProjectMutations({
     onConflict: setNameError,
@@ -144,6 +175,8 @@ function ProjectForm({
     event.preventDefault();
     setNameError(null);
     setRateError(null);
+    setEstimateError(null);
+    setBudgetError(null);
 
     const trimmed = name.trim();
     if (trimmed === "") {
@@ -161,6 +194,19 @@ function ProjectForm({
       hourlyRate = parsed;
     }
 
+    // An empty field means "no target" and is sent as null; 0 is a target the
+    // project is already over. The two must never collapse into each other.
+    const estimatedHours = parseTarget(estimate);
+    if (estimatedHours === INVALID) {
+      setEstimateError("Enter hours of 0 or more, or leave it empty");
+      return;
+    }
+    const budgetAmount = parseTarget(budget);
+    if (budgetAmount === INVALID) {
+      setBudgetError("Enter an amount of 0 or more, or leave it empty");
+      return;
+    }
+
     if (project) {
       void updateProject({
         id: project.id,
@@ -169,6 +215,9 @@ function ProjectForm({
         clientId,
         billableDefault,
         hourlyRate,
+        estimatedHours,
+        budgetAmount,
+        ...(budgetAmount === null ? {} : { budgetCurrency }),
       }).then((saved) => {
         if (!saved) return;
         toast.success("Project saved.");
@@ -183,6 +232,9 @@ function ProjectForm({
       clientId,
       billableDefault,
       hourlyRate,
+      estimatedHours,
+      budgetAmount,
+      ...(budgetAmount === null ? {} : { budgetCurrency }),
     }).then(async (created) => {
       if (!created) return;
 
@@ -350,6 +402,78 @@ function ProjectForm({
           </p>
         ) : null}
       </div>
+
+      <fieldset className="space-y-3 rounded-md border border-border p-3">
+        <legend className="px-1 text-sm font-medium">Estimate &amp; budget</legend>
+        <p className="text-xs text-muted-foreground">
+          Lifetime targets for the whole project, not a monthly allowance.
+          Leave a field empty for no target — that is not the same as a target
+          of zero.
+        </p>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="project-estimate">Estimated hours</Label>
+            <Input
+              id="project-estimate"
+              inputMode="decimal"
+              value={estimate}
+              placeholder="No estimate"
+              aria-invalid={estimateError !== null}
+              onChange={(event) => {
+                setEstimate(event.target.value);
+                if (estimateError) setEstimateError(null);
+              }}
+              data-testid="project-estimate-input"
+            />
+            {estimateError ? (
+              <p
+                className="text-sm text-destructive"
+                data-testid="project-estimate-error"
+              >
+                {estimateError}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="project-budget">Budget ({budgetCurrency})</Label>
+            <Input
+              id="project-budget"
+              inputMode="decimal"
+              value={budget}
+              placeholder="No budget"
+              aria-invalid={budgetError !== null}
+              onChange={(event) => {
+                setBudget(event.target.value);
+                if (budgetError) setBudgetError(null);
+              }}
+              data-testid="project-budget-input"
+            />
+            {budgetError ? (
+              <p
+                className="text-sm text-destructive"
+                data-testid="project-budget-error"
+              >
+                {budgetError}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        {project?.budgetCurrency !== null &&
+        project?.budgetCurrency !== undefined &&
+        project.budgetCurrency !== currency ? (
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="project-budget-currency-note"
+          >
+            This budget is in {project.budgetCurrency}, the workspace currency
+            when it was set. Time tracked in {currency} is reported separately
+            rather than converted.
+          </p>
+        ) : null}
+      </fieldset>
 
       <DialogFooter>
         <Button

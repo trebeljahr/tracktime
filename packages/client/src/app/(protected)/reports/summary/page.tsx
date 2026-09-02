@@ -8,8 +8,10 @@ import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
+import { PROJECT_LIST_INPUT } from "@/components/catalog/types";
+import { budgetView, type BudgetView } from "@/lib/budget-view";
 import { CURRENCY_FALLBACK_ICON, currencyIcon } from "@/lib/currency";
-import { useFormatSettings } from "@/lib/format";
+import { formatMoney, useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { ExportMenu } from "@/components/reports/export-menu";
@@ -67,6 +69,34 @@ function SummaryReport(): React.JSX.Element {
   );
 
   const result = query.data;
+
+  // Budgets live on the project, not on the report, so they are joined in the
+  // browser rather than folded into the range-scoped summary result. Only
+  // fetched while the report is actually grouped by project.
+  const projectsQuery = trpc.projects.list.useQuery(PROJECT_LIST_INPUT, {
+    staleTime: 30_000,
+    enabled: groupBy === "project",
+  });
+
+  const budgetFor = React.useMemo<
+    ((groupKey: string) => BudgetView | null) | undefined
+  >(() => {
+    if (groupBy !== "project") return undefined;
+    const projects = projectsQuery.data ?? [];
+    if (projects.every((project) => project.progress === null)) return undefined;
+
+    const views = new Map<string, BudgetView | null>(
+      projects.map((project) => [
+        project.id,
+        budgetView(project.progress, {
+          durationShort: fmt.durationShort,
+          money: formatMoney,
+          fallbackCurrency: fmt.currency,
+        }),
+      ]),
+    );
+    return (groupKey) => views.get(groupKey) ?? null;
+  }, [groupBy, projectsQuery.data, fmt.durationShort, fmt.currency]);
 
   const kpis = React.useMemo<KpiItem[]>(() => {
     const totalSec = result?.totalSec ?? 0;
@@ -256,6 +286,7 @@ function SummaryReport(): React.JSX.Element {
               duration={fmt.duration}
               money={fmt.money}
               dimensionLabel={dimension}
+              budgetFor={budgetFor}
             />
           )}
         </CardContent>

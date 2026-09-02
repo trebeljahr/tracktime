@@ -8,6 +8,7 @@ import {
   idInputSchema,
   projectListSchema,
   updateProjectSchema,
+  type BudgetProgress,
   type Project as ProjectWire,
 } from "@starter/shared";
 import { Client } from "../../models/Client.js";
@@ -16,12 +17,19 @@ import {
   toClientProject,
   type ProjectDocLike,
 } from "../../models/Project.js";
+import { getOrCreateSettings } from "../../models/Settings.js";
 import { publishSync } from "../../ws/sync.js";
 import { protectedProcedure, router } from "../trpc.js";
 import {
   cascadeDeleteProject,
   type CatalogRemoveResult,
 } from "./catalog-cascade.js";
+import {
+  budgetWrite,
+  loadBudgetProgress,
+  needsCurrency,
+  touchesBudget,
+} from "./project-budgets.js";
 import {
   PROJECT_COLOR_OFFSET,
   archiveInputSchema,
@@ -38,6 +46,12 @@ export type ProjectWithStats = ProjectWire & {
   entryCount: number;
   /** Sum of `durationSec` across those entries (running entries count 0). */
   totalSec: number;
+  /**
+   * Lifetime progress against the project's estimate/budget, or null when it
+   * has neither. Null is the "no target set" signal — a project with a target
+   * of zero still gets a progress object.
+   */
+  progress: BudgetProgress | null;
 };
 
 /** Raw shape produced by the `list` aggregation. */
@@ -140,7 +154,7 @@ export const projectsRouter = router({
         { $sort: { sortName: 1 } },
       ]);
 
-      return rows.map((row) => {
+      const projects = rows.map((row) => {
         const client = row.clientDoc[0];
         const stats = row.stats[0];
         return {
@@ -151,6 +165,16 @@ export const projectsRouter = router({
           totalSec: stats?.totalSec ?? 0,
         };
       });
+
+      // Costs nothing until a project actually carries a target, and archived
+      // projects keep reporting: their history is still the answer to
+      // "did that job come in under budget?".
+      const progress = await loadBudgetProgress(ownerId, projects);
+
+      return projects.map((project) => ({
+        ...project,
+        progress: progress.get(project.id) ?? null,
+      }));
     }),
 
   create: protectedProcedure
@@ -161,6 +185,11 @@ export const projectsRouter = router({
       if (input.clientId) await assertClientOwned(ctx.user.id, input.clientId);
 
       const existing = await Project.countDocuments({ ownerId: ctx.user.id });
+      // Only read settings when a money budget is actually being set — every
+      // other create stays a single write.
+      const workspaceCurrency = needsCurrency(input)
+        ? (await getOrCreateSettings(ctx.user.id)).currency
+        : "";
       const created = await Project.create({
         ownerId: ctx.user.id,
         name,
@@ -168,6 +197,10 @@ export const projectsRouter = router({
         clientId: input.clientId ?? null,
         billableDefault: input.billableDefault ?? true,
         hourlyRate: input.hourlyRate ?? null,
+        estimatedHours: null,
+        budgetAmount: null,
+        budgetCurrency: null,
+        ...budgetWrite(input, workspaceCurrency),
         archived: false,
       });
 
@@ -188,6 +221,27 @@ export const projectsRouter = router({
       }
       if (input.clientId) await assertClientOwned(ctx.user.id, input.clientId);
 
+      // Changing a budget's amount must keep the currency it was agreed in,
+      // so the existing snapshot is read before it is overwritten. An
+      // estimate-only edit needs neither lookup.
+      let budgetSet: Record<string, unknown> = {};
+      if (touchesBudget(input)) {
+        if (needsCurrency(input)) {
+          const [settings, existing] = await Promise.all([
+            getOrCreateSettings(ctx.user.id),
+            Project.findOne({ _id: input.id, ownerId: ctx.user.id })
+              .select("budgetAmount budgetCurrency")
+              .lean(),
+          ]);
+          budgetSet = budgetWrite(input, settings.currency, {
+            budgetAmount: existing?.budgetAmount ?? null,
+            budgetCurrency: existing?.budgetCurrency ?? null,
+          });
+        } else {
+          budgetSet = budgetWrite(input, "");
+        }
+      }
+
       const updated = await Project.findOneAndUpdate(
         { _id: input.id, ownerId: ctx.user.id },
         {
@@ -206,6 +260,7 @@ export const projectsRouter = router({
             ...(input.archived !== undefined
               ? { archived: input.archived }
               : {}),
+            ...budgetSet,
           },
         },
         { returnDocument: "after" },

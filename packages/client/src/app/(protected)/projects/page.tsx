@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { overallBudgetStatus } from "@starter/shared";
 
 import { CatalogScreen } from "@/components/catalog/catalog-screen";
 import { ProjectFormDialog } from "@/components/catalog/project-form-dialog";
@@ -87,6 +88,14 @@ export default function ProjectsPage(): React.JSX.Element {
     0,
   );
 
+  // The only "alert" this tool has: a count in the summary line. A solo user
+  // reading their own project list does not need to be notified as well.
+  const overBudget = visibleProjects.filter(
+    (project) =>
+      project.progress !== null &&
+      overallBudgetStatus(project.progress) === "over",
+  ).length;
+
   return (
     <CatalogScreen
       title="Projects"
@@ -118,6 +127,12 @@ export default function ProjectsPage(): React.JSX.Element {
           {visibleProjects.length}{" "}
           {visibleProjects.length === 1 ? "project" : "projects"} ·{" "}
           {format.duration(trackedTotal)} tracked
+          {overBudget > 0 ? (
+            <span className="text-destructive" data-testid="projects-over-budget">
+              {" · "}
+              {overBudget} over budget
+            </span>
+          ) : null}
         </>
       }
       hasError={projectsQuery.isError}

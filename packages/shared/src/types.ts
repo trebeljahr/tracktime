@@ -78,6 +78,27 @@ export type Project = {
   billableDefault: boolean;
   /** Overrides `WorkspaceSettings.defaultHourlyRate` when set. */
   hourlyRate: number | null;
+  /**
+   * Lifetime hours the project is estimated at, e.g. 80 for "quoted at two
+   * weeks". Null means no estimate — which is not the same as an estimate of
+   * zero, and must never render as "0% of 0".
+   */
+  estimatedHours: number | null;
+  /**
+   * Lifetime money budget. Null means none was set. Recurring (per-month)
+   * budgets are deliberately not modelled — see `budgets.ts`.
+   */
+  budgetAmount: number | null;
+  /**
+   * ISO 4217 code `budgetAmount` is denominated in, snapshotted from the
+   * workspace currency when the budget was set. Null exactly when
+   * `budgetAmount` is null.
+   *
+   * It is snapshotted for the same reason entries snapshot theirs: changing
+   * the workspace currency later must not silently re-denominate a budget
+   * that was agreed in the old one.
+   */
+  budgetCurrency: string | null;
   archived: boolean;
   createdAt: string;
   updatedAt: string;
