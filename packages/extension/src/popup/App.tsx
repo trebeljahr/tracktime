@@ -175,6 +175,7 @@ export function App(): JSX.Element {
           onStop={() => send({ type: "timer:stop" })}
           onPinFavorite={pinFavorite}
           onUnpinFavorite={unpinFavorite}
+          onAnswerIdle={(answer) => send({ type: "idle:answer", answer })}
           onSignOut={() => send({ type: "auth:sign-out" })}
           onSaveApiUrl={saveApiUrl}
           onSelectProject={selectProject}

@@ -99,6 +99,15 @@ export type Project = {
    * that was agreed in the old one.
    */
   budgetCurrency: string | null;
+  /**
+   * Overrides `WorkspaceSettings.idle.behavior` for entries on this project;
+   * null inherits it. This is what "Meetings" and "Reading" are for — projects
+   * where no keyboard input is the normal case, not a sign of absence.
+   *
+   * It never switches detection *on*: a workspace with idle disabled stays
+   * disabled everywhere.
+   */
+  idleBehavior: IdleBehavior | null;
   archived: boolean;
   createdAt: string;
   updatedAt: string;
@@ -151,6 +160,43 @@ export type TimeEntry = {
   updatedAt: string;
 };
 
+/**
+ * What to do when a device notices the person at it has stopped giving input.
+ *
+ * `ask` is the default and the only behaviour that cannot lose time: the timer
+ * keeps running until the answer arrives. The other three are opt-in, and two
+ * of them shorten the running entry, which is exactly why they are a choice
+ * rather than a threshold.
+ */
+export type IdleBehavior =
+  /** Keep running and offer the choice — discard the idle span, or keep it. */
+  | "ask"
+  /** End the entry at the idle start, reopen an identical one on return. */
+  | "pause-and-resume"
+  /** Never act. For work that legitimately produces no input. */
+  | "keep-running"
+  /** End the entry at the idle start and stay stopped. */
+  | "stop";
+
+/**
+ * Idle-detection configuration, nested inside workspace settings.
+ *
+ * Detection is per-device; this is the shared policy every device applies to
+ * its own signal. See `@starter/core/idle` for the rule that keeps one sleeping
+ * laptop from pausing a timer the person is still driving from another machine.
+ */
+export type IdleSettings = {
+  enabled: boolean;
+  /** Minutes without input before the device considers the person away. */
+  thresholdMinutes: number;
+  behavior: IdleBehavior;
+  /**
+   * Treat a locked screen as away immediately, without waiting out the
+   * threshold. Locking is deliberate in a way that "no keys pressed" is not.
+   */
+  lockIsImmediate: boolean;
+};
+
 /** Pomodoro configuration, nested inside workspace settings. */
 export type PomodoroSettings = {
   enabled: boolean;
@@ -171,6 +217,7 @@ export type WorkspaceSettings = {
   timeFormat: TimeFormat;
   durationFormat: DurationFormat;
   pomodoro: PomodoroSettings;
+  idle: IdleSettings;
 };
 
 /**

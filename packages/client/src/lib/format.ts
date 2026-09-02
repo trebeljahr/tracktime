@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import {
+  DEFAULT_IDLE_SETTINGS,
   entryDurationSec,
   formatDuration,
   formatDurationShort,
@@ -29,6 +30,7 @@ export const FALLBACK_SETTINGS: WorkspaceSettings = {
     cyclesBeforeLongBreak: 4,
     notify: true,
   },
+  idle: DEFAULT_IDLE_SETTINGS,
 };
 
 /** Currency formatting, memoized — `Intl.NumberFormat` construction is costly. */

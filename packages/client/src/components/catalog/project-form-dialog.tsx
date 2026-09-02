@@ -1,6 +1,11 @@
 "use client";
 
 import * as React from "react";
+import {
+  IDLE_BEHAVIORS,
+  idleBehaviorLabel,
+  type IdleBehavior,
+} from "@starter/shared";
 
 import { ColorPicker, COLOR_PALETTE } from "@/components/color-picker";
 import { Button } from "@/components/ui/button";
@@ -125,6 +130,9 @@ function ProjectForm({
       ? ""
       : String(project.budgetAmount),
   );
+  const [idleBehavior, setIdleBehavior] = React.useState<IdleBehavior | "">(
+    project?.idleBehavior ?? "",
+  );
   const [pendingTasks, setPendingTasks] = React.useState<string[]>([]);
   const [nameError, setNameError] = React.useState<string | null>(null);
   const [rateError, setRateError] = React.useState<string | null>(null);
@@ -206,6 +214,9 @@ function ProjectForm({
       setBudgetError("Enter an amount of 0 or more, or leave it empty");
       return;
     }
+    // "" is the inherit option, and has to reach the server as null rather
+    // than being dropped — otherwise clearing an override would be a no-op.
+    const idle: IdleBehavior | null = idleBehavior === "" ? null : idleBehavior;
 
     if (project) {
       void updateProject({
@@ -218,6 +229,7 @@ function ProjectForm({
         estimatedHours,
         budgetAmount,
         ...(budgetAmount === null ? {} : { budgetCurrency }),
+        idleBehavior: idle,
       }).then((saved) => {
         if (!saved) return;
         toast.success("Project saved.");
@@ -235,6 +247,7 @@ function ProjectForm({
       estimatedHours,
       budgetAmount,
       ...(budgetAmount === null ? {} : { budgetCurrency }),
+      idleBehavior: idle,
     }).then(async (created) => {
       if (!created) return;
 
@@ -474,6 +487,30 @@ function ProjectForm({
           </p>
         ) : null}
       </fieldset>
+      <div className="space-y-2">
+        <Label htmlFor="project-idle">When you go idle</Label>
+        <select
+          id="project-idle"
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          value={idleBehavior}
+          onChange={(event) =>
+            setIdleBehavior(event.target.value as IdleBehavior | "")
+          }
+          data-testid="project-idle-behavior"
+        >
+          <option value="">Use the workspace setting</option>
+          {IDLE_BEHAVIORS.map((behavior) => (
+            <option key={behavior} value={behavior}>
+              {idleBehaviorLabel(behavior)}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Pick “Keep running” for work that produces no typing — meetings,
+          calls, reading. It never switches idle detection on; that stays a
+          workspace setting.
+        </p>
+      </div>
 
       <DialogFooter>
         <Button

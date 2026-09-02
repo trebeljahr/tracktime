@@ -29,6 +29,12 @@ import {
 import { BackgroundError, toErrorResponse } from "./errors";
 import { addFavorite, removeFavorite } from "./favorites";
 import {
+  answerIdle,
+  observeIdle,
+  pollIdle,
+  syncDetectionInterval,
+} from "./idle";
+import {
   adoptSession,
   ensureReady,
   flushQueue,
@@ -83,6 +89,10 @@ const refreshBadge = async (): Promise<void> => {
     await renderBadge(null);
     return;
   }
+
+  // Re-checked on every badge tick: Chrome only reports idle *transitions*, so
+  // one missed while the worker was gone would otherwise never be acted on.
+  await pollIdle().catch(() => undefined);
 
   try {
     await renderBadge(await resolveRunning());
@@ -178,14 +188,19 @@ const apply = async (message: PopupToBackground): Promise<void> => {
     case "auth:sign-out":
       return signOut();
     case "timer:start":
-      return startTimer(
+      // `startTimer` answers with the entry it opened; `apply` reports state
+      // through the fresh snapshot instead, so the value is dropped here.
+      await startTimer(
         message.description,
         message.projectId,
         message.taskId,
         message.billable,
       );
+      return;
     case "timer:stop":
       return stopTimer();
+    case "idle:answer":
+      return answerIdle(message.answer);
     case "favorite:add":
       await addFavorite(message.quick);
       return;
@@ -278,6 +293,28 @@ watchWebSession(
   },
 );
 
+/**
+ * The idle signal itself.
+ *
+ * Registered at module scope like every other listener, and for the same
+ * reason: this event is what wakes an evicted worker, so a listener added
+ * after an `await` would miss the delivery that revived it. The detection
+ * interval is the user's threshold (see ./idle), so `idle` here means the
+ * threshold has just elapsed.
+ */
+chrome.idle.onStateChanged.addListener((state) => {
+  void (async () => {
+    if (state === "active") {
+      // A return to input is what spends a pending "resume when they come
+      // back", so it has to be reported even though nothing is idle.
+      await observeIdle("active", 0);
+      return;
+    }
+    const seconds = await syncDetectionInterval();
+    await observeIdle(state, seconds ?? 0);
+  })().catch(() => undefined);
+});
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== BADGE_ALARM) return;
   // Nothing is waiting on this, so it swallows its own failure: the alarm
@@ -303,6 +340,7 @@ async function bootstrap(): Promise<void> {
   try {
     await ensureReady();
     await ensureBadgeAlarm();
+    await syncDetectionInterval();
     await refreshBadge();
     await flushQueue();
   } catch {

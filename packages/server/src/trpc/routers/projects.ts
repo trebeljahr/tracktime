@@ -201,6 +201,7 @@ export const projectsRouter = router({
         budgetAmount: null,
         budgetCurrency: null,
         ...budgetWrite(input, workspaceCurrency),
+        idleBehavior: input.idleBehavior ?? null,
         archived: false,
       });
 
@@ -256,6 +257,9 @@ export const projectsRouter = router({
               : {}),
             ...(input.hourlyRate !== undefined
               ? { hourlyRate: input.hourlyRate ?? null }
+              : {}),
+            ...(input.idleBehavior !== undefined
+              ? { idleBehavior: input.idleBehavior ?? null }
               : {}),
             ...(input.archived !== undefined
               ? { archived: input.archived }

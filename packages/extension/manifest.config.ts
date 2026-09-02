@@ -97,8 +97,10 @@ export function buildManifest(mode: BuildMode): Record<string, unknown> {
       type: "module",
     },
     // `cookies` is what lets the extension read the web app's better-auth
-    // session and sign in without a second form.
-    permissions: ["storage", "alarms", "cookies"],
+    // session and sign in without a second form. `idle` is the only way to
+    // learn that the person has walked away — a service worker sees no input
+    // events of its own.
+    permissions: ["storage", "alarms", "cookies", "idle"],
     host_permissions: target.hostPermissions,
     icons: {
       "16": "icons/16.png",

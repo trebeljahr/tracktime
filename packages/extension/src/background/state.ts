@@ -15,6 +15,7 @@ import { mergeQuickStarts, type ApiClient, type TimeEntry } from "@starter/core"
 import type { BackgroundState } from "../lib/messaging";
 import { fetchClients, fetchProjects, fetchTasks } from "./catalog";
 import { fetchFavorites, fetchRecents } from "./favorites";
+import { pendingIdle } from "./idle-state";
 import {
   ensureReady,
   forgetSession,
@@ -63,6 +64,7 @@ const signedOutState = (
   recents: [],
   todaySec: 0,
   syncStatus: getSyncStatus(),
+  pendingIdle: null,
 });
 
 /**
@@ -136,19 +138,28 @@ export async function buildState(): Promise<BackgroundState> {
   const tasksProjectId = getCachedTasksProjectId();
 
   const running = await softRead(resolveRunning, peekRunning());
-  const [email, projects, clients, tasks, todaySec, favorites, recents] =
-    await Promise.all([
-      softRead(resolveEmail, current.session.email),
-      softRead(() => fetchProjects(current.api), getCachedProjects() ?? []),
-      softRead(() => fetchClients(current.api), getCachedClients() ?? []),
-      softRead(
-        () => fetchTasks(current.api, tasksProjectId),
-        getCachedTasks(tasksProjectId) ?? [],
-      ),
-      softRead(() => fetchTodaySec(current.api), getCachedTodaySec() ?? 0),
-      softRead(() => fetchFavorites(current.api), getCachedFavorites() ?? []),
-      softRead(() => fetchRecents(current.api), getCachedRecents() ?? []),
-    ]);
+  const [
+    email,
+    projects,
+    clients,
+    tasks,
+    todaySec,
+    favorites,
+    recents,
+    idle,
+  ] = await Promise.all([
+    softRead(resolveEmail, current.session.email),
+    softRead(() => fetchProjects(current.api), getCachedProjects() ?? []),
+    softRead(() => fetchClients(current.api), getCachedClients() ?? []),
+    softRead(
+      () => fetchTasks(current.api, tasksProjectId),
+      getCachedTasks(tasksProjectId) ?? [],
+    ),
+    softRead(() => fetchTodaySec(current.api), getCachedTodaySec() ?? 0),
+    softRead(() => fetchFavorites(current.api), getCachedFavorites() ?? []),
+    softRead(() => fetchRecents(current.api), getCachedRecents() ?? []),
+    softRead(pendingIdle, null),
+  ]);
 
   if (unauthorized) {
     // The token was revoked from Settings → Devices, or it simply expired.
@@ -182,5 +193,9 @@ export async function buildState(): Promise<BackgroundState> {
     recents,
     todaySec,
     syncStatus: getSyncStatus(),
+    // Dropped once the entry it refers to is no longer the running one: the
+    // question "what were those 40 minutes?" is meaningless against an entry
+    // somebody has since stopped, and answering it would edit the wrong row.
+    pendingIdle: idle !== null && idle.entryId === running?.id ? idle : null,
   };
 }

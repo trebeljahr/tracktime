@@ -27,15 +27,23 @@ export const applySettingsPatch = (
   current: WorkspaceSettings,
   patch: SettingsPatch
 ): WorkspaceSettings => {
-  const pomodoro = { ...current.pomodoro };
-  if (patch.pomodoro) {
-    for (const [key, value] of Object.entries(patch.pomodoro)) {
+  // Keys are constrained by the settings types; the cast is the narrowest way
+  // to write through an `Object.entries` loop without reaching for `any`.
+  const mergeBlock = <T extends object>(
+    block: T,
+    incoming: Partial<Record<keyof T, unknown>> | undefined,
+  ): T => {
+    if (!incoming) return block;
+    const next: T = { ...block };
+    for (const [key, value] of Object.entries(incoming)) {
       if (value === undefined) continue;
-      // Keys are constrained by PomodoroSettings; the cast is the narrowest
-      // way to write through an Object.entries loop without `any`.
-      (pomodoro as Record<string, unknown>)[key] = value;
+      (next as Record<string, unknown>)[key] = value;
     }
-  }
+    return next;
+  };
+
+  const pomodoro = mergeBlock(current.pomodoro, patch.pomodoro);
+  const idle = mergeBlock(current.idle, patch.idle);
 
   return {
     ...current,
@@ -53,6 +61,7 @@ export const applySettingsPatch = (
       ? patch.durationFormat
       : current.durationFormat,
     pomodoro,
+    idle,
   };
 };
 

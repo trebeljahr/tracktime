@@ -504,8 +504,19 @@ body {
   font-weight: 600;
 }
 
+.panel__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .panel__actions {
+  /* Wraps because the idle panel's three answers do not fit on one 360px row,
+     and truncating any of them would make one choice harder to reach than the
+     others. */
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
   margin-top: 10px;

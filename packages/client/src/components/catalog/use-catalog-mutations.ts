@@ -185,6 +185,7 @@ export function useProjectMutations(
         estimatedHours: budget.estimatedHours,
         budgetAmount: budget.budgetAmount,
         budgetCurrency: budget.budgetCurrency,
+        idleBehavior: vars.idleBehavior ?? null,
         archived: false,
         createdAt: now,
         updatedAt: now,
@@ -249,6 +250,9 @@ export function useProjectMutations(
                 : {}),
               ...(vars.hourlyRate !== undefined
                 ? { hourlyRate: vars.hourlyRate ?? null }
+                : {}),
+              ...(vars.idleBehavior !== undefined
+                ? { idleBehavior: vars.idleBehavior ?? null }
                 : {}),
               ...(vars.archived !== undefined
                 ? { archived: vars.archived }

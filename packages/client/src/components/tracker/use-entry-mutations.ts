@@ -14,6 +14,7 @@ import {
 
 import { toast } from "@/components/ui/sonner";
 import { ORIGIN_ID } from "@/hooks/use-sync";
+import { idleWatcher } from "@/lib/idle-watcher";
 import { trpc } from "@/lib/trpc";
 import {
   cancelQueuedForTemp,
@@ -76,6 +77,8 @@ export type StartTimerArgs = {
   projectId: string | null;
   taskId?: string | null;
   billable: boolean;
+  /** ISO instant to open the entry at. Defaults to now. */
+  start?: string;
 };
 
 export type ManualEntryArgs = StartTimerArgs & {
@@ -93,6 +96,14 @@ export type UpdateEntryArgs = {
   end?: string | null;
 };
 
+/** One idle decision, applied as "close this, then maybe open that". */
+export type SplitAtIdleArgs = {
+  /** ISO instant to end the running entry at — where input stopped. */
+  end: string;
+  /** The entry to reopen afterwards, or null to leave the timer stopped. */
+  resume: StartTimerArgs | null;
+};
+
 export type EntryMutations = {
   startTimer: (args: StartTimerArgs) => void;
   /**
@@ -100,12 +111,15 @@ export type EntryMutations = {
    * underneath — a quick start is a start whose fields were chosen earlier.
    */
   startQuickStart: (quick: QuickStart) => void;
-  stopTimer: () => void;
+  /** `end` defaults to now; idle detection passes the instant input stopped. */
+  stopTimer: (end?: string) => void;
   continueEntry: (entry: DetailedEntry) => void;
   createManualEntry: (args: ManualEntryArgs) => void;
   updateEntry: (args: UpdateEntryArgs) => void;
   duplicateEntry: (entry: DetailedEntry) => void;
   removeEntry: (entry: DetailedEntry) => void;
+  /** Truncate the running entry, then optionally reopen it. See idle guard. */
+  splitAtIdle: (args: SplitAtIdleArgs) => void;
   isBusy: boolean;
 };
 
@@ -386,11 +400,16 @@ export const useEntryMutations = (): EntryMutations => {
       });
       utils.entries.current.setData(undefined, optimistic);
       insertEntry(optimistic);
+      // This tab opened the entry, so it is the one allowed to act on its own
+      // idle signal for it. Claimed against the temp id first: a timer started
+      // offline still belongs to this device before the server names it.
+      idleWatcher.noteLocalStart(context.tempId, Date.parse(input.start));
       return context;
     },
     onSuccess: (entry, _raw, context) => {
       if (context?.tempId) replaceEntry(context.tempId, toDetailed(entry));
       utils.entries.current.setData(undefined, entry);
+      idleWatcher.noteLocalStart(entry.id, Date.now());
     },
     onError: (error, raw, context) =>
       handleError(
@@ -606,37 +625,92 @@ export const useEntryMutations = (): EntryMutations => {
 
   // ── public API ─────────────────────────────────────────────────────
 
-  const startQuickStart = React.useCallback(
-    (quick: QuickStart): void => {
-      // One builder for every start this app makes, shared with the extension
-      // and Raycast through core — so a favorite, a continued entry and the
-      // Start button produce byte-identical inputs, live or queued.
+  /**
+   * One builder for every start this app makes, shared with the extension and
+   * Raycast through core — so a favorite, a continued entry and the Start
+   * button produce byte-identical inputs, live or queued.
+   *
+   * `now` exists for the idle resume, which reopens the work at the instant
+   * input came back rather than whenever the mutation happens to fire.
+   */
+  const startWith = React.useCallback(
+    (quick: QuickStart, now?: Date): void => {
       const input: OfflineStartInput = buildQuickStartInput(quick, {
         source: "web",
         timeZone: deviceTimeZone(),
         originId: ORIGIN_ID,
+        now,
       });
       startMutation.mutate(input);
     },
     [startMutation]
   );
 
-  const startTimer = React.useCallback(
-    (args: StartTimerArgs): void => {
-      startQuickStart({
-        description: args.description,
-        projectId: args.projectId,
-        taskId: args.taskId ?? null,
-        billable: args.billable,
-      });
+  const startQuickStart = React.useCallback(
+    (quick: QuickStart): void => {
+      startWith(quick);
     },
-    [startQuickStart]
+    [startWith]
   );
 
-  const stopTimer = React.useCallback((): void => {
-    const input: OfflineStopInput = { end: nowIso(), originId: ORIGIN_ID };
-    stopMutation.mutate(input);
-  }, [stopMutation]);
+  const startTimer = React.useCallback(
+    (args: StartTimerArgs): void => {
+      startWith(
+        {
+          description: args.description,
+          projectId: args.projectId,
+          taskId: args.taskId ?? null,
+          billable: args.billable,
+        },
+        args.start === undefined ? undefined : new Date(args.start)
+      );
+    },
+    [startWith]
+  );
+
+  const stopTimer = React.useCallback(
+    (end?: string): void => {
+      // No `id`, even when idle detection knows one: the server stops whatever
+      // is running, which is what a replayed offline stop has to do too, and
+      // an entry started offline has no server id to name yet.
+      const input: OfflineStopInput = { end: end ?? nowIso(), originId: ORIGIN_ID };
+      // Deliberately not inside `stopMutation.onMutate`: `splitAtIdle` stops
+      // through the same mutation while the watcher is holding a resume, and
+      // releasing there would drop it. A stop the user asked for is the only
+      // one that should clear the watcher.
+      idleWatcher.noteLocalStop(Date.now());
+      stopMutation.mutate(input);
+    },
+    [stopMutation]
+  );
+
+  /**
+   * The pause half of pause-and-resume.
+   *
+   * The two writes are sequenced rather than fired together, and that is
+   * load-bearing: `entries.start` stops whatever is running *at the new
+   * entry's start* before inserting, so a start racing an in-flight stop would
+   * re-close the entry at "now" and put the idle minutes straight back on it.
+   * Awaiting the stop means the resume opens against nothing.
+   */
+  const splitAtIdle = React.useCallback(
+    ({ end, resume }: SplitAtIdleArgs): void => {
+      const stopInput: OfflineStopInput = { end, originId: ORIGIN_ID };
+      const openResumed = (): void => {
+        if (resume !== null) startTimer(resume);
+      };
+
+      void stopMutation.mutateAsync(stopInput).then(openResumed, (error) => {
+        // A transport failure was already parked in the offline queue by the
+        // shared error path, and its optimistic result stands — so the resume
+        // still belongs after it, and will replay in that order. A refusal
+        // from the server is different: the stop did not happen, and opening a
+        // second entry on top of a still-running one would only make it worse.
+        if (isNetworkError(error)) openResumed();
+      });
+    },
+    [startTimer, stopMutation]
+  );
 
   const continueEntry = React.useCallback(
     (entry: DetailedEntry): void => {
@@ -727,6 +801,7 @@ export const useEntryMutations = (): EntryMutations => {
     updateEntry,
     duplicateEntry,
     removeEntry,
+    splitAtIdle,
     isBusy:
       startMutation.isPending ||
       stopMutation.isPending ||

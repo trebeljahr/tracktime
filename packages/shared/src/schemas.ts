@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+import {
+  IDLE_BEHAVIORS,
+  MAX_IDLE_THRESHOLD_MINUTES,
+  MIN_IDLE_THRESHOLD_MINUTES,
+} from "./idle.js";
+import type { IdleBehavior } from "./types.js";
+
 export const updateProfileSchema = z.object({
   bio: z.string().max(500).optional(),
   avatarUrl: z.url().optional(),
@@ -47,6 +54,15 @@ export const entrySourceSchema = z.enum([
   "extension",
   "api",
 ]);
+/**
+ * Declared from the shared IDLE_BEHAVIORS list rather than repeating the
+ * literals, so a fifth behaviour cannot be added to the type and silently
+ * rejected by validation.
+ */
+export const idleBehaviorSchema = z.enum(
+  IDLE_BEHAVIORS as unknown as [IdleBehavior, ...IdleBehavior[]],
+);
+
 export const reportGroupBySchema = z.enum([
   "project",
   "client",
@@ -129,6 +145,8 @@ export const createProjectSchema = z.object({
   billableDefault: z.boolean().optional(),
   hourlyRate: hourlyRateSchema.nullish(),
   ...projectBudgetFields,
+  /** null/omitted inherits `WorkspaceSettings.idle.behavior`. */
+  idleBehavior: idleBehaviorSchema.nullish(),
   originId,
 });
 
@@ -140,6 +158,7 @@ export const updateProjectSchema = z.object({
   billableDefault: z.boolean().optional(),
   hourlyRate: hourlyRateSchema.nullish(),
   ...projectBudgetFields,
+  idleBehavior: idleBehaviorSchema.nullish(),
   archived: z.boolean().optional(),
   originId,
 });
@@ -328,6 +347,17 @@ export const pomodoroSettingsSchema = z.object({
   notify: z.boolean(),
 });
 
+export const idleSettingsSchema = z.object({
+  enabled: z.boolean(),
+  thresholdMinutes: z
+    .number()
+    .int()
+    .min(MIN_IDLE_THRESHOLD_MINUTES)
+    .max(MAX_IDLE_THRESHOLD_MINUTES),
+  behavior: idleBehaviorSchema,
+  lockIsImmediate: z.boolean(),
+});
+
 export const updateSettingsSchema = z.object({
   defaultHourlyRate: hourlyRateSchema.optional(),
   currency: z
@@ -338,6 +368,7 @@ export const updateSettingsSchema = z.object({
   timeFormat: z.enum(["12h", "24h"]).optional(),
   durationFormat: z.enum(["hms", "decimal"]).optional(),
   pomodoro: pomodoroSettingsSchema.partial().optional(),
+  idle: idleSettingsSchema.partial().optional(),
   originId,
 });
 

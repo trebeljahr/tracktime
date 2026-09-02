@@ -12,6 +12,7 @@ import {
   type TimeEntry,
   type TimerState,
 } from "@starter/core";
+import { idleWatcher } from "@/lib/idle-watcher";
 import { trpc } from "@/lib/trpc";
 
 /**
@@ -113,6 +114,11 @@ export const useSync = (): SyncStatus => {
       onEvent: (event, originId) => {
         // Our own echo — the mutation's optimistic update already landed.
         if (originId !== undefined && originId === ORIGIN_ID) return;
+        // Somebody just did something on another device, so the person was at
+        // a keyboard at this instant. Idle detection measures from here rather
+        // than from the last time *this* tab saw input — that is what stops a
+        // laptop left open from pausing work being done elsewhere.
+        idleWatcher.noteRemoteActivity(Date.now());
         invalidateFor(utilsRef.current, event);
       },
     });

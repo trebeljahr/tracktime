@@ -1,10 +1,15 @@
 import mongoose, { Schema, type Document } from "mongoose";
-import type {
-  DurationFormat,
-  PomodoroSettings,
-  TimeFormat,
-  WeekStart,
-  WorkspaceSettings,
+import {
+  DEFAULT_IDLE_SETTINGS,
+  IDLE_BEHAVIORS,
+  MAX_IDLE_THRESHOLD_MINUTES,
+  MIN_IDLE_THRESHOLD_MINUTES,
+  type DurationFormat,
+  type IdleSettings,
+  type PomodoroSettings,
+  type TimeFormat,
+  type WeekStart,
+  type WorkspaceSettings,
 } from "@starter/shared";
 
 /** Defaults applied to a workspace the first time its settings are read. */
@@ -17,6 +22,9 @@ export const DEFAULT_POMODORO: PomodoroSettings = {
   notify: true,
 };
 
+/** Re-exported under the model's naming so the two defaults read alike. */
+export const DEFAULT_IDLE: IdleSettings = DEFAULT_IDLE_SETTINGS;
+
 export const DEFAULT_SETTINGS: Omit<WorkspaceSettings, "userId"> = {
   defaultHourlyRate: 0,
   currency: "EUR",
@@ -24,6 +32,7 @@ export const DEFAULT_SETTINGS: Omit<WorkspaceSettings, "userId"> = {
   timeFormat: "24h",
   durationFormat: "hms",
   pomodoro: DEFAULT_POMODORO,
+  idle: DEFAULT_IDLE,
 };
 
 export interface ISettings extends Document {
@@ -34,6 +43,7 @@ export interface ISettings extends Document {
   timeFormat: TimeFormat;
   durationFormat: DurationFormat;
   pomodoro: PomodoroSettings;
+  idle: IdleSettings;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,7 +60,36 @@ export type SettingsDocLike = {
   timeFormat: TimeFormat;
   durationFormat: DurationFormat;
   pomodoro: PomodoroSettings;
+  /** Absent on documents written before idle detection existed. */
+  idle?: IdleSettings | null;
 };
+
+const idleSchema = new Schema<IdleSettings>(
+  {
+    enabled: { type: Boolean, required: true, default: DEFAULT_IDLE.enabled },
+    thresholdMinutes: {
+      type: Number,
+      required: true,
+      default: DEFAULT_IDLE.thresholdMinutes,
+      min: MIN_IDLE_THRESHOLD_MINUTES,
+      max: MAX_IDLE_THRESHOLD_MINUTES,
+    },
+    behavior: {
+      type: String,
+      // Must stay in lockstep with IdleBehavior; driving it off the shared
+      // list is what guarantees it does.
+      enum: [...IDLE_BEHAVIORS],
+      required: true,
+      default: DEFAULT_IDLE.behavior,
+    },
+    lockIsImmediate: {
+      type: Boolean,
+      required: true,
+      default: DEFAULT_IDLE.lockIsImmediate,
+    },
+  },
+  { _id: false },
+);
 
 const pomodoroSchema = new Schema<PomodoroSettings>(
   {
@@ -113,6 +152,11 @@ const settingsSchema = new Schema<ISettings>(
       required: true,
       default: (): PomodoroSettings => ({ ...DEFAULT_POMODORO }),
     },
+    idle: {
+      type: idleSchema,
+      required: true,
+      default: (): IdleSettings => ({ ...DEFAULT_IDLE }),
+    },
   },
   { timestamps: true },
 );
@@ -136,6 +180,18 @@ export function toClientSettings(doc: SettingsDocLike): WorkspaceSettings {
       cyclesBeforeLongBreak: doc.pomodoro.cyclesBeforeLongBreak,
       notify: doc.pomodoro.notify,
     },
+    // A settings document written before idle detection existed has no `idle`
+    // subdocument, and Mongoose does not backfill defaults on read. Falling
+    // back here keeps the wire shape whole for those users; the next write
+    // persists it.
+    idle: {
+      enabled: doc.idle?.enabled ?? DEFAULT_IDLE.enabled,
+      thresholdMinutes:
+        doc.idle?.thresholdMinutes ?? DEFAULT_IDLE.thresholdMinutes,
+      behavior: doc.idle?.behavior ?? DEFAULT_IDLE.behavior,
+      lockIsImmediate:
+        doc.idle?.lockIsImmediate ?? DEFAULT_IDLE.lockIsImmediate,
+    },
   };
 }
 
@@ -158,5 +214,10 @@ export async function getOrCreateSettings(
   const created = await Settings.findOne({ userId }).lean();
   return created
     ? toClientSettings(created)
-    : { userId, ...DEFAULT_SETTINGS, pomodoro: { ...DEFAULT_POMODORO } };
+    : {
+        userId,
+        ...DEFAULT_SETTINGS,
+        pomodoro: { ...DEFAULT_POMODORO },
+        idle: { ...DEFAULT_IDLE },
+      };
 }

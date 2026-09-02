@@ -4,6 +4,7 @@ import {
   deviceTimeZone,
   formatDuration,
   type Client,
+  type IdleAnswer,
   type Project,
   type QuickStart,
   type SyncStatus,
@@ -12,6 +13,7 @@ import {
 import type { BackgroundState } from "../lib/messaging";
 import { ApiUrlEditor } from "./api-url-editor";
 import { Combobox, type ComboboxOption } from "./combobox";
+import { IdlePanel } from "./idle-panel";
 import { Menu } from "./menu";
 import { QuickStartList } from "./quick-start-list";
 import { useElapsedSec } from "./use-elapsed";
@@ -30,6 +32,8 @@ export type TrackerScreenProps = {
   onStop: () => Promise<boolean>;
   onPinFavorite: (quick: QuickStart) => Promise<boolean>;
   onUnpinFavorite: (id: string) => Promise<boolean>;
+  /** Resolves the idle span the worker parked while the popup was closed. */
+  onAnswerIdle: (answer: IdleAnswer) => Promise<boolean>;
   onSignOut: () => Promise<boolean>;
   onSaveApiUrl: (apiUrl: string) => Promise<boolean>;
   /** Loads the task list for a project into the worker's snapshot. */
@@ -135,6 +139,7 @@ export function TrackerScreen({
   onStop,
   onPinFavorite,
   onUnpinFavorite,
+  onAnswerIdle,
   onSignOut,
   onSaveApiUrl,
   onSelectProject,
@@ -257,6 +262,15 @@ export function TrackerScreen({
     }
   };
 
+  const answerIdle = async (answer: IdleAnswer): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    // No optimistic override: which entry ends up running depends on the
+    // answer, and guessing wrong would flash the opposite of what happened.
+    await onAnswerIdle(answer);
+    setBusy(false);
+  };
+
   const stop = async (): Promise<void> => {
     if (busy) return;
     setBusy(true);
@@ -286,6 +300,18 @@ export function TrackerScreen({
   return (
     <div className="tracker" data-testid="tracker-screen">
       <div className="popup__body">
+        {/* Above everything else: it is a question about the time already on
+            the clock below, and answering it changes what that clock says. */}
+        {state.pendingIdle !== null ? (
+          <IdlePanel
+            pending={state.pendingIdle}
+            busy={busy}
+            onAnswer={(answer) => {
+              void answerIdle(answer);
+            }}
+          />
+        ) : null}
+
         {running === null ? (
           <form className="form" onSubmit={start} data-testid="tracker-start-form">
             {/* Above the description field on purpose: the whole point is not

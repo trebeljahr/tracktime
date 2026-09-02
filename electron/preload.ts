@@ -21,4 +21,26 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   openExternal: (url: string): Promise<boolean> =>
     ipcRenderer.invoke("app:openExternal", url),
+
+  /** The OS idle counter, which sees every app — not just this window. */
+  getIdleState: (): Promise<{ state: string; idleSeconds: number }> =>
+    ipcRenderer.invoke("idle:get"),
+
+  /**
+   * Subscribe to idle/lock changes. Returns an unsubscribe function; the
+   * listener is wrapped so the renderer never receives the IpcRendererEvent,
+   * which would leak `sender` across the context bridge.
+   */
+  onIdleState: (
+    listener: (payload: { state: string; idleSeconds: number }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: unknown,
+      payload: { state: string; idleSeconds: number },
+    ): void => listener(payload);
+    ipcRenderer.on("idle:state", handler);
+    return () => {
+      ipcRenderer.removeListener("idle:state", handler);
+    };
+  },
 });

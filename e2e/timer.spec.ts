@@ -4,6 +4,23 @@ import { cleanDatabase, closeDbConnection } from "./db-utils";
 
 const PASSWORD = "SecurePassword123!";
 
+/**
+ * The idle test bridge the client installs while idle detection is on.
+ *
+ * Declared here rather than imported: the spec compiles outside the client
+ * package's tsconfig, so its global augmentation is not in scope.
+ */
+declare global {
+  interface Window {
+    __tracktimeIdle?: {
+      simulate: (
+        signal: "active" | "idle" | "locked",
+        idleSeconds?: number,
+      ) => void;
+    };
+  }
+}
+
 let sequence = 0;
 
 /** Unique per test — signup is rejected for an address that already exists. */
@@ -101,6 +118,70 @@ test.describe("Timer", () => {
     await expect(day.getByTestId("day-total")).toHaveText(
       /^0:00:(?:0[1-9]|[1-5]\d)$/,
     );
+  });
+
+  test("pauses at the idle start and resumes the same work", async ({
+    page,
+  }) => {
+    await openTracker(page, "timer-idle");
+
+    // Configure idle detection: pause and resume, with the shortest threshold
+    // the settings allow.
+    await page.goto("/settings");
+    await page.getByTestId("settings-tab-idle").click();
+    await page.getByTestId("idle-enabled").click();
+    await expect(page.getByTestId("idle-enabled")).toHaveAttribute(
+      "data-state",
+      "checked",
+    );
+    await page.getByTestId("idle-behavior-pause-and-resume").click();
+    await expect(
+      page.getByTestId("idle-behavior-pause-and-resume"),
+    ).toHaveAttribute("data-state", "on");
+    await page.getByTestId("idle-threshold").fill("1");
+    await page.getByTestId("idle-threshold").press("Enter");
+    await expect(page.getByTestId("idle-save-indicator")).toHaveAttribute(
+      "data-state",
+      "saved",
+    );
+
+    await page.goto("/track");
+    await page.getByTestId("tracker-description").fill("Reading the RFC");
+    await page.getByTestId("tracker-toggle").click();
+    await expect(runningRows(page)).toHaveCount(1);
+
+    // The detector is the OS in real life, so the test injects a reading
+    // instead of idling for a real minute. `__tracktimeIdle` feeds exactly the
+    // signal `chrome.idle` and `powerMonitor` feed — it grants the page
+    // nothing it does not already have — and it only exists once idle
+    // detection is enabled, which is why the settings come first.
+    await expect
+      .poll(() =>
+        page.evaluate(() => typeof window.__tracktimeIdle?.simulate),
+      )
+      .toBe("function");
+
+    // Two minutes without input, against a one-minute threshold.
+    await page.evaluate(() => window.__tracktimeIdle?.simulate("idle", 120));
+
+    // Paused: the entry is closed, nothing is running, and the time it had
+    // before the idle span survives — the truncation is clamped so an entry
+    // that began inside the idle window keeps a second rather than vanishing.
+    await expect(runningRows(page)).toHaveCount(0);
+    const paused = entryRow(page, "Reading the RFC").first();
+    await expect(paused).toHaveAttribute("data-running", "false");
+
+    // Back at the keyboard: the same work reopens, by itself.
+    await page.evaluate(() => window.__tracktimeIdle?.simulate("active"));
+
+    await expect(runningRows(page)).toHaveCount(1);
+    await expect(
+      runningRows(page).getByTestId("entry-description"),
+    ).toHaveText("Reading the RFC");
+
+    // One session, now two rows: the work before the idle span and the work
+    // after it. The idle minutes are in neither.
+    await expect(entryRow(page, "Reading the RFC")).toHaveCount(2);
   });
 
   test("keeps at most one timer running", async ({ page }) => {

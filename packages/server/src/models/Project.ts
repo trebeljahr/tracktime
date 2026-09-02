@@ -1,5 +1,9 @@
 import mongoose, { Schema, type Document } from "mongoose";
-import type { Project as ProjectWire } from "@starter/shared";
+import {
+  IDLE_BEHAVIORS,
+  type IdleBehavior,
+  type Project as ProjectWire,
+} from "@starter/shared";
 
 export const DEFAULT_PROJECT_COLOR = "#4f46e5";
 
@@ -13,6 +17,8 @@ export interface IProject extends Document {
   estimatedHours: number | null;
   budgetAmount: number | null;
   budgetCurrency: string | null;
+  /** null inherits the workspace's idle behaviour. */
+  idleBehavior: IdleBehavior | null;
   archived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -33,6 +39,7 @@ export type ProjectDocLike = {
   estimatedHours: number | null;
   budgetAmount: number | null;
   budgetCurrency: string | null;
+  idleBehavior?: IdleBehavior | null;
   archived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -51,6 +58,15 @@ const projectSchema = new Schema<IProject>(
     estimatedHours: { type: Number, default: null, min: 0 },
     budgetAmount: { type: Number, default: null, min: 0 },
     budgetCurrency: { type: String, default: null },
+    // Nullable rather than defaulted to a behaviour: "inherit the workspace"
+    // has to stay distinguishable from "explicitly chose what the workspace
+    // happens to say today", or changing the workspace setting would skip
+    // every project created before it.
+    idleBehavior: {
+      type: String,
+      enum: [...IDLE_BEHAVIORS, null],
+      default: null,
+    },
     archived: { type: Boolean, required: true, default: false },
   },
   { timestamps: true },
@@ -74,6 +90,7 @@ export function toClientProject(doc: ProjectDocLike): ProjectWire {
     estimatedHours: doc.estimatedHours ?? null,
     budgetAmount: doc.budgetAmount ?? null,
     budgetCurrency: doc.budgetCurrency ?? null,
+    idleBehavior: doc.idleBehavior ?? null,
     archived: doc.archived,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),

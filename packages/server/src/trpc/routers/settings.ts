@@ -1,6 +1,7 @@
 // IMPLEMENTED BY: server skeleton agent (complete — no stubs here)
 import {
   updateSettingsSchema,
+  type IdleSettings,
   type PomodoroSettings,
   type WorkspaceSettings,
 } from "@starter/shared";
@@ -31,6 +32,11 @@ export const settingsRouter = router({
         ...(input.pomodoro ?? {}),
       };
 
+      const idle: IdleSettings = {
+        ...current.idle,
+        ...(input.idle ?? {}),
+      };
+
       const next: Omit<WorkspaceSettings, "userId"> = {
         defaultHourlyRate: input.defaultHourlyRate ?? current.defaultHourlyRate,
         currency: input.currency ?? current.currency,
@@ -38,6 +44,7 @@ export const settingsRouter = router({
         timeFormat: input.timeFormat ?? current.timeFormat,
         durationFormat: input.durationFormat ?? current.durationFormat,
         pomodoro,
+        idle,
       };
 
       const updated = await Settings.findOneAndUpdate(

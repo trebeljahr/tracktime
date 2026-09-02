@@ -11,6 +11,8 @@
 import type {
   Client,
   DetailedFavorite,
+  IdleAnswer,
+  PendingIdle,
   Project,
   QuickStart,
   QuickStartItem,
@@ -42,6 +44,8 @@ export type PopupToBackground =
   /** Pin the given combination. Idempotent — pinning twice is one pin. */
   | { type: "favorite:add"; quick: QuickStart }
   | { type: "favorite:remove"; id: string }
+  /** The user's answer to the idle prompt the popup is showing. */
+  | { type: "idle:answer"; answer: IdleAnswer }
   /** Tasks are per-project, so they are fetched when a project is picked. */
   | { type: "tasks:for-project"; projectId: string | null }
   | { type: "client:create"; name: string }
@@ -88,6 +92,14 @@ export type BackgroundState = {
   recents: RecentEntry[];
   todaySec: number;
   syncStatus: SyncStatus;
+  /**
+   * An idle span waiting to be explained, or null.
+   *
+   * The service worker has no UI, so with the `ask` behaviour it detects the
+   * idleness, leaves the timer running and parks the question here for
+   * whenever the popup is next opened. Nothing is discarded in the meantime.
+   */
+  pendingIdle: PendingIdle | null;
 };
 
 export type BackgroundResponse =

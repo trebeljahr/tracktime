@@ -33,6 +33,7 @@ import {
   type SyncStatus,
   type Task,
   type TimeEntry,
+  type WorkspaceSettings,
 } from "@starter/core";
 import { chromeStorage, localStorageArea } from "../lib/chrome-storage";
 import type { SessionSource } from "../lib/messaging";
@@ -45,6 +46,7 @@ import {
 } from "../lib/session";
 import { clearWebSessionCookie, readWebSessionToken } from "../lib/web-session";
 import { renderBadge } from "./badge";
+import { noteRemoteActivity, resetIdleWatcher } from "./idle-state";
 
 /** The rebuildable half of the worker: config plus whatever it configures. */
 export type Runtime = {
@@ -89,6 +91,10 @@ let cachedClients: Client[] | null = null;
 let cachedTodaySec: number | null = null;
 let cachedFavorites: DetailedFavorite[] | null = null;
 let cachedRecents: RecentEntry[] | null = null;
+
+/** Workspace settings, for the idle policy. Dropped on `settings.changed`. */
+let cachedSettings: WorkspaceSettings | null = null;
+let settingsLookup: Promise<WorkspaceSettings | null> | null = null;
 
 /** Tasks are per-project, so the cache has to remember which project's. */
 let cachedTasks: { projectId: string; tasks: Task[] } | null = null;
@@ -276,6 +282,8 @@ export async function reload(): Promise<Runtime> {
   cachedTodaySec = null;
   cachedFavorites = null;
   cachedRecents = null;
+  cachedSettings = null;
+  settingsLookup = null;
   cachedWebUrl = null;
   cachedEmail = null;
   return ensureReady();
@@ -302,6 +310,8 @@ const setSyncStatus = (next: SyncStatus): void => {
   cachedTodaySec = null;
   cachedFavorites = null;
   cachedRecents = null;
+  cachedSettings = null;
+  settingsLookup = null;
 
   // A socket that just came up is the first reliable sign the network is back.
   // Nothing awaits this, so it must swallow its own failure — the next
@@ -358,6 +368,8 @@ const applyEvent = (event: SyncEvent): void => {
       cachedFavorites = null;
       return;
     case "settings.changed":
+      cachedSettings = null;
+      settingsLookup = null;
       return;
   }
 };
@@ -377,6 +389,10 @@ const connectSync = (current: Runtime): void => {
       // Our own write, already applied locally — re-applying a stale copy of
       // it would flicker the badge back to what it was a moment ago.
       if (originId === ORIGIN_ID) return;
+      // Somebody just did something on another device, so the person was at a
+      // keyboard at this instant. Idle spans are measured from here, which is
+      // what stops a browser left open from pausing work done elsewhere.
+      void noteRemoteActivity(Date.now()).catch(() => undefined);
       applyEvent(event);
       void renderBadge(cachedRunning?.entry ?? null);
     },
@@ -400,6 +416,38 @@ export const getCachedProjects = (): Project[] | null => cachedProjects;
 export const setCachedProjects = (projects: Project[]): void => {
   cachedProjects = projects;
 };
+
+export const getCachedSettings = (): WorkspaceSettings | null => cachedSettings;
+
+/**
+ * Workspace settings, fetched once per worker and kept until a
+ * `settings.changed` event says otherwise.
+ *
+ * Returns null rather than throwing: idle detection is the only caller, and a
+ * settings read that fails must leave the timer alone rather than take a
+ * decision on a guess.
+ */
+export async function resolveSettings(): Promise<WorkspaceSettings | null> {
+  const current = await ensureReady();
+  if (!current.session) return null;
+  if (cachedSettings) return cachedSettings;
+  if (settingsLookup) return settingsLookup;
+
+  const lookup = current.api
+    .query<WorkspaceSettings>("settings.get")
+    .then((settings) => {
+      cachedSettings = settings;
+      return settings;
+    })
+    .catch(() => null);
+
+  settingsLookup = lookup;
+  try {
+    return await lookup;
+  } finally {
+    if (settingsLookup === lookup) settingsLookup = null;
+  }
+}
 
 export const getCachedTodaySec = (): number | null => cachedTodaySec;
 
@@ -598,6 +646,8 @@ export async function forgetSession(
   // and on every socket reconnect — so the rows must not outlive the token.
   await getOfflineQueue().clear();
   await forgetOptimisticRunning();
+  // The watcher's ownership claim names an entry in the account being left.
+  await resetIdleWatcher();
 
   // Deliberate on an explicit sign-out: signing out is synced, so the web app's
   // cookie goes too. NOT done when the server merely rejected the token — that

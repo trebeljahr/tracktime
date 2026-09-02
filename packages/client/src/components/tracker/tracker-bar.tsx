@@ -19,6 +19,7 @@ import {
   usePomodoro,
 } from "@/components/tracker/use-pomodoro";
 import { useEntryMutations } from "@/components/tracker/use-entry-mutations";
+import { useIdleGuard } from "@/components/tracker/use-idle-guard";
 import { useOfflineQueue } from "@/hooks/use-offline-queue";
 import { useRunningEntry } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
@@ -82,6 +83,10 @@ export function TrackerBar(): React.JSX.Element {
     config: format.settings.pomodoro,
     running: isRunning,
   });
+
+  // Mounted here rather than in the app shell so the detector lives exactly as
+  // long as the screen that owns the timer.
+  useIdleGuard();
 
   // Live elapsed time in the tab title, so a backgrounded tab still shows it.
   React.useEffect(() => {

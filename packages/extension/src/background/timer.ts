@@ -16,6 +16,7 @@ import {
 } from "@starter/core";
 import { renderBadge } from "./badge";
 import { BackgroundError } from "./errors";
+import { noteLocalStart, noteLocalStop } from "./idle-state";
 import {
   ensureReady,
   enqueueOffline,
@@ -84,7 +85,9 @@ export async function startTimer(
    * asked for — and would make a queued replay disagree with the live call.
    */
   billable?: boolean,
-): Promise<void> {
+  /** ISO instant to open the entry at. Idle resume passes the return time. */
+  startIso?: string,
+): Promise<TimeEntry | null> {
   const current = await ensureReady();
   if (!current.session) throw notSignedIn();
 
@@ -93,7 +96,7 @@ export async function startTimer(
     projectId,
     taskId,
     billable: billable ?? billableDefaultFor(projectId),
-    start: new Date().toISOString(),
+    start: startIso ?? new Date().toISOString(),
     // Its own source, not "api": an entry made from the toolbar stays
     // traceable back to the toolbar.
     source: "extension",
@@ -106,8 +109,7 @@ export async function startTimer(
   // Drain first. A live start sent ahead of older queued mutations would be
   // stopped again the moment they replay.
   if ((await flushQueue()) > 0) {
-    await queueStart(input, current.session.userId ?? "");
-    return;
+    return queueStart(input, current.session.userId ?? "");
   }
 
   try {
@@ -116,20 +118,24 @@ export async function startTimer(
     // Starting stops whatever was running, so the entry log — and with it the
     // derived recents list — has moved on.
     invalidateRecents();
+    // This device opened the entry, so it is the one allowed to act on its own
+    // idle signal for it.
+    await noteLocalStart(entry.id, Date.parse(input.start));
     await renderBadge(entry);
+    return entry;
   } catch (error) {
     // A server rejection (validation, conflict, expired token) means the
     // mutation was seen and refused — replaying it would only be refused
     // again, so it goes back to the popup instead of into the queue.
     if (!isTransportFailure(error)) throw error;
-    await queueStart(input, current.session.userId ?? "");
+    return queueStart(input, current.session.userId ?? "");
   }
 }
 
 const queueStart = async (
   input: OfflineStartInput,
   ownerId: string,
-): Promise<void> => {
+): Promise<TimeEntry> => {
   const tempId = createTempId();
   await enqueueOffline("entries.start", input, tempId);
   const entry = optimisticEntry(input, tempId, ownerId);
@@ -137,10 +143,17 @@ const queueStart = async (
   // On disk as well as in memory: the queued row outlives this worker, so the
   // running timer it implies has to outlive it too.
   await rememberOptimisticRunning(entry);
+  // Claimed against the temp id: a timer started offline still belongs to this
+  // device before the server has named it.
+  await noteLocalStart(tempId, Date.parse(input.start));
   await renderBadge(entry);
+  return entry;
 };
 
-export async function stopTimer(): Promise<void> {
+export async function stopTimer(
+  /** ISO instant to end at. Idle detection passes where input stopped. */
+  endIso?: string,
+): Promise<void> {
   const current = await ensureReady();
   if (!current.session) throw notSignedIn();
 
@@ -148,9 +161,14 @@ export async function stopTimer(): Promise<void> {
   // already-replayed start opened, which is the only entry that can still be
   // running by then. Pinning an id would name an entry that may not exist.
   const input: OfflineStopInput = {
-    end: new Date().toISOString(),
+    end: endIso ?? new Date().toISOString(),
     originId: ORIGIN_ID,
   };
+
+  // Only a stop the user asked for releases the watcher. Idle truncation stops
+  // through this same function while the watcher is holding a resume, and
+  // releasing there would drop it on the floor.
+  if (endIso === undefined) await noteLocalStop(Date.now());
 
   if ((await flushQueue()) > 0) {
     await queueStop(input);
