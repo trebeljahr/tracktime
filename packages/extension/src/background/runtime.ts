@@ -32,6 +32,7 @@ import {
   type SyncClient,
   type SyncEvent,
   type SyncStatus,
+  type Tag,
   type Task,
   type TimeEntry,
   type ResolvedSettings,
@@ -89,6 +90,7 @@ let runningLookup: Promise<TimeEntry | null> | null = null;
 
 let cachedProjects: Project[] | null = null;
 let cachedClients: Client[] | null = null;
+let cachedTags: Tag[] | null = null;
 let cachedTodaySec: number | null = null;
 let cachedFavorites: DetailedFavorite[] | null = null;
 let cachedRecents: RecentEntry[] | null = null;
@@ -279,6 +281,7 @@ export async function reload(): Promise<Runtime> {
   runningLookup = null;
   cachedProjects = null;
   cachedClients = null;
+  cachedTags = null;
   cachedTasks = null;
   cachedTodaySec = null;
   cachedFavorites = null;
@@ -307,6 +310,7 @@ const setSyncStatus = (next: SyncStatus): void => {
   runningLookup = null;
   cachedProjects = null;
   cachedClients = null;
+  cachedTags = null;
   cachedTasks = null;
   cachedTodaySec = null;
   cachedFavorites = null;
@@ -360,6 +364,7 @@ const applyEvent = (event: SyncEvent): void => {
     case "catalog.changed":
       if (event.scope === "project") cachedProjects = null;
       if (event.scope === "client") cachedClients = null;
+      if (event.scope === "tag") cachedTags = null;
       if (event.scope === "task") cachedTasks = null;
       // A renamed or deleted project changes what a pin is labelled with.
       cachedFavorites = null;
@@ -454,6 +459,12 @@ export const getCachedTodaySec = (): number | null => cachedTodaySec;
 
 export const setCachedTodaySec = (seconds: number): void => {
   cachedTodaySec = seconds;
+};
+
+export const getCachedTags = (): Tag[] | null => cachedTags;
+
+export const setCachedTags = (tags: Tag[]): void => {
+  cachedTags = tags;
 };
 
 export const getCachedClients = (): Client[] | null => cachedClients;

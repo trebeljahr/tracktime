@@ -26,6 +26,8 @@ type FormValues = {
   /** Undefined when the dropdown was not rendered — nothing to pick. */
   projectId?: string;
   taskId?: string;
+  /** Undefined when the picker was not rendered — no tags exist yet. */
+  tagIds?: string[];
   billable: boolean;
   start: Date | null;
   end: Date | null;
@@ -43,9 +45,11 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
   const { pop } = useNavigation();
   const [projectId, setProjectId] = useState(entry.projectId ?? NONE);
   const [taskId, setTaskId] = useState(entry.taskId ?? NONE);
+  const [tagIds, setTagIds] = useState<string[]>(entry.tagIds);
   const [submitting, setSubmitting] = useState(false);
 
   const projects = useApi("projects", (api) => api.projects());
+  const tags = useApi("tags", (api) => api.tags());
   const tasks = useApi(
     `tasks:${projectId}`,
     (api) => (projectId === NONE ? Promise.resolve([]) : api.tasks(projectId)),
@@ -60,6 +64,7 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
   // Dropdowns render only when they have something to offer — see start-timer.
   const hasProjects = (projects.data ?? []).length > 0;
   const hasTasks = projectId !== NONE && (tasks.data ?? []).length > 0;
+  const hasTags = (tags.data ?? []).length > 0;
 
   const submit = async (values: FormValues): Promise<void> => {
     if (values.start && values.end && values.end <= values.start) {
@@ -78,6 +83,9 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
         description: values.description.trim(),
         projectId: orNull(values.projectId),
         taskId: orNull(values.taskId),
+        // Always sent, so clearing every tag in the picker actually clears
+        // them rather than reading as "leave the tags alone".
+        tagIds: values.tagIds ?? [],
         billable: values.billable,
         start: (values.start ?? new Date(entry.start)).toISOString(),
         end: values.end ? values.end.toISOString() : null,
@@ -95,7 +103,9 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
 
   return (
     <Form
-      isLoading={projects.isLoading || tasks.isLoading || submitting}
+      isLoading={
+        projects.isLoading || tasks.isLoading || tags.isLoading || submitting
+      }
       actions={
         <ActionPanel>
           <Action.SubmitForm
@@ -157,6 +167,23 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
             />
           ))}
         </Form.Dropdown>
+      ) : null}
+      {hasTags ? (
+        <Form.TagPicker
+          id="tagIds"
+          title="Tags"
+          value={tagIds}
+          onChange={setTagIds}
+        >
+          {(tags.data ?? []).map((tag) => (
+            <Form.TagPicker.Item
+              key={tag.id}
+              value={tag.id}
+              title={tag.name}
+              icon={{ source: Icon.CircleFilled, tintColor: tag.color }}
+            />
+          ))}
+        </Form.TagPicker>
       ) : null}
       <Form.Checkbox
         id="billable"

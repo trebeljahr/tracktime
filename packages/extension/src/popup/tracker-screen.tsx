@@ -13,6 +13,7 @@ import {
 import type { BackgroundState } from "../lib/messaging";
 import { ApiUrlEditor } from "./api-url-editor";
 import { Combobox, type ComboboxOption } from "./combobox";
+import { TagPicker } from "./tag-picker";
 import { IdlePanel } from "./idle-panel";
 import { Menu } from "./menu";
 import { QuickStartList } from "./quick-start-list";
@@ -28,6 +29,7 @@ export type TrackerScreenProps = {
     taskId: string | null,
     /** Explicit for a quick start; omitted lets the project default decide. */
     billable?: boolean,
+    tagIds?: string[],
   ) => Promise<boolean>;
   onStop: () => Promise<boolean>;
   onPinFavorite: (quick: QuickStart) => Promise<boolean>;
@@ -39,6 +41,7 @@ export type TrackerScreenProps = {
   /** Loads the task list for a project into the worker's snapshot. */
   onSelectProject: (projectId: string | null) => Promise<boolean>;
   onCreateClient: (name: string) => Promise<boolean>;
+  onCreateTag: (name: string) => Promise<boolean>;
   onCreateProject: (name: string, clientId: string | null) => Promise<boolean>;
   onCreateTask: (projectId: string, name: string) => Promise<boolean>;
 };
@@ -75,6 +78,7 @@ const provisionalEntry = (
   description: string,
   projectId: string | null,
   taskId: string | null,
+  tagIds: string[] = [],
 ): TimeEntry => {
   const now = new Date().toISOString();
   return {
@@ -93,7 +97,7 @@ const provisionalEntry = (
     source: "extension",
     timeZone: deviceTimeZone(),
     runaway: null,
-    tagIds: [],
+    tagIds,
     invoiceId: null,
     createdAt: now,
     updatedAt: now,
@@ -148,12 +152,14 @@ export function TrackerScreen({
   onSaveApiUrl,
   onSelectProject,
   onCreateClient,
+  onCreateTag,
   onCreateProject,
   onCreateTask,
 }: TrackerScreenProps): JSX.Element {
   const [description, setDescription] = useState("");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [tagIds, setTagIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [showApiUrl, setShowApiUrl] = useState(false);
 
@@ -199,6 +205,10 @@ export function TrackerScreen({
     if (!created) return;
     setPendingProject(null);
     setPendingClientId(null);
+  };
+
+  const createTag = async (name: string): Promise<void> => {
+    await onCreateTag(name);
   };
 
   const createTask = async (name: string): Promise<void> => {
@@ -251,10 +261,17 @@ export function TrackerScreen({
     if (busy) return;
     setBusy(true);
     setOptimistic({
-      running: provisionalEntry(description.trim(), projectId, taskId),
+      running: provisionalEntry(description.trim(), projectId, taskId, tagIds),
     });
 
-    const started = await onStart(description.trim(), projectId, taskId);
+    const started = await onStart(
+      description.trim(),
+      projectId,
+      taskId,
+      // The form has no billable toggle, so the project's default decides.
+      undefined,
+      tagIds,
+    );
 
     // Either way the override goes: on success the worker's snapshot is the
     // better truth, on failure dropping it reverts the UI to what is real.
@@ -263,6 +280,9 @@ export function TrackerScreen({
     if (started) {
       setDescription("");
       setTaskId(null);
+      // Project and tags survive a start on purpose — the next block of work
+      // is usually the same kind of work, and re-picking every label would
+      // undo the point of a one-click toolbar.
     }
   };
 
@@ -425,6 +445,14 @@ export function TrackerScreen({
               onCreate={createTask}
               createLabel={(name) => `Create task “${name}”`}
               testId="tracker-task"
+            />
+
+            <TagPicker
+              tags={state.tags}
+              value={tagIds}
+              onChange={setTagIds}
+              onCreate={createTag}
+              testId="tracker-tags"
             />
 
             <button

@@ -18,6 +18,7 @@ import type {
   QuickStartItem,
   RecentEntry,
   SyncStatus,
+  Tag,
   Task,
   TimeEntry,
 } from "@starter/core";
@@ -39,6 +40,12 @@ export type PopupToBackground =
        * change what a pin means.
        */
       billable?: boolean;
+      /**
+       * Tags to open the entry with. A quick start passes the ones the
+       * favorite or the recent already carries, for the same reason it passes
+       * `billable` — they are part of what is being repeated.
+       */
+      tagIds?: string[];
     }
   | { type: "timer:stop" }
   /** Pin the given combination. Idempotent — pinning twice is one pin. */
@@ -49,6 +56,7 @@ export type PopupToBackground =
   /** Tasks are per-project, so they are fetched when a project is picked. */
   | { type: "tasks:for-project"; projectId: string | null }
   | { type: "client:create"; name: string }
+  | { type: "tag:create"; name: string }
   | { type: "project:create"; name: string; clientId: string | null }
   | { type: "task:create"; projectId: string; name: string }
   | { type: "config:set-api-url"; apiUrl: string };
@@ -73,6 +81,8 @@ export type BackgroundState = {
   running: TimeEntry | null;
   projects: Project[];
   clients: Client[];
+  /** Every unarchived tag — tags are not scoped to a project. */
+  tags: Tag[];
   /** Tasks for whichever project the popup last asked about. */
   tasks: Task[];
   /** Which project `tasks` belongs to, so the popup can spot a stale list. */

@@ -231,6 +231,51 @@ body {
   flex: none;
 }
 
+/* Tag chips — the picker's selection above it, and the running entry's own. */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 140px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: default;
+}
+
+/* Only the removable chips are buttons, so only they take a pointer. */
+button.tag {
+  cursor: pointer;
+}
+
+.tag__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag__x {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+}
+
+button.tag:hover .tag__x {
+  color: inherit;
+}
+
 .today {
   display: flex;
   align-items: baseline;

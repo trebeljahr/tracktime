@@ -15,6 +15,7 @@ import {
   type Project,
   type QuickStart,
   type RecentEntry,
+  type Tag,
   type Task,
   type TimeEntry,
   type ResolvedSettings,
@@ -42,10 +43,13 @@ export type ProjectWithStats = Project & {
 
 export type TaskWithStats = Task & { totalSec: number };
 
+export type TagWithStats = Tag & { entryCount: number; totalSec: number };
+
 export type StartInput = {
   description?: string;
   projectId?: string | null;
   taskId?: string | null;
+  tagIds?: string[];
   billable?: boolean;
 };
 
@@ -54,6 +58,8 @@ export type UpdateInput = {
   description?: string;
   projectId?: string | null;
   taskId?: string | null;
+  /** Absent leaves the tags alone; `[]` clears them. */
+  tagIds?: string[];
   billable?: boolean;
   start?: string;
   end?: string | null;
@@ -96,6 +102,8 @@ export type Tracktime = {
   remove(id: string): Promise<{ success: true; id: string }>;
   projects(): Promise<ProjectWithStats[]>;
   tasks(projectId: string): Promise<TaskWithStats[]>;
+  /** Tags are not scoped to a project, so this takes no argument. */
+  tags(): Promise<TagWithStats[]>;
   settings(): Promise<ResolvedSettings>;
 };
 
@@ -167,6 +175,9 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
       projectId,
       includeArchived: false,
     }),
+
+  tags: () =>
+    client.query<TagWithStats[]>("tags.list", { includeArchived: false }),
 
   settings: () => client.query<ResolvedSettings>("settings.get"),
 });

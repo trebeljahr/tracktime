@@ -61,19 +61,13 @@ type MutationContext = {
   queued?: boolean;
 };
 
-/**
- * The offline payloads plus the tags the picker supplied.
- *
- * `@starter/core`'s `OfflineStartInput`/`OfflineCreateInput`/`OfflineUpdateInput`
- * predate tags and do not carry `tagIds`. The field rides along here rather
- * than being dropped: the tRPC input schemas accept it, and a queued row is
- * stored and replayed as plain JSON, so a tag applied while offline survives
- * the replay. Widening the payload types in core would make this a plain
- * `OfflineStartInput` again.
- */
-type StartInput = OfflineStartInput & { tagIds?: string[] };
-type CreateInput = OfflineCreateInput & { tagIds?: string[] };
-type UpdateInput = OfflineUpdateInput & { tagIds?: string[] };
+// The offline payload types in `@starter/core` now carry `tagIds` themselves,
+// so these are the plain payloads — the local intersection that widened them
+// here is gone, and the extension replays tagged rows through the same
+// contract rather than only this client understanding them.
+type StartInput = OfflineStartInput;
+type CreateInput = OfflineCreateInput;
+type UpdateInput = OfflineUpdateInput;
 
 const byStartDesc = (a: DetailedEntry, b: DetailedEntry): number => {
   const delta = Date.parse(b.start) - Date.parse(a.start);

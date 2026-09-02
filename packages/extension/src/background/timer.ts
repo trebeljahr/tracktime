@@ -74,9 +74,9 @@ const optimisticEntry = (
   timeZone: input.timeZone,
   // Server-owned: only the runaway guard ever writes it.
   runaway: null,
-  // The popup cannot pick tags yet, and nothing is invoiced at the moment it
-  // starts — both are filled in by the server echo if they ever change.
-  tagIds: [],
+  tagIds: input.tagIds ?? [],
+  // Nothing is invoiced at the moment a timer starts; the server echo fills
+  // this in if it ever changes.
   invoiceId: null,
   createdAt: input.start,
   updatedAt: input.start,
@@ -97,6 +97,8 @@ export async function startTimer(
   billable?: boolean,
   /** ISO instant to open the entry at. Idle resume passes the return time. */
   startIso?: string,
+  /** Tags to open the entry with; a quick start passes the ones it carries. */
+  tagIds: string[] = [],
 ): Promise<TimeEntry | null> {
   const current = await ensureReady();
   if (!current.session) throw notSignedIn();
@@ -105,6 +107,7 @@ export async function startTimer(
     description,
     projectId,
     taskId,
+    tagIds,
     billable: billable ?? billableDefaultFor(projectId),
     start: startIso ?? new Date().toISOString(),
     // Its own source, not "api": an entry made from the toolbar stays

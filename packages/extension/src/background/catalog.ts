@@ -12,16 +12,44 @@
  * event it triggers comes back tagged as ours and is ignored rather than
  * re-applied.
  */
-import type { ApiClient, Client, Project, Task } from "@starter/core";
+import type { ApiClient, Client, Project, Tag, Task } from "@starter/core";
 import {
   ensureReady,
   ORIGIN_ID,
   getCachedClients,
+  getCachedTags,
+  setCachedTags,
   getCachedTasks,
   setCachedClients,
   setCachedProjects,
   setCachedTasks,
 } from "./runtime";
+
+/**
+ * Tags are unscoped — they hang off the entry, not off a project — so unlike
+ * tasks they can be fetched once and offered whatever else is picked.
+ *
+ * `tags.list` also answers with per-tag roll-ups. They are simply ignored:
+ * typing the result as `Tag` reads the fields the popup renders and leaves the
+ * rest alone, the same way the project and client fetches do.
+ */
+export const fetchTags = async (api: ApiClient): Promise<Tag[]> => {
+  const tags = await api.query<Tag[]>("tags.list", { includeArchived: false });
+  setCachedTags(tags);
+  return tags;
+};
+
+export async function createTag(name: string): Promise<Tag> {
+  const current = await ensureReady();
+  const created = await current.api.mutate<Tag>("tags.create", {
+    name: name.trim(),
+    originId: ORIGIN_ID,
+  });
+  // Appended rather than invalidated: the popup is mid-flow and about to
+  // render this list, and a refetch would blank the picker for a beat.
+  setCachedTags([...(getCachedTags() ?? []), created]);
+  return created;
+}
 
 export const fetchProjects = async (api: ApiClient): Promise<Project[]> => {
   const projects = await api.query<Project[]>("projects.list", {

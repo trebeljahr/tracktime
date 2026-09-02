@@ -26,10 +26,21 @@ export const isTempId = (id: string): boolean => id.startsWith(TEMP_ID_PREFIX);
 
 // ── payloads ─────────────────────────────────────────────────────────
 
+/**
+ * Tags carried by a queued entry mutation.
+ *
+ * Optional, and deliberately so: rows written by a build that predates tags
+ * decode without the field, and replaying one must not fail. The server reads
+ * an absent list as "no tags" on start/create and as "leave them alone" on
+ * update — exactly what those old rows meant when they were written.
+ */
+export type OfflineTagIds = string[] | undefined;
+
 export type OfflineStartInput = {
   description: string;
   projectId: string | null;
   taskId: string | null;
+  tagIds?: OfflineTagIds;
   billable: boolean;
   start: string;
   source: EntrySource;
@@ -50,6 +61,7 @@ export type OfflineCreateInput = {
   description: string;
   projectId: string | null;
   taskId: string | null;
+  tagIds?: OfflineTagIds;
   billable: boolean;
   start: string;
   end: string;
@@ -63,6 +75,8 @@ export type OfflineUpdateInput = {
   description?: string;
   projectId?: string | null;
   taskId?: string | null;
+  /** Absent leaves the tags alone; `[]` clears them. */
+  tagIds?: OfflineTagIds;
   billable?: boolean;
   start?: string;
   end?: string | null;

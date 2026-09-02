@@ -51,9 +51,14 @@ const dayTotal = (entries: DetailedEntry[], nowMs: number): number =>
  * accessory still reserves a slot, which is what makes a Raycast list look
  * ragged instead of aligned.
  */
+/** At most this many tag chips per row; the rest collapse into "+N". */
+const MAX_TAG_ACCESSORIES = 2;
+
 const accessoriesFor = (
   entry: DetailedEntry,
   nowMs: number,
+  /** Tag names by id. Empty until `tags.list` settles, which only delays chips. */
+  tagNames: ReadonlyMap<string, string>,
 ): List.Item.Accessory[] => {
   const running = entry.end === null;
   const accessories: List.Item.Accessory[] = [];
@@ -62,6 +67,28 @@ const accessoriesFor = (
     accessories.push({
       icon: { source: Icon.BankNote, tintColor: Color.Green },
       tooltip: "Billable",
+    });
+  }
+
+  // `DetailedEntry` carries only `tagIds`, so the names come from the tag
+  // catalog this command already loads. An id it cannot name is skipped
+  // rather than shown raw — an archived tag is absent from that list.
+  const named = entry.tagIds
+    .map((id) => tagNames.get(id))
+    .filter((name): name is string => name !== undefined);
+
+  // Capped: a Raycast row has a fixed width, and an entry with six tags would
+  // push the clock range and the duration off the end of it.
+  for (const name of named.slice(0, MAX_TAG_ACCESSORIES)) {
+    accessories.push({ tag: { value: name, color: Color.SecondaryText } });
+  }
+  if (named.length > MAX_TAG_ACCESSORIES) {
+    accessories.push({
+      tag: {
+        value: `+${named.length - MAX_TAG_ACCESSORIES}`,
+        color: Color.SecondaryText,
+      },
+      tooltip: named.join(", "),
     });
   }
 
@@ -93,6 +120,11 @@ export default function Entries(): React.JSX.Element {
       });
       return entries;
     },
+  );
+
+  const tags = useApi("tags", (api) => api.tags());
+  const tagNames = new Map(
+    (tags.data ?? []).map((tag) => [tag.id, tag.name] as const),
   );
 
   if (signedOut) return <SignedOutView />;
@@ -169,7 +201,7 @@ export default function Entries(): React.JSX.Element {
                     .filter(Boolean)
                     .join(" › ") || undefined
                 }
-                accessories={accessoriesFor(entry, now)}
+                accessories={accessoriesFor(entry, now, tagNames)}
                 actions={
                   <ActionPanel>
                     <ActionPanel.Section>

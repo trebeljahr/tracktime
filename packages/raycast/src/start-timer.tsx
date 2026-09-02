@@ -22,6 +22,8 @@ type FormValues = {
   /** Undefined when the dropdown was not rendered — no projects to pick. */
   projectId?: string;
   taskId?: string;
+  /** Undefined when the picker was not rendered — no tags exist yet. */
+  tagIds?: string[];
   billable: boolean;
 };
 
@@ -34,9 +36,12 @@ export default function StartTimer(): React.JSX.Element {
   const [projectId, setProjectId] = useState<string>(NONE);
   const [billable, setBillable] = useState(false);
   const [taskId, setTaskId] = useState<string>(NONE);
+  const [tagIds, setTagIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const projects = useApi("projects", (api) => api.projects());
+  // Unscoped, unlike tasks: a tag belongs to the workspace, not to a project.
+  const tags = useApi("tags", (api) => api.tags());
   const tasks = useApi(
     `tasks:${projectId}`,
     (api) => (projectId === NONE ? Promise.resolve([]) : api.tasks(projectId)),
@@ -58,6 +63,7 @@ export default function StartTimer(): React.JSX.Element {
   // Both of these render only once they have something to offer.
   const hasProjects = (projects.data ?? []).length > 0;
   const hasTasks = projectId !== NONE && (tasks.data ?? []).length > 0;
+  const hasTags = (tags.data ?? []).length > 0;
 
   const submit = async (values: FormValues): Promise<void> => {
     setSubmitting(true);
@@ -67,6 +73,7 @@ export default function StartTimer(): React.JSX.Element {
         description: values.description.trim(),
         projectId: orNull(values.projectId),
         taskId: orNull(values.taskId),
+        tagIds: values.tagIds ?? [],
         billable: values.billable,
       });
       await refreshMenuBar();
@@ -85,7 +92,9 @@ export default function StartTimer(): React.JSX.Element {
 
   return (
     <Form
-      isLoading={projects.isLoading || tasks.isLoading || submitting}
+      isLoading={
+        projects.isLoading || tasks.isLoading || tags.isLoading || submitting
+      }
       actions={
         <ActionPanel>
           <Action.SubmitForm
@@ -158,6 +167,24 @@ export default function StartTimer(): React.JSX.Element {
             />
           ))}
         </Form.Dropdown>
+      ) : null}
+      {hasTags ? (
+        <Form.TagPicker
+          id="tagIds"
+          title="Tags"
+          value={tagIds}
+          onChange={setTagIds}
+          info="Tags cut across projects — an entry can carry several."
+        >
+          {(tags.data ?? []).map((tag) => (
+            <Form.TagPicker.Item
+              key={tag.id}
+              value={tag.id}
+              title={tag.name}
+              icon={{ source: Icon.CircleFilled, tintColor: tag.color }}
+            />
+          ))}
+        </Form.TagPicker>
       ) : null}
       <Form.Checkbox
         id="billable"

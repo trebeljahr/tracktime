@@ -22,6 +22,7 @@ import { watchWebSession } from "../lib/web-session";
 import { renderBadge } from "./badge";
 import {
   createClient,
+  createTag,
   createProject,
   createTask,
   selectProjectTasks,
@@ -195,6 +196,9 @@ const apply = async (message: PopupToBackground): Promise<void> => {
         message.projectId,
         message.taskId,
         message.billable,
+        // No explicit start instant — that argument is the idle resume's.
+        undefined,
+        message.tagIds,
       );
       return;
     case "timer:stop":
@@ -210,6 +214,9 @@ const apply = async (message: PopupToBackground): Promise<void> => {
       return selectProjectTasks(message.projectId);
     case "client:create":
       await createClient(message.name);
+      return;
+    case "tag:create":
+      await createTag(message.name);
       return;
     case "project:create":
       await createProject(message.name, message.clientId);

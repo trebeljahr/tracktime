@@ -13,7 +13,7 @@
  */
 import { mergeQuickStarts, type ApiClient, type TimeEntry } from "@starter/core";
 import type { BackgroundState } from "../lib/messaging";
-import { fetchClients, fetchProjects, fetchTasks } from "./catalog";
+import { fetchClients, fetchProjects, fetchTags, fetchTasks } from "./catalog";
 import { fetchFavorites, fetchRecents } from "./favorites";
 import { pendingIdle } from "./idle-state";
 import {
@@ -22,6 +22,7 @@ import {
   getCachedClients,
   getCachedFavorites,
   getCachedProjects,
+  getCachedTags,
   getCachedRecents,
   getCachedTasks,
   getCachedTasksProjectId,
@@ -57,6 +58,7 @@ const signedOutState = (
   running: null,
   projects: [],
   clients: [],
+  tags: [],
   tasks: [],
   tasksProjectId: null,
   quickStarts: [],
@@ -142,6 +144,7 @@ export async function buildState(): Promise<BackgroundState> {
     email,
     projects,
     clients,
+    tags,
     tasks,
     todaySec,
     favorites,
@@ -151,6 +154,7 @@ export async function buildState(): Promise<BackgroundState> {
     softRead(resolveEmail, current.session.email),
     softRead(() => fetchProjects(current.api), getCachedProjects() ?? []),
     softRead(() => fetchClients(current.api), getCachedClients() ?? []),
+    softRead(() => fetchTags(current.api), getCachedTags() ?? []),
     softRead(
       () => fetchTasks(current.api, tasksProjectId),
       getCachedTasks(tasksProjectId) ?? [],
@@ -179,6 +183,7 @@ export async function buildState(): Promise<BackgroundState> {
     running,
     projects,
     clients,
+    tags,
     tasks,
     tasksProjectId,
     // Merged here rather than in the popup: the worker owns all state, and

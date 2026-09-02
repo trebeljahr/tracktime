@@ -99,6 +99,11 @@ export function App(): JSX.Element {
     [send],
   );
 
+  const createTag = useCallback(
+    (name: string): Promise<boolean> => send({ type: "tag:create", name }),
+    [send],
+  );
+
   const createClient = useCallback(
     (name: string): Promise<boolean> => send({ type: "client:create", name }),
     [send],
@@ -163,13 +168,14 @@ export function App(): JSX.Element {
         <TrackerScreen
           state={state}
           error={error}
-          onStart={(description, projectId, taskId, billable) =>
+          onStart={(description, projectId, taskId, billable, tagIds) =>
             send({
               type: "timer:start",
               description,
               projectId,
               taskId,
               billable,
+              tagIds,
             })
           }
           onStop={() => send({ type: "timer:stop" })}
@@ -180,6 +186,7 @@ export function App(): JSX.Element {
           onSaveApiUrl={saveApiUrl}
           onSelectProject={selectProject}
           onCreateClient={createClient}
+          onCreateTag={createTag}
           onCreateProject={createProject}
           onCreateTask={createTask}
         />
