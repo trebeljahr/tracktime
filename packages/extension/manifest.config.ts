@@ -31,8 +31,8 @@ export type BuildTarget = {
 
 export const BUILD_TARGETS: Record<BuildMode, BuildTarget> = {
   development: {
-    // The port `pnpm run dev:fixed` pins. `dev` picks a random API port, which
-    // is what the popup's runtime override is for.
+    // The API port `pnpm run dev` pins. A git worktree runs on random ports
+    // instead, which is what the popup's runtime override is for.
     apiUrl: "http://localhost:5159",
     name: "tracktime (dev)",
     hostPermissions: ["http://localhost/*", "http://127.0.0.1/*"],

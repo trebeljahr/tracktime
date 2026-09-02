@@ -23,8 +23,8 @@ Worth binding to hotkeys: **Toggle Timer** (⌥T works well) and **Start Timer**
 2. Set **API URL** and **Web App URL** in the extension preferences only if you
    are not on the default deployment. Leaving them empty follows the build: a
    `ray build` bundle talks to the deployed hosts, a `ray develop` one talks to
-   `http://localhost:5159` / `http://localhost:6477` — the ports
-   `pnpm run dev:fixed` pins.
+   `http://localhost:5159` / `http://localhost:3392` — the ports `pnpm run dev`
+   pins. (A git worktree runs on random ports; set the preferences for that.)
 
 There is no API key to mint or paste. Raycast signs in through the RFC 8628
 device flow and keeps the resulting better-auth **session token** in Raycast's

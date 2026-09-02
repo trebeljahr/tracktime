@@ -23,8 +23,8 @@ pnpm install
 pnpm run dev:infra
 
 # Start development servers
-pnpm run dev         # random ports (for agents/worktrees)
-pnpm run dev:fixed   # fixed ports (client=3000, server=5000)
+pnpm run dev         # pinned ports (client=3392, server=5159, docs=4000)
+pnpm run dev:auto    # random ports (for agents/worktrees)
 ```
 
 ## Configuration

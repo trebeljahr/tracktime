@@ -68,27 +68,38 @@ such as `hatchkit destroy <project> --recipe`, `hatchkit gh-pages --undo
 pnpm install                          # install all dependencies
 pnpm run dev:infra                    # start MongoDB, Redis, local S3 (Docker, one-time)
 pnpm run seed:assets                  # populate local S3 from seed/assets/ (idempotent)
-pnpm run dev                          # start server + client (client on 3392)
+pnpm run dev                          # client 3392, server 5159, docs 4000
 pnpm run dev:auto                     # same, but every port auto-picked
-pnpm run dev:fixed                    # start on fixed ports (client=6477, server=5159)
+pnpm run dev:fixed                    # the pinned ports, or fail — never a fallback
 ```
 
 Two dev commands, because the two callers want opposite things:
 
-- **`pnpm run dev`** serves the client on **port 3392**, hardcoded as
-  `DEV_CLIENT_PORT` in `scripts/dev.mjs`. The origin never moves, so password
-  managers, saved logins and bookmarks keep working. The API and docs ports are
-  still auto-picked from the ephemeral range — nothing types those.
+- **`pnpm run dev`** pins **client 3392, API 5159, docs 4000** (`DEV_*_PORT` in
+  `scripts/dev.mjs`). The origins never move, so password managers, saved logins
+  and bookmarks keep working — and so do the clients that bake the API URL in at
+  build time (browser extension, Raycast, desktop/mobile), none of which can
+  follow a port that changes per run.
 - **`pnpm run dev:auto`** auto-picks every port. Use it for agents and for any
-  second instance, so nothing fights over 3392.
+  second instance, so nothing fights over the pinned three.
 
 `pnpm run dev` inside a git worktree behaves like `dev:auto` automatically, so
-several agents can run side by side without stepping on the main checkout.
+several agents can run side by side without stepping on the main checkout. A
+worktree therefore does NOT serve the ports the extension and Raycast default
+to — point them at the printed ports, or run `dev:fixed` there when the worktree
+is the thing being tested.
 
-`PORT`, `API_PORT` and `DOCS_PORT` still pin individual ports, and `--fixed`
-wins over all of it. If 3392 is busy, dev warns and falls back to a random port
-for that run rather than refusing to start. `node scripts/dev.mjs --dry-run`
-resolves and prints ports without starting anything.
+`PORT`, `API_PORT` and `DOCS_PORT` pin individual ports, and `--fixed` wins over
+all of it, worktree included. If a pinned port is busy, `dev` warns and falls
+back to a random one for that run rather than refusing to start; `dev:fixed`
+exits instead, because "these exact ports" was the point. `node scripts/dev.mjs
+--dry-run` resolves and prints ports without starting anything.
+
+`dev` also derives the dev browser extension's `chrome-extension://<id>` origin
+from `packages/extension/dist`'s absolute path — the same hash Chrome uses — and
+passes it to the server as `TRUSTED_ORIGINS`, so no id is ever pasted by hand
+for local work. Anything in `TRUSTED_ORIGINS` in the environment is kept
+alongside it. Production origins still belong in `.env.production`.
 
 Drop fixtures into `seed/assets/` to have them auto-populate the
 local bucket — see `seed/README.md`. To copy a real-prod bucket into
@@ -205,12 +216,21 @@ const { token } = await pollForDeviceSession(
 );
 ```
 
-Every such client's **origin must be in `TRUSTED_ORIGINS`**, or sign-in
-answers `403 INVALID_ORIGIN` before the password is checked: better-auth force-
-validates `Origin` whenever a request carries `Sec-Fetch-*` headers, which every
-real browser fetch does (curl does not — which makes curl a misleading way to
-test this). An unpacked extension's id comes from the absolute path it was
-loaded from; `pnpm run extension:id` prints the origin to add.
+A client that runs **in a browser** must have its **origin in
+`TRUSTED_ORIGINS`**, or sign-in answers `403 INVALID_ORIGIN` before the password
+is checked: better-auth force-validates `Origin` whenever a request carries
+`Sec-Fetch-*` headers, which every real browser fetch does (curl does not —
+which makes curl a misleading way to test this). An unpacked extension's id
+comes from the absolute path it was loaded from; `pnpm run dev` derives it and
+trusts it automatically, and `pnpm run extension:id` prints it for any other
+server.
+
+Raycast and CLIs need **no origin at all**, and have none to give: their `fetch`
+sends neither `Origin` nor `Sec-Fetch-*`, and better-auth's `validateOrigin`
+returns early unless the request carries cookies or those headers. What guards
+them instead is the device flow — a code the user approves in an already
+signed-in browser — plus the client-id allowlist in `auth/client-label.ts` and
+per-session revocation in Settings → Devices.
 
 Store that token in real secret storage (Keychain, `chrome.storage.session`,
 the Raycast password store), never a plain config file. Clients send
@@ -274,11 +294,10 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
 - Server origin and web origin come from extension preferences. Empty follows
   the build, the same convention as the browser extension's build targets:
   `ray build` → the deployed hosts, `ray develop` → `localhost:5159` /
-  `localhost:6477`, the ports `pnpm run dev:fixed` pins. Neither preference
+  `localhost:3392`, the ports `pnpm run dev` pins. Neither preference
   carries a `default` in `package.json`, because a default there is stored as a
   real value and "untouched" would be indistinguishable from "typed the
-  production URL". Plain `pnpm run dev` randomizes the API port — set **API
-  URL** by hand for that.
+  production URL". A worktree runs on random ports — set both by hand there.
 
 ### Deployment (two Coolify apps)
 
@@ -309,8 +328,11 @@ pnpm run extension:id [dev|prod]  # the chrome-extension:// origin to trust
 Each target carries its own name and `host_permissions`, so both can be
 installed at once and a production build cannot be pointed at localhost. As
 unpacked extensions the two have different ids, and **each id's origin must be
-in that server's `TRUSTED_ORIGINS`**. Pin `EXTENSION_KEY` to fix the production
-id before the server needs to trust it.
+in that server's `TRUSTED_ORIGINS`**. The dev id is derived and trusted by
+`pnpm run dev` (`scripts/lib/extension-id.mjs`, shared with `extension:id` so
+the two can never disagree). The production id has to be pinned with
+`EXTENSION_KEY` and added to `.env.production` by hand — deliberately: a
+production trust list that a script can extend is a trust list nobody reviews.
 
 ### Static export caveats
 

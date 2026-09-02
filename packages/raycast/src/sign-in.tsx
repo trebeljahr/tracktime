@@ -238,9 +238,9 @@ export default function SignIn(): React.JSX.Element {
         ...(isDevBuild()
           ? [
               "This is a `ray develop` build, so it defaults to the local dev",
-              "server — `pnpm run dev:fixed` (API `5159`, client `6477`). Plain",
-              "`pnpm run dev` picks the API port at random and prints it; put",
-              "that port in **API URL** and the client port in **Web App URL**.",
+              "server — `pnpm run dev` (API `5159`, client `3392`). A git",
+              "worktree runs on random ports and prints them; put those in",
+              "**API URL** and **Web App URL**.",
               "",
               "Preferences override the default even here, so clear them to go",
               "back to localhost.",

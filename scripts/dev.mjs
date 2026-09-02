@@ -6,8 +6,9 @@
 // ran at once — a person in their terminal plus any number of agents in their
 // own worktrees:
 //
-//   * ports          — `pnpm dev` always serves the client on one hardcoded
-//                      port (so password managers and bookmarks work);
+//   * ports          — `pnpm dev` pins client, API and docs to the same ports
+//                      every run (so password managers, bookmarks and the
+//                      clients that bake in the API URL keep working);
 //                      `pnpm dev:auto` picks random high ports instead, so
 //                      agents never collide with you or with each other
 //   * MongoDB        — a per-instance database, so two checkouts never share or
@@ -26,9 +27,11 @@
 //   WEB_HOST                    browser-facing host (default localhost)
 //
 // Usage:
-//   pnpm run dev                Client on DEV_CLIENT_PORT, rest auto-picked
+//   pnpm run dev                Pinned ports (client 3392, server 5159, docs 4000),
+//                               falling back to a random one if any is busy
 //   pnpm run dev:auto           Everything auto-picked (agents, worktrees)
-//   pnpm run dev:fixed          Fixed ports (client 6477, docs 4000, server 5159)
+//   pnpm run dev:fixed          The same pinned ports, but fail instead of
+//                               falling back — and pinned even in a worktree
 //   pnpm run dev:docs           Same as dev, plus the docs site
 //   pnpm run dev:docs:fixed     Fixed ports with docs
 //   node scripts/dev.mjs --dry-run   Resolve and print ports, start nothing
@@ -38,6 +41,7 @@ import { createHash } from "crypto";
 import { existsSync, readFileSync } from "fs";
 import { createServer } from "net";
 import { basename, resolve } from "path";
+import { extensionOrigin } from "./lib/extension-id.mjs";
 
 const fixedMode = process.argv.includes("--fixed");
 const includeDocs = process.argv.includes("--docs");
@@ -78,19 +82,26 @@ const instanceId = deriveInstanceId();
 
 // ── Ports ────────────────────────────────────────────────────────────
 //
-// The client port is HARDCODED for `pnpm dev`. Password managers, saved
-// logins, bookmarks and OAuth redirect allowlists all key off the origin, so
-// the URL a human opens must be the same one every single time. That is the
-// whole reason this constant exists — do not make it dynamic.
+// `pnpm dev` PINS all three. Every client that is not the web app bakes or
+// stores the API origin — the browser extension bakes it at build time, Raycast
+// defaults to it, native builds bake it — and a port that moves per run makes
+// each of them a copy-paste chore. Password managers, saved logins, bookmarks
+// and OAuth redirect allowlists key off the client origin for the same reason.
 //
-// 3392 is picked to sit inside the browser-friendly 3000-3999 range while
-// avoiding the defaults everything else grabs (3000/3001/3100/3333/...). If it
-// ever collides with another of your projects, change it here — one number,
-// one place.
+// Agents get `pnpm dev:auto` (automatic in a worktree), which is where random
+// ports belong: nothing types those, and several can run at once.
+//
+// 3392 sits inside the browser-friendly 3000-3999 range while avoiding the
+// defaults everything else grabs (3000/3001/3100/3333/...). 5159 and 4000 are
+// the API and docs equivalents. Change them here — one number, one place — and
+// `packages/extension/manifest.config.ts` plus Raycast's preference defaults
+// have to follow.
 const DEV_CLIENT_PORT = 3392;
+const DEV_API_PORT = 5159;
+const DEV_DOCS_PORT = 4000;
 
-// Everything else — the API, the docs site, and every port in `pnpm dev:auto`
-// — comes out of the ephemeral range, which no conventional dev server uses.
+// `pnpm dev:auto` — and any pinned port that turns out to be busy — comes out of
+// the ephemeral range, which no conventional dev server uses.
 const HIGH_PORT_MIN = 49152;
 const HIGH_PORT_MAX = 65535;
 
@@ -100,8 +111,9 @@ const HIGH_PORT_MAX = 65535;
  * the main `.git`, so the two differ only in a worktree.
  *
  * Worktrees are where agents run, often several at once. They must never fight
- * over the one hardcoded port, so `pnpm dev` behaves like `pnpm dev:auto`
- * there even if someone forgets the longer command.
+ * over the pinned ports, so `pnpm dev` behaves like `pnpm dev:auto` there even
+ * if someone forgets the longer command. `--fixed` overrides that, for the case
+ * where a worktree is the thing being tested against a baked-in API URL.
  */
 function isLinkedWorktree() {
   try {
@@ -154,38 +166,50 @@ async function findRandomFreePort(maxAttempts = 50) {
   );
 }
 
-/** An explicit env var always wins, then --fixed, then the mode above. */
-async function pickPort(envValue, fixedValue) {
-  if (envValue) return parseInt(envValue, 10);
-  if (fixedMode) return fixedValue;
-  return findRandomFreePort();
-}
-
 /**
- * The client is the only port a human types. A busy hardcoded port does not
- * block dev: say who to look for and fall back to a random one for this run.
+ * An explicit env var wins, then the mode, then the pinned port.
+ *
+ * A busy pinned port does not block dev: say who to look for and fall back to a
+ * random one for this run. `--fixed` is the opposite promise — a caller that
+ * asked for exact ports wants to hear that it cannot have them, not to be
+ * silently moved somewhere the extension it is testing cannot reach.
  */
-async function pickClientPort() {
-  if (process.env.PORT) return parseInt(process.env.PORT, 10);
-  if (fixedMode) return 6477;
-  if (autoPorts) return findRandomFreePort();
-  if (await isPortFree(DEV_CLIENT_PORT)) {
-    claimed.add(DEV_CLIENT_PORT);
-    return DEV_CLIENT_PORT;
+async function pickPort(envValue, pinned, label) {
+  if (envValue) return parseInt(envValue, 10);
+  // --fixed still wins inside a worktree: asking for these exact ports is the
+  // one reason to run it there (testing a client that has the API baked in).
+  if (autoPorts && !fixedMode) return findRandomFreePort();
+
+  if (await isPortFree(pinned)) {
+    claimed.add(pinned);
+    return pinned;
+  }
+
+  const who = `lsof -nP -iTCP:${pinned} -sTCP:LISTEN`;
+  if (fixedMode) {
+    console.error(
+      `\n  ${label} port ${pinned} is in use, and --fixed means exactly these` +
+        `\n  ports. See who has it:  ${who}\n`,
+    );
+    process.exit(1);
   }
 
   const fallback = await findRandomFreePort();
   console.warn(
-    `\n  Port ${DEV_CLIENT_PORT} is already in use — something else is listening` +
-      `\n  on it (lsof -nP -iTCP:${DEV_CLIENT_PORT} -sTCP:LISTEN).` +
+    `\n  ${label} port ${pinned} is already in use — something else is` +
+      `\n  listening on it (${who}).` +
       `\n  Using ${fallback} for this run.\n`,
   );
   return fallback;
 }
 
-const clientPort = await pickClientPort();
-const docsPort = await pickPort(process.env.DOCS_PORT, 4000);
-const apiPort = await pickPort(process.env.API_PORT, 5159);
+const clientPort = await pickPort(process.env.PORT, DEV_CLIENT_PORT, "Client");
+const apiPort = await pickPort(process.env.API_PORT, DEV_API_PORT, "API");
+// Only when --docs asked for it: a docs port nobody starts should not warn
+// about 4000 being busy, nor fail a --fixed run over it.
+const docsPort = includeDocs
+  ? await pickPort(process.env.DOCS_PORT, DEV_DOCS_PORT, "Docs")
+  : null;
 
 // ── Per-instance database ────────────────────────────────────────────
 //
@@ -252,12 +276,34 @@ if (existsSync(lockFile)) {
   }
 }
 
+// ── Trusted origins ──────────────────────────────────────────────────
+//
+// The dev browser extension's origin is `chrome-extension://<id>`, and an
+// unpacked extension's id is a hash of the absolute path Chrome loaded it from
+// — which is THIS checkout's `packages/extension/dist`. So the dev server can
+// derive it instead of asking a human to run `pnpm run extension:id` and paste
+// the result into an env file; the id is a fact about the path, not a secret.
+//
+// Only in dev, and only this one id. In production the extension's origin comes
+// from a pinned key and belongs in `.env.production`, where it is reviewed —
+// nothing here writes to that.
+const devExtensionOrigin = extensionOrigin(
+  resolve(repoRoot, "packages/extension/dist"),
+);
+const trustedOrigins = [
+  ...(process.env.TRUSTED_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  devExtensionOrigin,
+];
+
 console.log(`\n  Instance: ${instanceId}`);
 const portMode = fixedMode
-  ? "fixed ports"
+  ? "pinned ports (--fixed: no fallback)"
   : autoPorts
     ? `auto ports (${autoMode ? "--auto" : "worktree"})`
-    : `client on ${DEV_CLIENT_PORT}, rest auto`;
+    : "pinned ports";
 console.log(`  Mode:     ${portMode}`);
 console.log(`  Client:   http://${WEB_HOST}:${clientPort}`);
 if (includeDocs) {
@@ -265,7 +311,8 @@ if (includeDocs) {
 }
 console.log(`  Server:   http://${WEB_HOST}:${apiPort}`);
 console.log(`  Database: ${mongoUri}`);
-console.log(`  Next dir: packages/client/${nextDistDir}\n`);
+console.log(`  Next dir: packages/client/${nextDistDir}`);
+console.log(`  Trusts:   ${devExtensionOrigin} (dev extension)\n`);
 
 if (dryRun) process.exit(0);
 
@@ -290,6 +337,7 @@ const clientEnv = [
 
 const serverEnv = [
   `PORT=${apiPort}`,
+  `TRUSTED_ORIGINS=${trustedOrigins.join(",")}`,
   `FRONTEND_URL=http://${WEB_HOST}:${clientPort}`,
   `MONGODB_URI=${mongoUri}`,
   `BETTER_AUTH_URL=http://${WEB_HOST}:${apiPort}`,

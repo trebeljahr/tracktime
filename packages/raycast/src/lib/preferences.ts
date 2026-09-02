@@ -10,14 +10,14 @@ import { environment, getPreferenceValues } from "@raycast/api";
  * deployed API only ever produces an ENOTFOUND against a server the change is
  * not in.
  *
- * The ports are the ones `pnpm run dev:fixed` pins, because those are the only
- * dev ports that hold still; plain `pnpm run dev` picks the API port at random,
- * which is what the preferences below are for.
+ * The ports are the ones `pnpm run dev` pins. A worktree runs on random ports
+ * instead (agents, several at once), which is what the preferences below are
+ * for.
  */
 const DEFAULT_ORIGINS = {
   development: {
     apiUrl: "http://localhost:5159",
-    webUrl: "http://localhost:6477",
+    webUrl: "http://localhost:3392",
   },
   production: {
     apiUrl: "https://api.tracktime.trebeljahr.com",
