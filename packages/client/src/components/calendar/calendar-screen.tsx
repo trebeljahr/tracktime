@@ -14,7 +14,7 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Redo2, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -162,6 +162,7 @@ export function CalendarScreen(): React.JSX.Element {
 
   const { entries, isLoading } = useCalendarEntries(listInput, view !== "year");
   const actions = useCalendarActions(listInput);
+  const { history } = actions;
 
   const title = React.useMemo<string>(() => {
     const date = new Date(anchorMs);
@@ -199,6 +200,24 @@ export function CalendarScreen(): React.JSX.Element {
   // Keyboard navigation, the same bindings Google Calendar and Clockify use.
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      // Undo/redo first: they are the only modifier bindings here, and inside
+      // an input the browser's own text undo has to win instead.
+      if ((event.metaKey || event.ctrlKey) && !event.altKey) {
+        if (isTypingTarget(event.target)) return;
+        const key = event.key.toLowerCase();
+        if (key === "z") {
+          event.preventDefault();
+          if (event.shiftKey) history.redo();
+          else history.undo();
+          return;
+        }
+        if (key === "y" && !event.shiftKey) {
+          event.preventDefault();
+          history.redo();
+          return;
+        }
+      }
+
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
 
@@ -228,7 +247,7 @@ export function CalendarScreen(): React.JSX.Element {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [navigate, step]);
+  }, [history, navigate, step]);
 
   const openBlankDraft = (): void => {
     const base = new Date(anchorMs);
@@ -338,6 +357,35 @@ export function CalendarScreen(): React.JSX.Element {
               ))}
             </TabsList>
           </Tabs>
+
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={
+                history.undoLabel ? `Undo ${history.undoLabel}` : "Undo"
+              }
+              title={`Undo${history.undoLabel ? ` ${history.undoLabel}` : ""} (Ctrl/\u2318 + Z)`}
+              data-testid="calendar-undo"
+              disabled={!history.canUndo}
+              onClick={history.undo}
+            >
+              <Undo2 className="size-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={
+                history.redoLabel ? `Redo ${history.redoLabel}` : "Redo"
+              }
+              title={`Redo${history.redoLabel ? ` ${history.redoLabel}` : ""} (Ctrl/\u2318 + Shift + Z)`}
+              data-testid="calendar-redo"
+              disabled={!history.canRedo}
+              onClick={history.redo}
+            >
+              <Redo2 className="size-4" />
+            </Button>
+          </div>
 
           <Button
             size="sm"

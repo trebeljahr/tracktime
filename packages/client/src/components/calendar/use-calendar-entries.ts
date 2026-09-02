@@ -7,6 +7,27 @@ import { toast } from "@/components/ui/sonner";
 import { ORIGIN_ID } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
+import {
+  EMPTY_HISTORY,
+  canRedo,
+  canUndo,
+  draftFromEntry,
+  dropStep,
+  inversePatch,
+  isNoopPatch,
+  patchLabel,
+  peekRedo,
+  peekUndo,
+  pushStep,
+  redo as redoStep,
+  remapEntryId,
+  replaceEntryId,
+  restartsTimer,
+  undo as undoStep,
+  type HistoryState,
+  type HistoryStep,
+  type StepBody,
+} from "./calendar-history";
 
 /** The exact `entries.list` input the calendar screen is showing. */
 export type CalendarQueryInput = {
@@ -35,6 +56,9 @@ export type EntryDraft = {
   billable?: boolean;
   start: string;
   end: string;
+  /** Carried so undoing a delete restores the zone the entry was recorded in. */
+  timeZone?: string;
+  tagIds?: string[];
 };
 
 const durationOf = (start: string, end: string | null): number => {
@@ -75,11 +99,23 @@ export const useCalendarEntries = (
   };
 };
 
+/** The undo/redo surface the calendar toolbar and its shortcuts drive. */
+export type CalendarHistory = {
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  /** What undo would reverse next, e.g. "move" — null when there is nothing. */
+  undoLabel: string | null;
+  redoLabel: string | null;
+};
+
 export type CalendarActions = {
   update: (id: string, patch: EntryPatch) => void;
   create: (draft: EntryDraft) => void;
   remove: (id: string) => void;
   isMutating: boolean;
+  history: CalendarHistory;
 };
 
 /**
@@ -259,26 +295,220 @@ export const useCalendarActions = (
     onSettled: settle,
   });
 
+  // ── raw mutations, no history ──────────────────────────────────────
+
+  // Each resolves to whether the write landed. A mutation that failed left
+  // nothing behind to reverse, so its history step has to go with it —
+  // otherwise undoing a refused delete would create a duplicate entry.
+
+  const applyUpdate = React.useCallback(
+    (id: string, patch: EntryPatch): Promise<boolean> =>
+      updateMutation
+        .mutateAsync({ id, ...patch, originId: ORIGIN_ID })
+        .then(() => true)
+        .catch(() => false),
+    [updateMutation]
+  );
+
+  const applyCreate = React.useCallback(
+    (draft: EntryDraft): Promise<string | null> =>
+      createMutation
+        .mutateAsync({ ...draft, originId: ORIGIN_ID })
+        .then((created) => created.id)
+        .catch(() => null),
+    [createMutation]
+  );
+
+  const applyRemove = React.useCallback(
+    (id: string): Promise<boolean> =>
+      removeMutation
+        .mutateAsync({ id, originId: ORIGIN_ID })
+        .then(() => true)
+        .catch(() => false),
+    [removeMutation]
+  );
+
+  // ── history ────────────────────────────────────────────────────────
+
+  // The ref is the stack; the state is only how it reaches the render. Undo
+  // has to read the current stack AND act on the step it pops, which a
+  // functional setState cannot do — and reading through the ref is what keeps
+  // two keystrokes inside one frame from undoing the same change twice.
+  const historyRef = React.useRef<HistoryState>(EMPTY_HISTORY);
+  const [history, setHistory] = React.useState<HistoryState>(EMPTY_HISTORY);
+
+  const writeHistory = React.useCallback(
+    (map: (current: HistoryState) => HistoryState): void => {
+      historyRef.current = map(historyRef.current);
+      setHistory(historyRef.current);
+    },
+    []
+  );
+
+  const nextStepIdRef = React.useRef(1);
+
+  const record = React.useCallback(
+    (body: StepBody, label: string): HistoryStep => {
+      const step: HistoryStep = { ...body, id: nextStepIdRef.current, label };
+      nextStepIdRef.current += 1;
+      writeHistory((current) => pushStep(current, step));
+      return step;
+    },
+    [writeHistory]
+  );
+
+  const entryById = React.useCallback(
+    (id: string): DetailedEntry | undefined =>
+      utils.entries.list
+        .getData(input)
+        ?.entries.find((entry) => entry.id === id),
+    [input, utils]
+  );
+
+  /**
+   * Run a create, and re-aim the history at the id the server hands back.
+   *
+   * `replacing` is the id this create is resurrecting, when the create is the
+   * undo of a delete: every older step about that entry has to follow it to
+   * its new id, or they would each undo into a "not found".
+   */
+  const createTracked = React.useCallback(
+    (draft: EntryDraft, stepId: number, replacing: string | null): void => {
+      void applyCreate(draft).then((id) => {
+        writeHistory((current) => {
+          if (id === null) return dropStep(current, stepId);
+          const rebased =
+            replacing === null
+              ? current
+              : replaceEntryId(current, replacing, id);
+          return remapEntryId(rebased, stepId, id);
+        });
+      });
+    },
+    [applyCreate, writeHistory]
+  );
+
+  /** Run a write, and forget `stepId` if the server refused it. */
+  const trackFailure = React.useCallback(
+    (result: Promise<boolean>, stepId: number | null): void => {
+      void result.then((ok) => {
+        if (!ok && stepId !== null) {
+          writeHistory((current) => dropStep(current, stepId));
+        }
+      });
+    },
+    [writeHistory]
+  );
+
   const update = React.useCallback(
     (id: string, patch: EntryPatch): void => {
-      updateMutation.mutate({ id, ...patch, originId: ORIGIN_ID });
+      const entry = entryById(id);
+      const step =
+        entry && !isNoopPatch(entry, patch)
+          ? record(
+              restartsTimer(entry, patch)
+                ? {
+                    kind: "barrier",
+                    reason:
+                      "Stopping a running timer cannot be undone — only one " +
+                      "entry can run at a time",
+                  }
+                : {
+                    kind: "update",
+                    entryId: id,
+                    undo: inversePatch(entry, patch),
+                    redo: patch,
+                  },
+              patchLabel(patch)
+            )
+          : null;
+      trackFailure(applyUpdate(id, patch), step?.id ?? null);
     },
-    [updateMutation]
+    [applyUpdate, entryById, record, trackFailure]
   );
 
   const create = React.useCallback(
     (draft: EntryDraft): void => {
-      createMutation.mutate({ ...draft, originId: ORIGIN_ID });
+      const step = record({ kind: "create", entryId: null, draft }, "create");
+      createTracked(draft, step.id, null);
     },
-    [createMutation]
+    [createTracked, record]
   );
 
   const remove = React.useCallback(
     (id: string): void => {
-      removeMutation.mutate({ id, originId: ORIGIN_ID });
+      const entry = entryById(id);
+      const step = entry
+        ? record(
+            entry.end === null
+              ? {
+                  kind: "barrier",
+                  reason:
+                    "Deleting a running timer cannot be undone — only one " +
+                    "entry can run at a time",
+                }
+              : {
+                  kind: "remove",
+                  entryId: id,
+                  draft: draftFromEntry(entry, entry.end),
+                },
+            "delete"
+          )
+        : null;
+      trackFailure(applyRemove(id), step?.id ?? null);
     },
-    [removeMutation]
+    [applyRemove, entryById, record, trackFailure]
   );
+
+  const travel = React.useCallback(
+    (direction: "undo" | "redo"): void => {
+      const current = historyRef.current;
+      const move =
+        direction === "undo" ? undoStep(current) : redoStep(current);
+
+      if (move.outcome === "empty") return;
+      if (move.outcome === "blocked") {
+        toast.error(move.reason);
+        return;
+      }
+
+      writeHistory(() => move.state);
+      const target = move.step;
+      const undoing = direction === "undo";
+
+      switch (target.kind) {
+        case "update":
+          void applyUpdate(
+            target.entryId,
+            undoing ? target.undo : target.redo
+          );
+          break;
+        case "create":
+          // Undoing a create deletes; redoing it writes a NEW entry, whose id
+          // the step then adopts so a further undo deletes the right one.
+          if (!undoing) createTracked(target.draft, target.id, target.entryId);
+          else if (target.entryId) void applyRemove(target.entryId);
+          break;
+        case "remove":
+          if (undoing) createTracked(target.draft, target.id, target.entryId);
+          else if (target.entryId) void applyRemove(target.entryId);
+          break;
+        case "barrier":
+          return;
+      }
+
+      toast.success(`${undoing ? "Undid" : "Redid"} ${target.label}`);
+    },
+    [applyRemove, applyUpdate, createTracked, writeHistory]
+  );
+
+  const undo = React.useCallback((): void => {
+    travel("undo");
+  }, [travel]);
+
+  const redo = React.useCallback((): void => {
+    travel("redo");
+  }, [travel]);
 
   return {
     update,
@@ -288,5 +518,13 @@ export const useCalendarActions = (
       updateMutation.isPending ||
       createMutation.isPending ||
       removeMutation.isPending,
+    history: {
+      undo,
+      redo,
+      canUndo: canUndo(history),
+      canRedo: canRedo(history),
+      undoLabel: peekUndo(history)?.label ?? null,
+      redoLabel: peekRedo(history)?.label ?? null,
+    },
   };
 };
