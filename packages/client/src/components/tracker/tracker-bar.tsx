@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CloudOff, Play, Plus, Square, WifiOff } from "lucide-react";
+import { Building2, CloudOff, Play, Plus, Square, WifiOff } from "lucide-react";
 import { formatDuration } from "@starter/shared";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,7 @@ import { TaskPicker } from "@/components/task-picker";
 import { TagPicker } from "@/components/tags/tag-picker";
 import { BillableGlyph } from "@/components/tracker/billable-glyph";
 import { ManualEntryDialog } from "@/components/tracker/manual-entry-dialog";
-import { QuickStartRow } from "@/components/tracker/quick-start-row";
+import { QuickStartMenu } from "@/components/tracker/quick-start-menu";
 import {
   requestPomodoroPermission,
   usePomodoro,
@@ -73,6 +73,26 @@ export function TrackerBar(): React.JSX.Element {
   // long as the screen that owns the timer.
   useIdleGuard();
 
+  // Publish this bar's height so the day headings below it know where to come
+  // to rest when they stick. The bar grows a second line for the pomodoro and
+  // offline badges, so a constant would be wrong exactly when it matters.
+  const barRef = React.useRef<HTMLDivElement | null>(null);
+  React.useLayoutEffect(() => {
+    const node = barRef.current;
+    if (node === null) return;
+
+    const root = document.documentElement;
+    const observer = new ResizeObserver(([record]) => {
+      const height = record?.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight;
+      root.style.setProperty("--tracker-bar-height", `${height}px`);
+    });
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--tracker-bar-height");
+    };
+  }, []);
+
   // Live elapsed time in the tab title, so a backgrounded tab still shows it.
   React.useEffect(() => {
     if (running === null) {
@@ -85,6 +105,12 @@ export function TrackerBar(): React.JSX.Element {
       document.title = "tracktime";
     };
   }, [running, elapsedSec]);
+
+  // Read off the picked project rather than stored: a client is never chosen
+  // on the bar, so there is no second copy of it that could drift.
+  const clientName =
+    projects.data?.find((candidate) => candidate.id === projectId)?.clientName ??
+    null;
 
   const projectBillableDefault = React.useCallback(
     (nextProjectId: string | null): boolean => {
@@ -188,15 +214,16 @@ export function TrackerBar(): React.JSX.Element {
 
   return (
     <div
+      ref={barRef}
       className="sticky top-14 z-30 -mx-3 mb-6 border-b border-border bg-background/95 px-3 py-3 backdrop-blur md:-mx-6 md:px-6"
       data-testid="tracker-bar"
+      data-running={isRunning ? "true" : "false"}
     >
-      {/* Above the fields on purpose: the whole point is to not have to fill
-          them in. Hidden while a timer runs, where the row would only offer to
-          stop this one and start another. */}
-      {isRunning ? null : <QuickStartRow mutations={mutations} />}
-
       <div className="flex flex-wrap items-center gap-2">
+        {/* Was a rail of chips above this row. Hidden while a timer runs,
+            where it would only offer to stop this one and start another. */}
+        {isRunning ? null : <QuickStartMenu mutations={mutations} />}
+
         <Input
           value={description}
           autoFocus
@@ -229,10 +256,26 @@ export function TrackerBar(): React.JSX.Element {
           testId="tracker-project"
         />
 
+        {/* The client is a property of the project, not a field of its own —
+            showing it read-only is what stops "Redesign" from being ambiguous
+            when two clients both have one, without adding a fourth picker to
+            a bar that is already wide. */}
+        {clientName === null ? null : (
+          <span
+            className="hidden max-w-32 shrink items-center gap-1 truncate text-xs text-muted-foreground lg:inline-flex"
+            title={`Client: ${clientName}`}
+            data-testid="tracker-client"
+          >
+            <Building2 className="size-3 shrink-0" />
+            <span className="truncate">{clientName}</span>
+          </span>
+        )}
+
         <TaskPicker
           projectId={projectId}
           value={taskId}
           onChange={handleTaskChange}
+          onProjectChange={handleProjectChange}
           className="h-10 border-0 shadow-none"
           testId="tracker-task"
         />
@@ -297,19 +340,25 @@ export function TrackerBar(): React.JSX.Element {
 
           {/* A button, not a mode: logging past work is one action that ends
               when the dialog closes, so the bar can never be left sitting in a
-              state where Start has quietly turned into Add. */}
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="shrink-0"
-            aria-label="Add time entry"
-            title="Add time entry"
-            onClick={() => setManualOpen(true)}
-            data-testid="tracker-manual-open"
-          >
-            <Plus />
-          </Button>
+              state where Start has quietly turned into Add.
+
+              Gone entirely while a timer runs. Sitting next to Stop it read
+              like it would add something TO the running entry, and logging a
+              past block is never what you reach for mid-timer anyway. */}
+          {isRunning ? null : (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="shrink-0"
+              aria-label="Add time entry"
+              title="Add time entry"
+              onClick={() => setManualOpen(true)}
+              data-testid="tracker-manual-open"
+            >
+              <Plus />
+            </Button>
+          )}
         </div>
       </div>
 

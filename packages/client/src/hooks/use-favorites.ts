@@ -175,15 +175,22 @@ export const useQuickStarts = (): QuickStarts => {
     [favoriteList, reorderMutation]
   );
 
-  return {
-    items,
-    favorites: favoriteList,
-    // `isPending` rather than `isLoading` on both, so a background refetch —
-    // or a reorder — never collapses the row the user is aiming at.
-    isLoading: favorites.isPending || recents.isPending,
-    isPinned,
-    pin,
-    unpin,
-    move,
-  };
+  // `isPending` rather than `isLoading` on both, so a background refetch — or
+  // a reorder — never collapses the list the user is aiming at.
+  const isLoading = favorites.isPending || recents.isPending;
+
+  // Memoised: the entry list threads this into every row, and a fresh object
+  // each render would defeat the rows' `React.memo`.
+  return React.useMemo(
+    () => ({
+      items,
+      favorites: favoriteList,
+      isLoading,
+      isPinned,
+      pin,
+      unpin,
+      move,
+    }),
+    [items, favoriteList, isLoading, isPinned, pin, unpin, move]
+  );
 };

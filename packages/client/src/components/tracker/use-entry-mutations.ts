@@ -776,23 +776,44 @@ export const useEntryMutations = (): EntryMutations => {
 
   removeEntryRef.current = removeEntry;
 
-  return {
-    startTimer,
-    startQuickStart,
-    stopTimer,
-    continueEntry,
-    createManualEntry,
-    updateEntry,
-    duplicateEntry,
-    removeEntry,
-    splitAtIdle,
-    resolveRunaway,
-    isBusy:
-      startMutation.isPending ||
-      stopMutation.isPending ||
-      createMutation.isPending ||
-      updateMutation.isPending ||
-      removeMutation.isPending ||
-      resolveRunawayMutation.isPending,
-  };
+  const isBusy =
+    startMutation.isPending ||
+    stopMutation.isPending ||
+    createMutation.isPending ||
+    updateMutation.isPending ||
+    removeMutation.isPending ||
+    resolveRunawayMutation.isPending;
+
+  // Memoised because the entry list threads this object into every row, and a
+  // fresh object each render would defeat the rows' `React.memo` — a running
+  // timer re-renders this hook once a second, which would otherwise re-render
+  // the whole history with it.
+  return React.useMemo(
+    () => ({
+      startTimer,
+      startQuickStart,
+      stopTimer,
+      continueEntry,
+      createManualEntry,
+      updateEntry,
+      duplicateEntry,
+      removeEntry,
+      splitAtIdle,
+      resolveRunaway,
+      isBusy,
+    }),
+    [
+      startTimer,
+      startQuickStart,
+      stopTimer,
+      continueEntry,
+      createManualEntry,
+      updateEntry,
+      duplicateEntry,
+      removeEntry,
+      splitAtIdle,
+      resolveRunaway,
+      isBusy,
+    ]
+  );
 };

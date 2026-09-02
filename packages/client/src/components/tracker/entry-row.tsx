@@ -63,7 +63,7 @@ export type EntryRowProps = {
  * project, billable, both clock times and the duration — because the edit a
  * user actually makes is a two-minute correction, not a form submission.
  */
-export function EntryRow({
+function EntryRowImpl({
   entry,
   mutations,
   quickStarts,
@@ -168,54 +168,83 @@ export function EntryRow({
         "min-[1140px]:grid min-[1140px]:grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_0px_minmax(5.5rem,1.1fr)_2rem_12.5rem_5.5rem_0px_2rem_2rem]",
         "xl:grid-cols-[minmax(0,2fr)_minmax(0,1.7fr)_minmax(0,0.8fr)_minmax(5.5rem,1fr)_2rem_13rem_5.5rem_4.5rem_2rem_2rem]",
         nested && "pl-10",
-        running && "bg-primary/5"
+        // The one row that is still happening. A 5% tint was not enough to
+        // find it in a day of twelve rows, so it also gets an accent edge and
+        // a live badge — three signals rather than one, and the badge carries
+        // a word, so the row never relies on colour alone.
+        //
+        // `destructive`, because that is already this app's "live" colour: the
+        // header's running dot and the Stop button both use it, while
+        // `primary` is near-black in the light theme and reads as "selected".
+        //
+        // The edge is a pseudo-element rather than a border, and the badge
+        // lives INSIDE the description cell: both column templates above name
+        // exactly ten tracks, so an eleventh grid item — or four pixels of
+        // border — would knock this row's columns out of line with the rest.
+        running &&
+          "relative bg-destructive/[0.06] hover:bg-destructive/10 before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-destructive"
       )}
       data-testid="entry-row"
       data-entry-id={entry.id}
       data-running={running ? "true" : "false"}
       data-syncing={syncing ? "true" : "false"}
     >
-      {editingDescription ? (
-        <Input
-          value={draft}
-          autoFocus
-          aria-label="Description"
-          className="h-8 min-w-0 flex-1 basis-56 min-[1140px]:w-full"
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commitDescription}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commitDescription();
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
+      <div className="flex min-w-0 flex-1 basis-56 items-center gap-2 min-[1140px]:w-full">
+        {running ? (
+          <span
+            className="flex shrink-0 items-center gap-1.5 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
+            data-testid="entry-running-badge"
+          >
+            <span className="relative flex size-1.5">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-75" />
+              <span className="relative inline-flex size-1.5 rounded-full bg-destructive" />
+            </span>
+            Running
+          </span>
+        ) : null}
+
+        {editingDescription ? (
+          <Input
+            value={draft}
+            autoFocus
+            aria-label="Description"
+            className="h-8 min-w-0 flex-1"
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={commitDescription}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitDescription();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setDraft(entry.description);
+                setEditingDescription(false);
+              }
+            }}
+            data-testid="entry-description-input"
+          />
+        ) : (
+          <button
+            type="button"
+            disabled={syncing}
+            className={cn(
+              "min-w-0 flex-1 truncate rounded px-2 py-1 text-left text-sm hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent",
+              entry.description.trim() === "" && "text-muted-foreground italic"
+            )}
+            onClick={() => {
               setDraft(entry.description);
-              setEditingDescription(false);
-            }
-          }}
-          data-testid="entry-description-input"
-        />
-      ) : (
-        <button
-          type="button"
-          disabled={syncing}
-          className={cn(
-            "min-w-0 flex-1 basis-56 truncate rounded px-2 py-1 text-left text-sm hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent min-[1140px]:w-full",
-            entry.description.trim() === "" && "text-muted-foreground italic"
-          )}
-          onClick={() => {
-            setDraft(entry.description);
-            setEditingDescription(true);
-          }}
-          data-testid="entry-description"
-        >
-          {entry.description.trim() === ""
-            ? "Add description"
-            : entry.description}
-        </button>
-      )}
+              setEditingDescription(true);
+            }}
+            data-testid="entry-description"
+          >
+            {entry.description.trim() === ""
+              ? "Add description"
+              : entry.description}
+          </button>
+        )}
+      </div>
 
       {/* Same picker as the tracker bar, create surfaces and all: filing a
           past entry under a project that does not exist yet is exactly when
@@ -326,7 +355,7 @@ export function EntryRow({
         <LiveDuration
           baseSec={0}
           matchEntryId={entry.id}
-          className="w-24 text-right text-sm min-[1140px]:w-full"
+          className="w-24 text-right text-sm font-semibold min-[1140px]:w-full"
           testId="entry-duration"
         />
       ) : (
@@ -356,7 +385,7 @@ export function EntryRow({
           type="button"
           variant="ghost"
           size="icon"
-          className="size-8 text-destructive"
+          className="size-8 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
           aria-label="Stop this entry"
           onClick={() => mutations.stopTimer()}
           data-testid="entry-stop"
@@ -439,3 +468,11 @@ export function EntryRow({
     </div>
   );
 }
+
+/**
+ * Memoised: a running timer re-renders the list once a second and history
+ * pages in fifty rows at a time. With `useEntryMutations` and `useQuickStarts`
+ * both handing back stable objects, an unchanged row does no work on either.
+ */
+export const EntryRow = React.memo(EntryRowImpl);
+EntryRow.displayName = "EntryRow";

@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Timer } from "lucide-react";
-import type { DetailedEntry } from "@starter/shared";
+import { Loader2, Timer } from "lucide-react";
+import { toLocalDateKey, type DetailedEntry } from "@starter/shared";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +22,21 @@ import {
 import { useQuickStarts } from "@/hooks/use-favorites";
 import { useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
+
+/**
+ * Where a day heading comes to rest when it sticks.
+ *
+ * The app header is a fixed 3.5rem; the tracker bar under it is not — it grows
+ * a second line for the pomodoro and offline badges. `--tracker-bar-height` is
+ * published by the bar itself via a ResizeObserver, and the fallback is the
+ * bar's one-line height, so the heading still lands correctly on the first
+ * paint before the observer has measured anything.
+ */
+const STICKY_TOP = "calc(3.5rem + var(--tracker-bar-height, 4.1rem))";
+
+/** Rough rendered height of one row and one heading, in px. */
+const ROW_HEIGHT = 45;
+const HEADING_HEIGHT = 37;
 
 function EntrySkeletons(): React.JSX.Element {
   return (
@@ -48,15 +63,34 @@ function EntrySkeletons(): React.JSX.Element {
   );
 }
 
-function DayHeader({ group }: { group: DayGroup }): React.JSX.Element {
+function DayHeader({
+  group,
+  live,
+}: {
+  group: DayGroup;
+  /**
+   * Whether the running timer belongs to this day. Only that one header may
+   * subscribe to the per-second clock — every other day's total is settled, and
+   * a `LiveDuration` there would re-render a heading once a second to print the
+   * same number.
+   */
+  live: boolean;
+}): React.JSX.Element {
   const format = useFormatSettings();
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2">
+    <div
+      className="sticky z-20 flex flex-wrap items-center justify-between gap-2 rounded-t-lg border-b border-border bg-muted px-3 py-2"
+      style={{ top: STICKY_TOP }}
+      data-testid="day-header"
+    >
       <span className="text-sm font-medium" data-testid="day-label">
         {dayHeadingLabel(group.date)}
       </span>
       <span className="flex items-center gap-4 text-sm">
+        <span className="text-muted-foreground" data-testid="day-count">
+          {group.entryCount} {group.entryCount === 1 ? "entry" : "entries"}
+        </span>
         {group.amount > 0 ? (
           <span className="text-muted-foreground" data-testid="day-amount">
             {format.money(group.amount)}
@@ -64,12 +98,21 @@ function DayHeader({ group }: { group: DayGroup }): React.JSX.Element {
         ) : null}
         <span className="flex items-center gap-1.5">
           <span className="text-muted-foreground">Total</span>
-          <LiveDuration
-            baseSec={group.totalSec}
-            matchDate={group.date}
-            className="text-sm font-medium"
-            testId="day-total"
-          />
+          {live ? (
+            <LiveDuration
+              baseSec={group.totalSec}
+              matchDate={group.date}
+              className="text-sm font-medium"
+              testId="day-total"
+            />
+          ) : (
+            <span
+              className="font-mono text-sm font-medium tabular-nums"
+              data-testid="day-total"
+            >
+              {format.duration(group.totalSec)}
+            </span>
+          )}
         </span>
       </span>
     </div>
@@ -77,18 +120,40 @@ function DayHeader({ group }: { group: DayGroup }): React.JSX.Element {
 }
 
 /**
- * The day-grouped log under the tracker bar. Pages through history with the
- * server cursor, collapses look-alike runs, and keeps every field editable in
- * place.
+ * The day-grouped log under the tracker bar. Pages through the whole history
+ * with the server cursor, and keeps every field editable in place.
+ *
+ * The list is not windowed. It is kept cheap three other ways instead, because
+ * a windowed list cannot hold a row that grows a popover, a combobox and an
+ * inline editor without measuring every one of them:
+ *
+ *  - each day is a `content-visibility: auto` section, so the browser skips
+ *    layout and paint for the days that are off screen while the scrollbar
+ *    still reflects the whole history (`contain-intrinsic-size` is seeded from
+ *    the day's own row count, so scrolling does not jump as days render);
+ *  - rows are `React.memo`, and both `useEntryMutations` and `useQuickStarts`
+ *    hand back stable objects, so a second of running clock re-renders one
+ *    duration rather than the log;
+ *  - only the day the timer is running in subscribes to that clock at all.
  */
 export function EntryList(): React.JSX.Element {
   const mutations = useEntryMutations();
   const quickStarts = useQuickStarts();
+  // The query, not `useRunningEntry` — this only needs to know WHICH day is
+  // live, and the hook's live clock would re-render the whole list once a
+  // second to answer a question whose answer changes twice a day.
+  const running =
+    trpc.entries.current.useQuery(undefined, { staleTime: 15_000 }).data ?? null;
   const [editing, setEditing] = React.useState<DetailedEntry | null>(null);
 
   const query = trpc.entries.list.useInfiniteQuery(TRACKER_LIST_INPUT, {
     getNextPageParam: (lastPage) => lastPage.nextCursor,
+    // A refetch on an infinite query refetches EVERY page it holds, so a
+    // window flip after scrolling far back would replay the whole history.
+    // The socket already invalidates on every remote change; this is the
+    // backstop, and it does not need to be instant.
     refetchOnWindowFocus: true,
+    staleTime: 30_000,
   });
 
   const entries = React.useMemo(
@@ -97,7 +162,19 @@ export function EntryList(): React.JSX.Element {
   );
   const days = React.useMemo(() => groupEntriesByDay(entries), [entries]);
 
+  const runningDate =
+    running === null ? null : toLocalDateKey(new Date(running.start));
+
   const { fetchNextPage, hasNextPage, isFetchingNextPage } = query;
+
+  // Guarded with a ref rather than `isFetchingNextPage`: the observer fires
+  // again the moment a page lands and the sentinel is still in view, and React
+  // Query's pending flag has not flipped back yet at that instant.
+  const loadingRef = React.useRef(false);
+  React.useEffect(() => {
+    loadingRef.current = isFetchingNextPage;
+  }, [isFetchingNextPage]);
+
   const sentinelRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
@@ -106,11 +183,15 @@ export function EntryList(): React.JSX.Element {
 
     const observer = new IntersectionObserver(
       (records) => {
+        if (loadingRef.current) return;
         if (records.some((record) => record.isIntersecting)) {
           void fetchNextPage();
         }
       },
-      { rootMargin: "400px" }
+      // A screen ahead of the fold: the next page is already on the wire by
+      // the time the last day scrolls into view, so the list never visibly
+      // stops.
+      { rootMargin: "800px 0px" }
     );
     observer.observe(node);
     return () => {
@@ -165,11 +246,17 @@ export function EntryList(): React.JSX.Element {
       {days.map((day) => (
         <section
           key={day.date}
-          className="overflow-hidden rounded-lg border border-border"
+          className="rounded-lg border border-border"
+          // `auto` keeps the last measured size once the day has been rendered
+          // once, so this estimate only ever has to be right the first time.
+          style={{
+            contentVisibility: "auto",
+            containIntrinsicSize: `auto ${HEADING_HEIGHT + day.entryCount * ROW_HEIGHT}px`,
+          }}
           data-testid="day-group"
           data-date={day.date}
         >
-          <DayHeader group={day} />
+          <DayHeader group={day} live={day.date === runningDate} />
           {day.entries.map((entry) => (
             <EntryRow
               key={entry.id}
@@ -184,18 +271,39 @@ export function EntryList(): React.JSX.Element {
 
       <div ref={sentinelRef} aria-hidden="true" className="h-px" />
 
-      {hasNextPage ? (
+      {isFetchingNextPage ? (
+        <div
+          className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground"
+          data-testid="entries-loading-more"
+        >
+          <Loader2 className="size-4 animate-spin" />
+          Loading earlier days…
+        </div>
+      ) : null}
+
+      {/* The observer does the loading; this is the manual fallback for the
+          cases it cannot cover — a browser without IntersectionObserver, and a
+          fetch that failed and left the sentinel sitting in view. */}
+      {hasNextPage && !isFetchingNextPage ? (
         <div className="flex justify-center">
           <Button
             type="button"
             variant="outline"
-            disabled={isFetchingNextPage}
             onClick={() => void fetchNextPage()}
             data-testid="entries-load-more"
           >
-            {isFetchingNextPage ? "Loading…" : "Load more"}
+            Load earlier days
           </Button>
         </div>
+      ) : null}
+
+      {!hasNextPage ? (
+        <p
+          className="py-2 text-center text-xs text-muted-foreground"
+          data-testid="entries-end"
+        >
+          That is everything you have tracked.
+        </p>
       ) : null}
 
       <EntryEditDialog

@@ -34,12 +34,11 @@ import {
 import { useFormatSettings } from "@/lib/format";
 import { ConfirmDialog } from "./confirm-dialog";
 import { TaskFormDialog } from "./task-form-dialog";
-import type { ProjectRow, TaskRow } from "./types";
+import type { TaskRow } from "./types";
 import { useTaskMutations } from "./use-catalog-mutations";
 
 export type TasksTableProps = {
   tasks: TaskRow[];
-  projects: ProjectRow[];
   isLoading: boolean;
   /** True when filters are hiding rows, so the empty state can say so. */
   isFiltered: boolean;
@@ -49,7 +48,6 @@ export type TasksTableProps = {
 /** Every task the owner has, across projects — the Tasks manage screen. */
 export function TasksTable({
   tasks,
-  projects,
   isLoading,
   isFiltered,
   onCreate,
@@ -226,7 +224,6 @@ export function TasksTable({
           if (!next) setEditing(null);
         }}
         task={editing}
-        projects={projects}
       />
 
       <ConfirmDialog

@@ -2,8 +2,8 @@
 
 import * as React from "react";
 
+import { ProjectPicker } from "@/components/project-picker";
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/sonner";
-import type { ProjectRow, TaskRow } from "./types";
+import type { TaskRow } from "./types";
 import { useTaskMutations } from "./use-catalog-mutations";
 
 export type TaskFormDialogProps = {
@@ -23,21 +23,28 @@ export type TaskFormDialogProps = {
   onOpenChange: (open: boolean) => void;
   /** Omitted/null creates; otherwise the dialog edits this task. */
   task?: TaskRow | null;
-  projects: ProjectRow[];
   /** Preselected project for a new task. */
   defaultProjectId?: string | null;
+  /**
+   * Called with the newly created task. Lets a caller act on the result — the
+   * tracker's task picker selects it immediately, so "New task…" leaves you
+   * ready to start the timer.
+   */
+  onCreated?: (task: { id: string; name: string; projectId: string }) => void;
 };
 
 /**
- * The Tasks screen's create/edit form. Unlike the inline panel on a project
- * row, a task created here has to name its project explicitly.
+ * The create/edit form behind every "New task…" surface. Unlike the inline
+ * panel on a project row, a task created here has to name its project
+ * explicitly — through the same picker the tracker bar uses, so a project (and
+ * its client) missing from the list can be created without leaving the dialog.
  */
 export function TaskFormDialog({
   open,
   onOpenChange,
   task,
-  projects,
   defaultProjectId = null,
+  onCreated,
 }: TaskFormDialogProps): React.JSX.Element {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -46,9 +53,11 @@ export function TaskFormDialog({
           <TaskForm
             key={task?.id ?? "new"}
             task={task ?? null}
-            projects={projects}
             defaultProjectId={defaultProjectId}
-            onDone={() => onOpenChange(false)}
+            onDone={(created) => {
+              onOpenChange(false);
+              if (created) onCreated?.(created);
+            }}
           />
         ) : null}
       </DialogContent>
@@ -58,14 +67,13 @@ export function TaskFormDialog({
 
 type TaskFormProps = {
   task: TaskRow | null;
-  projects: ProjectRow[];
   defaultProjectId: string | null;
-  onDone: () => void;
+  /** Receives the created task on create; nothing on edit. */
+  onDone: (created?: { id: string; name: string; projectId: string }) => void;
 };
 
 function TaskForm({
   task,
-  projects,
   defaultProjectId,
   onDone,
 }: TaskFormProps): React.JSX.Element {
@@ -80,17 +88,6 @@ function TaskForm({
   const { createTask, updateTask, isSaving } = useTaskMutations(null, {
     onConflict: setNameError,
   });
-
-  const projectOptions = React.useMemo<ComboboxOption[]>(
-    () =>
-      projects.map((project) => ({
-        value: project.id,
-        label: project.archived ? `${project.name} (archived)` : project.name,
-        color: project.color,
-        keywords: project.clientName ? [project.clientName] : [],
-      })),
-    [projects],
-  );
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -120,7 +117,7 @@ function TaskForm({
     void createTask({ name: trimmed, projectId }).then((created) => {
       if (!created) return;
       toast.success(`Task "${created.name}" created.`);
-      onDone();
+      onDone({ id: created.id, name: created.name, projectId });
     });
   };
 
@@ -159,18 +156,15 @@ function TaskForm({
       {task ? null : (
         <div className="space-y-2">
           <Label>Project</Label>
-          <Combobox
-            options={projectOptions}
+          <ProjectPicker
             value={projectId}
             onChange={(next) => {
               setProjectId(next);
               if (projectError) setProjectError(null);
             }}
             placeholder="Pick a project"
-            searchPlaceholder="Search projects..."
-            emptyText="No projects yet."
             className="w-full"
-            data-testid="task-project-picker"
+            testId="task-project-picker"
           />
           {projectError ? (
             <p
@@ -187,7 +181,9 @@ function TaskForm({
         <Button
           type="button"
           variant="outline"
-          onClick={onDone}
+          // Wrapped: onDone takes an optional created task, and passing it
+          // straight to onClick would hand it the mouse event instead.
+          onClick={() => onDone()}
           data-testid="task-cancel"
         >
           Cancel

@@ -113,7 +113,6 @@ export default function TasksPage(): React.JSX.Element {
     >
       <TasksTable
         tasks={visibleTasks}
-        projects={allProjects}
         isLoading={tasksQuery.isLoading}
         isFiltered={needle !== "" || projectFilter !== null}
         onCreate={() => setCreating(true)}
@@ -122,7 +121,6 @@ export default function TasksPage(): React.JSX.Element {
       <TaskFormDialog
         open={creating}
         onOpenChange={setCreating}
-        projects={allProjects}
         defaultProjectId={projectFilter}
       />
     </CatalogScreen>
