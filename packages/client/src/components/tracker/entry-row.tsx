@@ -151,6 +151,22 @@ export function EntryRow({
     <div
       className={cn(
         "flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 last:border-b-0 hover:bg-muted/40",
+        // Every row shares ONE column template, so description, project,
+        // client, tags and the times line up down the list instead of each
+        // row packing its own width. Track sizes are `fr` or fixed — never
+        // `auto`/`min-content`, which resolve against a single row's content
+        // and would bring the ragged columns straight back.
+        //
+        // Two templates for the same TEN items: the fixed part of the row
+        // (times, duration, amount) costs ~23rem whatever the viewport, so
+        // below `xl` the client and the amount collapse to zero-width tracks
+        // rather than being hidden — `display: none` would drop a grid item
+        // and slide every later column one track left. The lower switch is
+        // 1140px rather than `lg`, because at 1024 what is left over is so
+        // thin the project reads "A…"; below it the row stays a wrapping flex
+        // line, ragged but legible.
+        "min-[1140px]:grid min-[1140px]:grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_0px_minmax(5.5rem,1.1fr)_2rem_12.5rem_5.5rem_0px_2rem_2rem]",
+        "xl:grid-cols-[minmax(0,2fr)_minmax(0,1.7fr)_minmax(0,0.8fr)_minmax(5.5rem,1fr)_2rem_13rem_5.5rem_4.5rem_2rem_2rem]",
         nested && "pl-10",
         running && "bg-primary/5"
       )}
@@ -164,7 +180,7 @@ export function EntryRow({
           value={draft}
           autoFocus
           aria-label="Description"
-          className="h-8 min-w-0 flex-1 basis-56"
+          className="h-8 min-w-0 flex-1 basis-56 min-[1140px]:w-full"
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commitDescription}
           onKeyDown={(event) => {
@@ -186,7 +202,7 @@ export function EntryRow({
           type="button"
           disabled={syncing}
           className={cn(
-            "min-w-0 flex-1 basis-56 truncate rounded px-2 py-1 text-left text-sm hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent",
+            "min-w-0 flex-1 basis-56 truncate rounded px-2 py-1 text-left text-sm hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent min-[1140px]:w-full",
             entry.description.trim() === "" && "text-muted-foreground italic"
           )}
           onClick={() => {
@@ -209,7 +225,7 @@ export function EntryRow({
         value={entry.projectId}
         disabled={syncing}
         size="sm"
-        className="h-8 max-w-48 border-0 shadow-none"
+        className="h-8 w-full min-w-0 max-w-48 border-0 shadow-none min-[1140px]:max-w-none"
         placeholder="No project"
         testId="entry-project"
         onChange={(projectId) =>
@@ -217,11 +233,11 @@ export function EntryRow({
         }
       />
 
-      {entry.clientName ? (
-        <span className="hidden text-xs text-muted-foreground lg:inline">
-          {entry.clientName}
-        </span>
-      ) : null}
+      {/* Rendered even when empty: `display: none` removes a grid item, and a
+          client-less row would pull every later column one track left. */}
+      <span className="hidden min-w-0 truncate text-xs text-muted-foreground min-[1140px]:block">
+        {entry.clientName ?? ""}
+      </span>
 
       {/* The chips ARE the trigger, so tagging costs one click and the row
           keeps its height however many tags it carries — the overflow
@@ -231,7 +247,7 @@ export function EntryRow({
         disabled={syncing}
         maxChips={2}
         placeholder=""
-        className="h-8 max-w-44 border-0 px-2 shadow-none"
+        className="h-8 w-full min-w-0 max-w-44 border-0 px-2 shadow-none min-[1140px]:max-w-none"
         testId="entry-tags"
         onChange={(ids) => mutations.updateEntry({ id: entry.id, tagIds: ids })}
       />
@@ -253,7 +269,7 @@ export function EntryRow({
         <BillableGlyph billable={entry.billable} />
       </Button>
 
-      <div className="flex items-center gap-1">
+      <div className="flex min-w-0 items-center gap-1 min-[1140px]:w-full">
         <TimeField
           value={entry.start}
           timeFormat={format.timeFormat}
@@ -310,7 +326,7 @@ export function EntryRow({
         <LiveDuration
           baseSec={0}
           matchEntryId={entry.id}
-          className="w-24 text-right text-sm"
+          className="w-24 text-right text-sm min-[1140px]:w-full"
           testId="entry-duration"
         />
       ) : (
@@ -320,13 +336,13 @@ export function EntryRow({
           disabled={syncing}
           aria-label="Duration"
           testId="entry-duration"
-          className="h-8 w-24"
+          className="h-8 w-24 min-[1140px]:w-full"
           onCommit={handleDurationCommit}
         />
       )}
 
       <span
-        className="hidden w-20 text-right text-sm text-muted-foreground tabular-nums sm:inline"
+        className="hidden w-20 overflow-hidden text-right text-sm text-muted-foreground tabular-nums sm:inline min-[1140px]:block min-[1140px]:w-full"
         data-testid="entry-amount"
       >
         {entry.hourlyRate === null ? "" : format.money(entry.amount)}
