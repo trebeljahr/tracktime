@@ -201,10 +201,13 @@ export function EntryRow({
         </button>
       )}
 
+      {/* Same picker as the tracker bar, create surfaces and all: filing a
+          past entry under a project that does not exist yet is exactly when
+          you need to make one, and sending that trip to the Projects screen
+          loses the row you were fixing. */}
       <ProjectPicker
         value={entry.projectId}
         disabled={syncing}
-        allowCreate={false}
         size="sm"
         className="h-8 max-w-48 border-0 shadow-none"
         placeholder="No project"

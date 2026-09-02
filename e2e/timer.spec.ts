@@ -348,6 +348,39 @@ test.describe("Timer", () => {
   });
 
   /**
+   * Filing a past entry is exactly when the missing project turns up, so the
+   * row's picker carries the same create surfaces as the tracker bar's rather
+   * than sending you to the Projects screen and back.
+   */
+  test("an entry row can create the project it is being filed under", async ({
+    page,
+  }) => {
+    await openTracker(page, "row-picker-create");
+
+    await page.getByTestId("tracker-description").fill("Unfiled work");
+    await page.getByTestId("tracker-toggle").click();
+    await expect(runningRows(page)).toHaveCount(1);
+    await page.getByTestId("tracker-toggle").click();
+
+    const row = entryRow(page, "Unfiled work");
+    await expect(row.getByTestId("entry-project")).toContainText("No project");
+
+    await row.getByTestId("entry-project").click();
+    await page.getByTestId("project-picker-new-project").click();
+
+    await expect(page.getByTestId("project-dialog")).toBeVisible();
+    await page.getByTestId("project-name-input").fill("Filed Later");
+    await page.getByTestId("project-submit").click();
+
+    // The new project lands on that entry, not merely in the catalog.
+    await expect(row.getByTestId("entry-project")).toContainText("Filed Later");
+    await page.reload();
+    await expect(
+      entryRow(page, "Unfiled work").getByTestId("entry-project"),
+    ).toContainText("Filed Later");
+  });
+
+  /**
    * A stray click on Start leaves a few-second entry cluttering the day. The
    * toast offers to discard it — but never does so on its own, because
    * silently deleting tracked time is the worse failure.
