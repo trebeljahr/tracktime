@@ -118,6 +118,55 @@ export const useTimesheetMutations = (
   const [pending, setPending] = React.useState(0);
 
   /**
+   * Creates whose temp id the server has not answered for yet, mapped to the
+   * real id it eventually gives them — or to null when the create never
+   * landed and is parked on the offline queue instead.
+   *
+   * A cell is re-edited seconds after being filled in more often than not:
+   * type "2", Enter, realise it was three and a half, type again. That second
+   * edit resolves against the OPTIMISTIC entry, whose id only this tab has
+   * ever seen, so without somewhere to wait it was refused outright and the
+   * grid silently kept the first number. Holding the edit until the create
+   * names the entry costs a few milliseconds and makes the two writes land in
+   * the order they were made.
+   *
+   * Successful entries stay in the map rather than being deleted the instant
+   * they settle: a keystroke handler can be holding the render from just
+   * before the swap, and a temp id that has already been answered for must
+   * still resolve. A create that failed or queued is dropped, so the next
+   * edit is refused exactly as it was.
+   */
+  const createdIds = React.useRef(new Map<string, Promise<string | null>>());
+
+  /**
+   * Run `apply` against an id the server knows, waiting on an in-flight
+   * create when the cell still carries a temp one.
+   */
+  const withServerId = React.useCallback(
+    (id: string, apply: (serverId: string) => void): void => {
+      if (!isTempId(id)) {
+        apply(id);
+        return;
+      }
+      const inFlight = createdIds.current.get(id);
+      if (inFlight === undefined) {
+        // Queued offline, or already failed: an update would be lost the
+        // moment the create replays under a real id.
+        toast.info("Still syncing — try again in a moment.");
+        return;
+      }
+      void inFlight.then((serverId) => {
+        if (serverId === null) {
+          toast.info("Still syncing — try again in a moment.");
+          return;
+        }
+        apply(serverId);
+      });
+    },
+    []
+  );
+
+  /**
    * One write, optimistically applied.
    *
    * `queue` is what makes the edit survive a dead network: it is only reached
@@ -185,10 +234,14 @@ export const useTimesheetMutations = (
         end,
       });
 
-      void run({
+      // `run` never rejects, so the id it settles on is enough to tell an
+      // edit made in the meantime whether it has an entry to write to.
+      let serverId: string | null = null;
+      const named = run({
         optimistic: (entries) => [optimistic, ...entries],
         perform: async () => {
           const created = await createEntry.mutateAsync(input);
+          serverId = created.id;
           patchList((entries) =>
             entries.map((entry) =>
               entry.id === tempId
@@ -199,6 +252,11 @@ export const useTimesheetMutations = (
         },
         queue: () => enqueueOffline("entries.create", input, tempId),
         failure: "Could not add the time",
+      }).then((): string | null => serverId);
+
+      createdIds.current.set(tempId, named);
+      void named.then((id) => {
+        if (id === null) createdIds.current.delete(tempId);
       });
     },
     [billableFor, createEntry, patchList, run, shapeContext]
@@ -206,75 +264,87 @@ export const useTimesheetMutations = (
 
   const adjust = React.useCallback(
     (id: string, end: string): void => {
-      if (isTempId(id)) {
-        // The server has never seen this entry; an update would be lost the
-        // moment the queued create replays under a real id.
-        toast.info("Still syncing — try again in a moment.");
-        return;
-      }
-      const input: OfflineUpdateInput = { id, end, originId: ORIGIN_ID };
+      withServerId(id, (serverId) => {
+        const input: OfflineUpdateInput = {
+          id: serverId,
+          end,
+          originId: ORIGIN_ID,
+        };
 
-      void run({
-        optimistic: (entries) =>
-          entries.map((entry) =>
-            entry.id === id
-              ? {
-                  ...entry,
-                  end,
-                  durationSec: Math.max(
-                    0,
-                    Math.round((Date.parse(end) - Date.parse(entry.start)) / 1000)
-                  ),
-                }
-              : entry
-          ),
-        perform: async () => {
-          await updateEntry.mutateAsync(input);
-        },
-        queue: () => enqueueOffline("entries.update", input),
-        failure: "Could not save the change",
+        void run({
+          optimistic: (entries) =>
+            entries.map((entry) =>
+              entry.id === serverId
+                ? {
+                    ...entry,
+                    end,
+                    durationSec: Math.max(
+                      0,
+                      Math.round(
+                        (Date.parse(end) - Date.parse(entry.start)) / 1000
+                      )
+                    ),
+                  }
+                : entry
+            ),
+          perform: async () => {
+            await updateEntry.mutateAsync(input);
+          },
+          queue: () => enqueueOffline("entries.update", input),
+          failure: "Could not save the change",
+        });
       });
     },
-    [run, updateEntry]
+    [run, updateEntry, withServerId]
   );
 
   const remove = React.useCallback(
     (id: string, context: CellEditContext): void => {
-      const existing = utils.entries.list
-        .getData(listInput)
-        ?.entries.find((entry) => entry.id === id);
-
-      if (isTempId(id)) {
+      if (isTempId(id) && !createdIds.current.has(id)) {
         // Never reached the server — drop it locally and cancel its replay,
         // so the create cannot resurrect an entry the user just cleared.
+        // A temp id the map still knows belongs to a create that IS in flight,
+        // and deleting it locally would only last until that create answers.
         patchList((entries) => entries.filter((entry) => entry.id !== id));
         void cancelQueuedForTemp(id);
         return;
       }
 
-      const input: OfflineIdInput = { id, originId: ORIGIN_ID };
+      withServerId(id, (serverId) => {
+        // Read after the wait, so an entry the create has just renamed is
+        // still found and the undo below can offer its real times back.
+        const existing = utils.entries.list
+          .getData(listInput)
+          ?.entries.find((entry) => entry.id === serverId);
+        const input: OfflineIdInput = { id: serverId, originId: ORIGIN_ID };
 
-      void run({
-        optimistic: (entries) => entries.filter((entry) => entry.id !== id),
-        perform: async () => {
-          await removeEntry.mutateAsync(input);
-          // Clearing a cell deletes tracked time, so the way back is offered
-          // rather than assumed — the grid has no other undo.
-          if (existing?.end) {
-            toast.message("Entry removed", {
-              action: {
-                label: "Undo",
-                onClick: () =>
-                  create(existing.start, existing.end ?? existing.start, context),
-              },
-            });
-          }
-        },
-        queue: () => enqueueOffline("entries.remove", input),
-        failure: "Could not remove the time",
+        void run({
+          optimistic: (entries) =>
+            entries.filter((entry) => entry.id !== serverId),
+          perform: async () => {
+            await removeEntry.mutateAsync(input);
+            // Clearing a cell deletes tracked time, so the way back is offered
+            // rather than assumed — the grid has no other undo.
+            if (existing?.end) {
+              toast.message("Entry removed", {
+                action: {
+                  label: "Undo",
+                  onClick: () =>
+                    create(
+                      existing.start,
+                      existing.end ?? existing.start,
+                      context
+                    ),
+                },
+              });
+            }
+          },
+          queue: () => enqueueOffline("entries.remove", input),
+          failure: "Could not remove the time",
+        });
       });
     },
-    [create, listInput, patchList, removeEntry, run, utils]
+    [create, listInput, patchList, removeEntry, run, utils, withServerId]
   );
 
   const applyPlan = React.useCallback(
