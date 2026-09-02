@@ -15,6 +15,14 @@ import {
 
 import { toast } from "@/components/ui/sonner";
 import { ORIGIN_ID } from "@/hooks/use-sync";
+import {
+  buildOptimisticEntry,
+  decorateEntry,
+  projectFacts,
+  stoppedEntryShape,
+  type EntryShapeContext,
+  type OptimisticEntryArgs,
+} from "@/lib/entry-shape";
 import { idleWatcher } from "@/lib/idle-watcher";
 import { trpc } from "@/lib/trpc";
 import {
@@ -240,133 +248,36 @@ export const useEntryMutations = (): EntryMutations => {
   }, [utils]);
 
   // ── optimistic entry construction ──────────────────────────────────
+  //
+  // The shapes themselves live in `lib/entry-shape.ts` so the timesheet grid
+  // writes exactly the same optimistic entry — in particular the same rate
+  // snapshot — as the tracker does.
 
-  type ProjectFacts = {
-    projectName: string | null;
-    projectColor: string | null;
-    clientName: string | null;
-    /** The project's configured rate — an input to the snapshot, not a value. */
-    projectRate: number | null;
-  };
-
-  const describeProject = React.useCallback(
-    (projectId: string | null): ProjectFacts => {
-      if (projectId === null) {
-        return {
-          projectName: null,
-          projectColor: null,
-          clientName: null,
-          projectRate: null,
-        };
-      }
-      const project = utils.projects.list
-        .getData({})
-        ?.find((candidate) => candidate.id === projectId);
-      return {
-        projectName: project?.name ?? null,
-        projectColor: project?.color ?? null,
-        clientName: project?.clientName ?? null,
-        projectRate: project?.hourlyRate ?? null,
-      };
-    },
+  const shapeContext = React.useCallback(
+    (): EntryShapeContext => ({
+      projects: utils.projects.list.getData({}) ?? [],
+      settings: utils.settings.get.getData() ?? null,
+    }),
     [utils]
   );
 
   /** Decorate a server entry with the catalog labels the list renders. */
   const toDetailed = React.useCallback(
-    (entry: TimeEntry): DetailedEntry => {
-      const project = describeProject(entry.projectId);
-      return {
-        ...entry,
-        projectName: project.projectName,
-        projectColor: project.projectColor,
-        clientName: project.clientName,
-        taskName: null,
-        amount: entryAmount(entry.durationSec, entry.hourlyRate),
-      };
-    },
-    [describeProject]
+    (entry: TimeEntry): DetailedEntry => decorateEntry(shapeContext(), entry),
+    [shapeContext]
   );
 
   const buildEntry = React.useCallback(
-    (args: {
-      id: string;
-      description: string;
-      projectId: string | null;
-      taskId: string | null;
-      billable: boolean;
-      start: string;
-      end: string | null;
-    }): DetailedEntry => {
-      const settings = utils.settings.get.getData();
-      const project = describeProject(args.projectId);
-      const hourlyRate = resolveHourlyRate({
-        billable: args.billable,
-        projectRate: project.projectRate,
-        defaultRate: settings?.defaultHourlyRate ?? null,
-      });
-      const durationSec =
-        args.end === null ? 0 : durationBetween(args.start, args.end);
-      const stamp = nowIso();
-
-      return {
-        id: args.id,
-        workspaceId: settings?.workspaceId ?? "",
-        authorId: settings?.userId ?? "",
-        description: args.description,
-        projectId: args.projectId,
-        taskId: args.taskId,
-        billable: args.billable,
-        start: args.start,
-        end: args.end,
-        durationSec,
-        hourlyRate,
-        currency: settings?.currency ?? "EUR",
-        source: "web",
-        timeZone: deviceTimeZone(),
-        // Server-owned: only the runaway guard ever writes it.
-        runaway: null,
-        createdAt: stamp,
-        updatedAt: stamp,
-        projectName: project.projectName,
-        projectColor: project.projectColor,
-        clientName: project.clientName,
-        taskName: null,
-        amount: entryAmount(durationSec, hourlyRate),
-      };
-    },
-    [describeProject, utils]
+    (args: OptimisticEntryArgs): DetailedEntry =>
+      buildOptimisticEntry(shapeContext(), args),
+    [shapeContext]
   );
 
   /** The stopped shape the server would write for a running entry. */
   const stopShape = React.useCallback(
-    (running: TimeEntry, end: string): DetailedEntry => {
-      const settings = utils.settings.get.getData();
-      const project = describeProject(running.projectId);
-      const safeEnd =
-        Date.parse(end) > Date.parse(running.start) ? end : running.start;
-      const hourlyRate = resolveHourlyRate({
-        billable: running.billable,
-        projectRate: project.projectRate,
-        defaultRate: settings?.defaultHourlyRate ?? null,
-      });
-      const durationSec = durationBetween(running.start, safeEnd);
-
-      return {
-        ...running,
-        end: safeEnd,
-        durationSec,
-        hourlyRate,
-        currency: settings?.currency ?? running.currency,
-        updatedAt: safeEnd,
-        projectName: project.projectName,
-        projectColor: project.projectColor,
-        clientName: project.clientName,
-        taskName: null,
-        amount: entryAmount(durationSec, hourlyRate),
-      };
-    },
-    [describeProject, utils]
+    (running: TimeEntry, end: string): DetailedEntry =>
+      stoppedEntryShape(shapeContext(), running, end),
+    [shapeContext]
   );
 
   /**
@@ -549,7 +460,7 @@ export const useEntryMutations = (): EntryMutations => {
           const billable = input.billable ?? entry.billable;
           const start = input.start ?? entry.start;
           const end = input.end === undefined ? entry.end : input.end;
-          const project = describeProject(projectId);
+          const project = projectFacts(shapeContext(), projectId);
           const hourlyRate = resolveHourlyRate({
             billable,
             projectRate: project.projectRate,

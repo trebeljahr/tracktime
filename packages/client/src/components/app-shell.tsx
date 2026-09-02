@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock,
   FolderKanban,
+  Grid3x3,
   ListChecks,
   LogOut,
   Menu,
@@ -65,6 +66,7 @@ export const NAV_SECTIONS: NavSection[] = [
     heading: null,
     items: [
       { href: "/track", label: "Track", icon: Timer },
+      { href: "/timesheet", label: "Timesheet", icon: Grid3x3 },
       { href: "/calendar", label: "Calendar", icon: CalendarDays },
     ],
   },

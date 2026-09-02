@@ -2,13 +2,8 @@
 
 import * as React from "react";
 import { format, parseISO } from "date-fns";
-import type {
-  DurationFormat,
-  WeeklyReportResult,
-  WeeklyReportRow,
-} from "@starter/shared";
+import type { WeeklyReportResult, WeeklyReportRow } from "@starter/shared";
 
-import { DurationInput } from "@/components/duration-input";
 import {
   Table,
   TableBody,
@@ -33,30 +28,23 @@ const dayHeading = (day: string): { weekday: string; date: string } => {
 export type WeeklyGridProps = {
   result: WeeklyReportResult;
   duration: (seconds: number) => string;
-  durationFormat: DurationFormat;
-  /** Commit a new total for one cell; the page turns it into entry writes. */
-  onCommitCell: (row: WeeklyReportRow, dayIndex: number, seconds: number) => void;
-  /** Cells backed by a running timer are read-only until it is stopped. */
-  isCellLocked: (row: WeeklyReportRow, dayIndex: number) => boolean;
-  disabled?: boolean;
   /** "YYYY-MM-DD" of today, so the current column can be highlighted. */
   todayKey?: string;
 };
 
 /**
- * The timesheet grid: one row per project+task, one column per weekday.
+ * The week at a glance: one row per project+task, one column per weekday.
  *
- * Every cell is a duration field - typing "1:30" into Wednesday adjusts that
- * day's time for the row, which is how a weekly timesheet is meant to be
- * filled in.
+ * Read-only, deliberately. The cells used to be editable, which meant a cell
+ * summing several entries had to pick one of them to rewrite — it took the most
+ * recent, silently, which is how a timesheet grid destroys records nobody
+ * pointed at. Entering time is the /timesheet screen's job, where the rules for
+ * an ambiguous cell are explicit and a cell that cannot be resolved is shown as
+ * such instead of accepting the keystroke.
  */
 export function WeeklyGrid({
   result,
   duration,
-  durationFormat,
-  onCommitCell,
-  isCellLocked,
-  disabled = false,
   todayKey,
 }: WeeklyGridProps): React.JSX.Element {
   return (
@@ -108,22 +96,17 @@ export function WeeklyGrid({
               </TableCell>
 
               {result.days.map((day, index) => {
-                const locked = isCellLocked(row, index);
+                const seconds = row.daySeconds[index] ?? 0;
                 return (
-                  <TableCell key={day} className="p-1 text-center">
-                    <DurationInput
-                      value={row.daySeconds[index] ?? 0}
-                      format={durationFormat}
-                      disabled={disabled || locked}
-                      aria-label={`${row.label}, ${day}`}
-                      className={cn(
-                        "mx-auto w-24",
-                        (row.daySeconds[index] ?? 0) === 0 &&
-                          "text-muted-foreground"
-                      )}
-                      onCommit={(seconds) => onCommitCell(row, index, seconds)}
-                      testId={`weekly-cell-${key}-${index}`}
-                    />
+                  <TableCell
+                    key={day}
+                    className={cn(
+                      "text-center tabular-nums",
+                      seconds === 0 && "text-muted-foreground"
+                    )}
+                    data-testid={`weekly-cell-${key}-${index}`}
+                  >
+                    {seconds === 0 ? "–" : duration(seconds)}
                   </TableCell>
                 );
               })}
