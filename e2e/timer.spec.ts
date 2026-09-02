@@ -253,34 +253,45 @@ test.describe("Timer", () => {
   test("logs a manual entry with an explicit duration", async ({ page }) => {
     await openTracker(page, "timer-manual");
 
-    await page.getByTestId("tracker-mode-manual").click();
+    // The + is its own button, not a mode the bar gets stuck in: the Start
+    // button keeps saying Start, and the range lives in a dialog.
+    await page.getByTestId("tracker-description").fill("Manual block");
+    await page.getByTestId("tracker-manual-open").click();
 
-    // Manual mode swaps the live clock for a start/end range, pre-filled with
-    // the last hour.
-    await expect(page.getByTestId("tracker-start-time")).toBeVisible();
-    await expect(page.getByTestId("tracker-end-time")).toBeVisible();
-    await expect(page.getByTestId("tracker-duration")).toHaveValue("1:00:00");
+    const dialog = page.getByTestId("manual-entry-dialog");
+    await expect(dialog).toBeVisible();
     await expect(page.getByTestId("tracker-toggle")).toHaveAttribute(
       "data-state",
-      "add",
+      "idle",
     );
 
-    await page.getByTestId("tracker-description").fill("Manual block");
-    // The duration field accepts tracker shorthand and normalises it.
-    await page.getByTestId("tracker-duration").fill("45m");
-    await page.getByTestId("tracker-duration").press("Enter");
-    await expect(page.getByTestId("tracker-duration")).toHaveValue("0:45:00");
+    // The dialog opens on the hour that just passed, seeded with whatever the
+    // composer already had typed in it.
+    await expect(page.getByTestId("manual-entry-description")).toHaveValue(
+      "Manual block",
+    );
+    await expect(page.getByTestId("manual-entry-start")).toBeVisible();
+    await expect(page.getByTestId("manual-entry-end")).toBeVisible();
+    await expect(page.getByTestId("manual-entry-duration")).toHaveValue(
+      "1:00:00",
+    );
 
-    await page.getByTestId("tracker-toggle").click();
+    // The duration field accepts tracker shorthand and normalises it.
+    await page.getByTestId("manual-entry-duration").fill("45m");
+    await page.getByTestId("manual-entry-duration").press("Enter");
+    await expect(page.getByTestId("manual-entry-duration")).toHaveValue(
+      "0:45:00",
+    );
+
+    await page.getByTestId("manual-entry-add").click();
+    await expect(dialog).toBeHidden();
 
     const row = entryRow(page, "Manual block");
     await expect(row).toHaveCount(1);
     await expect(row).toHaveAttribute("data-running", "false");
     await expect(row.getByTestId("entry-duration")).toHaveValue("0:45:00");
 
-    // Adding resets the composer for the next block without starting a timer.
-    await expect(page.getByTestId("tracker-description")).toHaveValue("");
-    await expect(page.getByTestId("tracker-duration")).toHaveValue("1:00:00");
+    // Adding logged the block without starting a timer.
     await expect(runningRows(page)).toHaveCount(0);
   });
 

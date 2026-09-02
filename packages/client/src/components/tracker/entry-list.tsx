@@ -154,7 +154,7 @@ export function EntryList(): React.JSX.Element {
       <EmptyState
         icon={Timer}
         title="No time tracked yet"
-        description="Type what you are working on above and hit Start — or switch to manual mode to log time you already spent."
+        description="Type what you are working on above and hit Start — or press + to log time you already spent."
         testId="entries-empty"
       />
     );

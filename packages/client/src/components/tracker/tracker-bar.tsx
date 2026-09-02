@@ -1,20 +1,19 @@
 "use client";
 
 import * as React from "react";
-import { CloudOff, Play, Plus, Square, Timer, WifiOff } from "lucide-react";
+import { CloudOff, Play, Plus, Square, WifiOff } from "lucide-react";
 import { formatDuration } from "@starter/shared";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { DurationInput } from "@/components/duration-input";
 import { ProjectPicker } from "@/components/project-picker";
 import { TaskPicker } from "@/components/task-picker";
 import { TagPicker } from "@/components/tags/tag-picker";
 import { BillableGlyph } from "@/components/tracker/billable-glyph";
+import { ManualEntryDialog } from "@/components/tracker/manual-entry-dialog";
 import { QuickStartRow } from "@/components/tracker/quick-start-row";
-import { TimeField } from "@/components/tracker/time-field";
 import {
   requestPomodoroPermission,
   usePomodoro,
@@ -28,28 +27,10 @@ import { useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 
-type TrackerMode = "timer" | "manual";
-
-const HOUR_MS = 3_600_000;
-
-const defaultManualRange = (): { start: string; end: string } => {
-  const end = new Date();
-  end.setSeconds(0, 0);
-  return {
-    start: new Date(end.getTime() - HOUR_MS).toISOString(),
-    end: end.toISOString(),
-  };
-};
-
-const clampEnd = (start: string, end: string): string =>
-  Date.parse(end) > Date.parse(start)
-    ? end
-    : new Date(Date.parse(start) + 60_000).toISOString();
-
 /**
  * The bar the whole product is used through: description, project, billable,
- * the live elapsed clock and one big Start/Stop button — plus a manual mode
- * that swaps the clock for an explicit start/end range.
+ * the live elapsed clock and one big Start/Stop button — plus a separate
+ * button that opens the dialog for logging time that was never timed.
  */
 export function TrackerBar(): React.JSX.Element {
   const { entry: running, elapsedSec } = useRunningEntry();
@@ -59,13 +40,12 @@ export function TrackerBar(): React.JSX.Element {
   const { pending, online } = useOfflineQueue();
   const projects = trpc.projects.list.useQuery({});
 
-  const [mode, setMode] = React.useState<TrackerMode>("timer");
+  const [manualOpen, setManualOpen] = React.useState(false);
   const [description, setDescription] = React.useState("");
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [taskId, setTaskId] = React.useState<string | null>(null);
   const [billable, setBillable] = React.useState(false);
   const [tagIds, setTagIds] = React.useState<string[]>([]);
-  const [manual, setManual] = React.useState(defaultManualRange);
 
   const isRunning = running !== null;
 
@@ -186,29 +166,6 @@ export function TrackerBar(): React.JSX.Element {
     else start();
   }, [isRunning, start, stop]);
 
-  const addManual = React.useCallback((): void => {
-    const end = clampEnd(manual.start, manual.end);
-    mutations.createManualEntry({
-      description,
-      projectId,
-      taskId,
-      billable,
-      tagIds,
-      start: manual.start,
-      end,
-    });
-    setDescription("");
-    // Tags deliberately survive: consecutive manual entries are usually the
-    // same kind of work, and re-picking the label every time is what stops
-    // people from tagging at all.
-    setManual(defaultManualRange());
-  }, [billable, description, manual, mutations, projectId, tagIds, taskId]);
-
-  const submit = React.useCallback((): void => {
-    if (mode === "manual") addManual();
-    else toggle();
-  }, [addManual, mode, toggle]);
-
   // Cmd/Ctrl+Enter toggles the timer from anywhere on the page, including
   // from inside another field.
   const toggleRef = React.useRef(toggle);
@@ -228,11 +185,6 @@ export function TrackerBar(): React.JSX.Element {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, []);
-
-  const manualSeconds = Math.max(
-    0,
-    Math.round((Date.parse(manual.end) - Date.parse(manual.start)) / 1000)
-  );
 
   return (
     <div
@@ -259,7 +211,7 @@ export function TrackerBar(): React.JSX.Element {
             if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
               event.preventDefault();
               commitDescription();
-              submit();
+              toggle();
             }
             if (event.key === "Escape") {
               event.preventDefault();
@@ -309,108 +261,52 @@ export function TrackerBar(): React.JSX.Element {
 
         <Separator orientation="vertical" className="hidden h-8 sm:block" />
 
-        {mode === "timer" ? (
-          <span
-            className="w-24 shrink-0 text-right font-mono text-lg tabular-nums"
-            data-testid="tracker-elapsed"
-            data-running={isRunning ? "true" : "false"}
-          >
-            {format.duration(isRunning ? elapsedSec : 0)}
-          </span>
-        ) : (
-          <div className="flex items-center gap-1">
-            <TimeField
-              value={manual.start}
-              timeFormat={format.timeFormat}
-              aria-label="Start time"
-              testId="tracker-start-time"
-              onCommit={(iso) =>
-                setManual((current) => ({
-                  start: iso,
-                  end: clampEnd(iso, current.end),
-                }))
-              }
-            />
-            <span className="text-muted-foreground">–</span>
-            <TimeField
-              value={manual.end}
-              timeFormat={format.timeFormat}
-              aria-label="End time"
-              testId="tracker-end-time"
-              onCommit={(iso) =>
-                setManual((current) => ({
-                  start: current.start,
-                  end: clampEnd(current.start, iso),
-                }))
-              }
-            />
-            <DurationInput
-              value={manualSeconds}
-              format={format.durationFormat}
-              aria-label="Duration"
-              testId="tracker-duration"
-              className="h-8 w-24"
-              onCommit={(seconds) =>
-                setManual((current) => ({
-                  start: current.start,
-                  end: new Date(
-                    Date.parse(current.start) + Math.max(60, seconds) * 1000
-                  ).toISOString(),
-                }))
-              }
-            />
-          </div>
-        )}
-
-        <Button
-          type="button"
-          className={cn(
-            "w-24 shrink-0",
-            isRunning &&
-              mode === "timer" &&
-              "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          )}
-          onClick={submit}
-          data-testid="tracker-toggle"
-          data-state={mode === "manual" ? "add" : isRunning ? "running" : "idle"}
+        <span
+          className="w-24 shrink-0 text-right font-mono text-lg tabular-nums"
+          data-testid="tracker-elapsed"
+          data-running={isRunning ? "true" : "false"}
         >
-          {mode === "manual" ? (
-            <>
-              <Plus /> Add
-            </>
-          ) : isRunning ? (
-            <>
-              <Square /> Stop
-            </>
-          ) : (
-            <>
-              <Play /> Start
-            </>
-          )}
-        </Button>
+          {format.duration(isRunning ? elapsedSec : 0)}
+        </span>
 
-        <div className="flex shrink-0 items-center rounded-md border border-border p-0.5">
+        {/* Start and + stay one unit: the bar wraps on narrow screens, and
+            an orphaned + on its own line reads like it belongs to the row
+            below it. */}
+        <div className="flex shrink-0 items-center gap-2">
           <Button
             type="button"
-            variant={mode === "timer" ? "secondary" : "ghost"}
-            size="icon"
-            className="size-7"
-            aria-label="Timer mode"
-            aria-pressed={mode === "timer"}
-            onClick={() => setMode("timer")}
-            data-testid="tracker-mode-timer"
+            className={cn(
+              "w-24 shrink-0",
+              isRunning &&
+                "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            )}
+            onClick={toggle}
+            data-testid="tracker-toggle"
+            data-state={isRunning ? "running" : "idle"}
           >
-            <Timer />
+            {isRunning ? (
+              <>
+                <Square /> Stop
+              </>
+            ) : (
+              <>
+                <Play /> Start
+              </>
+            )}
           </Button>
+
+          {/* A button, not a mode: logging past work is one action that ends
+              when the dialog closes, so the bar can never be left sitting in a
+              state where Start has quietly turned into Add. */}
           <Button
             type="button"
-            variant={mode === "manual" ? "secondary" : "ghost"}
+            variant="outline"
             size="icon"
-            className="size-7"
-            aria-label="Manual mode"
-            aria-pressed={mode === "manual"}
-            onClick={() => setMode("manual")}
-            data-testid="tracker-mode-manual"
+            className="shrink-0"
+            aria-label="Add time entry"
+            title="Add time entry"
+            onClick={() => setManualOpen(true)}
+            data-testid="tracker-manual-open"
           >
             <Plus />
           </Button>
@@ -452,6 +348,26 @@ export function TrackerBar(): React.JSX.Element {
           ) : null}
         </div>
       ) : null}
+
+      <ManualEntryDialog
+        open={manualOpen}
+        onOpenChange={setManualOpen}
+        // Seeded from the composer, so typing a description and then reaching
+        // for the + does not throw that away. While a timer runs the composer
+        // mirrors the running entry, which is not a draft for a new block.
+        seed={
+          isRunning
+            ? {
+                description: "",
+                projectId: null,
+                taskId: null,
+                billable: false,
+                tagIds: [],
+              }
+            : { description, projectId, taskId, billable, tagIds }
+        }
+        mutations={mutations}
+      />
     </div>
   );
 }

@@ -81,13 +81,13 @@ async function logManualEntry(
   description: string,
   duration: string,
 ): Promise<Locator> {
-  await page.getByTestId("tracker-mode-manual").click();
-  await page.getByTestId("tracker-description").fill(description);
-  await page.getByTestId("tracker-duration").fill(duration);
-  await page.getByTestId("tracker-duration").press("Enter");
-  await expect(page.getByTestId("tracker-duration")).toHaveValue(duration);
+  await page.getByTestId("tracker-manual-open").click();
+  await page.getByTestId("manual-entry-description").fill(description);
+  await page.getByTestId("manual-entry-duration").fill(duration);
+  await page.getByTestId("manual-entry-duration").press("Enter");
+  await expect(page.getByTestId("manual-entry-duration")).toHaveValue(duration);
 
-  await page.getByTestId("tracker-toggle").click();
+  await page.getByTestId("manual-entry-add").click();
 
   const row = page
     .locator('[data-testid="entry-row"]')
