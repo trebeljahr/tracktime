@@ -218,6 +218,38 @@ the Raycast password store), never a plain config file. Clients send
 any of them can be signed out; revocation kills the HTTP and WebSocket paths
 at once. Device-flow client ids are allowlisted in `auth/client-label.ts`.
 
+### Tags
+
+Tags are the one catalog dimension outside the Client → Project → Task
+hierarchy: many per entry, orthogonal to it, so "invoicing" or "deep work"
+can be reported on across every project. Entries carry `tagIds: string[]`.
+
+Three rules that fail quietly if broken:
+
+- **`TimeEntry.tagIds` is never `required`.** Entries written before tags
+  existed have no such field, and a required array would fail validation on
+  each of them the next time it was saved. (Same trap as
+  `TimeEntry.description`, and as `createdBy` on the catalog models.)
+- **Deleting a tag `$pull`s it off every entry** — never `$set: []` and never
+  `$unset`, either of which takes that entry's *other* tags with it.
+- **Tags ride alongside `QuickStart`, never inside `quickStartKey`.** Folding
+  them into the key would split one recurring combination into a recent per
+  set of labels, so a favorite tagged differently one day fragments the
+  recents list. Quick starts therefore open untagged.
+
+`reports.summary` with `groupBy: "tag"` gives an entry's **full** duration to
+each of its tags, so the group rows deliberately sum to more than the range
+total. Splitting the duration evenly would invent time nobody spent. The
+overlap is real, so the table states it on screen rather than showing a
+breakdown that cannot reconcile; the report's own totals stay single-counted.
+
+Every client can set tags. The offline payload types in `@starter/core`
+(`OfflineStartInput` and friends) carry an optional `tagIds`, so a tag applied
+offline survives the replay from the web app, the extension or Raycast alike.
+Optional, because a row queued by a build that predates tags must still decode
+and replay: the server reads an absent list as "no tags" on start/create and
+as "leave them alone" on update.
+
 ### Raycast extension
 
 `packages/raycast` is a Raycast extension: a macOS menu bar timer plus
