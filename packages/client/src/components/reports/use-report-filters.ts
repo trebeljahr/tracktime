@@ -21,6 +21,7 @@ export const REPORT_PARAM = {
   projects: "projects",
   clients: "clients",
   tasks: "tasks",
+  tags: "tags",
   billable: "billable",
   search: "q",
   groupBy: "group",
@@ -37,17 +38,23 @@ export type ReportFilterState = {
   projectIds: string[];
   clientIds: string[];
   taskIds: string[];
+  tagIds: string[];
   billable: BillableFilter;
   search: string;
 };
 
 /** Which id list a multi-select writes to. */
-export type IdFilterKey = "projectIds" | "clientIds" | "taskIds";
+export type IdFilterKey =
+  | "projectIds"
+  | "clientIds"
+  | "taskIds"
+  | "tagIds";
 
 const PARAM_FOR_IDS: Record<IdFilterKey, string> = {
   projectIds: REPORT_PARAM.projects,
   clientIds: REPORT_PARAM.clients,
   taskIds: REPORT_PARAM.tasks,
+  tagIds: REPORT_PARAM.tags,
 };
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
@@ -96,6 +103,7 @@ export const toReportFilters = (state: ReportFilterState): ReportFilters => ({
   ...(state.projectIds.length > 0 ? { projectIds: state.projectIds } : {}),
   ...(state.clientIds.length > 0 ? { clientIds: state.clientIds } : {}),
   ...(state.taskIds.length > 0 ? { taskIds: state.taskIds } : {}),
+  ...(state.tagIds.length > 0 ? { tagIds: state.tagIds } : {}),
   ...(state.billable === "all" ? {} : { billable: state.billable === "yes" }),
   ...(state.search.trim().length > 0 ? { search: state.search.trim() } : {}),
 });
@@ -149,6 +157,7 @@ export const useReportFilters = (): UseReportFiltersResult => {
   const projectsParam = searchParams.get(REPORT_PARAM.projects);
   const clientsParam = searchParams.get(REPORT_PARAM.clients);
   const tasksParam = searchParams.get(REPORT_PARAM.tasks);
+  const tagsParam = searchParams.get(REPORT_PARAM.tags);
   const billableParam = searchParams.get(REPORT_PARAM.billable);
   const searchParam = searchParams.get(REPORT_PARAM.search);
 
@@ -158,10 +167,19 @@ export const useReportFilters = (): UseReportFiltersResult => {
       projectIds: parseIds(projectsParam),
       clientIds: parseIds(clientsParam),
       taskIds: parseIds(tasksParam),
+      tagIds: parseIds(tagsParam),
       billable: parseBillable(billableParam),
       search: searchParam ?? "",
     }),
-    [range, projectsParam, clientsParam, tasksParam, billableParam, searchParam]
+    [
+      range,
+      projectsParam,
+      clientsParam,
+      tasksParam,
+      tagsParam,
+      billableParam,
+      searchParam,
+    ]
   );
 
   const filters = React.useMemo(() => toReportFilters(state), [state]);
@@ -226,6 +244,7 @@ export const useReportFilters = (): UseReportFiltersResult => {
       [REPORT_PARAM.projects]: null,
       [REPORT_PARAM.clients]: null,
       [REPORT_PARAM.tasks]: null,
+      [REPORT_PARAM.tags]: null,
       [REPORT_PARAM.billable]: null,
       [REPORT_PARAM.search]: null,
     });
@@ -240,6 +259,7 @@ export const useReportFilters = (): UseReportFiltersResult => {
     state.projectIds.length > 0 ||
     state.clientIds.length > 0 ||
     state.taskIds.length > 0 ||
+    state.tagIds.length > 0 ||
     state.billable !== "all" ||
     state.search.trim().length > 0;
 

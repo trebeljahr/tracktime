@@ -10,6 +10,11 @@ export type ReportFilters = {
   clientIds?: string[];
   taskIds?: string[];
   billable?: boolean;
+  /**
+   * Keep only entries carrying at least one of these tags (OR, not AND).
+   * Empty or absent means "no tag filter" — never "only untagged entries".
+   */
+  tagIds?: string[];
   search?: string;
   /** IANA zone days are bucketed in. Defaults to UTC when absent. */
   timeZone?: string;
@@ -94,3 +99,28 @@ export type CsvExportResult = {
   /** RFC 4180 CSV text. */
   csv: string;
 };
+
+// ── server-rendered PDF export ───────────────────────────────────────
+
+/**
+ * A report rendered to PDF on the server.
+ *
+ * The bytes travel base64-encoded because tRPC's transport is JSON: there is
+ * no binary frame to put a Buffer in, and anything not JSON-representable
+ * would be silently mangled by the serializer. The client decodes it back to
+ * a `Blob` and hands that to the browser as a download.
+ *
+ * Encoding it rather than exposing a separate binary HTTP route is what keeps
+ * ONE procedure working from every shell: the browser, Electron and Capacitor
+ * all talk to the same API over HTTPS with the same auth, and none of them
+ * needs a second authenticated fetch path or a signed download URL.
+ */
+export type PdfExportResult = {
+  filename: string;
+  /** base64-encoded PDF bytes */
+  base64: string;
+  mimeType: "application/pdf";
+};
+
+// ── per-project budgets ──────────────────────────────────────────────
+

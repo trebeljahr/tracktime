@@ -3,6 +3,7 @@
 // `list` resolves the owning client (even an archived one) and aggregates
 // entry counts / tracked seconds in a single pipeline — never N+1.
 import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import {
   createProjectSchema,
   idInputSchema,

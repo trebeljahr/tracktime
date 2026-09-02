@@ -25,6 +25,10 @@ export interface ITimeEntry extends Document {
   timeZone: string | null;
   /** What the runaway guard did about this entry. See @starter/shared/runaway. */
   runaway: RunawayDoc | null;
+  /** Ids of the Tags on this entry. Empty array = untagged. */
+  tagIds: string[];
+  /** The Invoice this entry was billed on, or null while still billable. */
+  invoiceId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,6 +66,8 @@ export type TimeEntryDocLike = {
   timeZone: string | null;
   /** Absent on every entry written before the guard existed. */
   runaway?: RunawayDoc | null;
+  tagIds: string[];
+  invoiceId: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -117,6 +123,20 @@ const timeEntrySchema = new Schema<ITimeEntry>(
     // See the note on TimeEntry.timeZone in @starter/shared.
     timeZone: { type: String, default: null },
     runaway: { type: runawaySchema, default: null },
+    tagIds: { type: [String], default: [] },
+    /**
+     * The DENORMALIZED half of the double-billing guard.
+     *
+     * `Invoice.entryIds` is the source of truth for what an invoice bills.
+     * This field exists so the opposite question — "which entries are still
+     * billable?" — is one indexed query (`invoiceId: null`) instead of a scan
+     * of every invoice's entryIds array, which is the query the invoice
+     * preview runs on every keystroke of a date range.
+     *
+     * The two are written in the SAME place (invoice create / delete) inside
+     * one code path, so they cannot drift: never set one without the other.
+     */
+    invoiceId: { type: String, default: null },
   },
   { timestamps: true },
 );
@@ -127,6 +147,12 @@ timeEntrySchema.index({ workspaceId: 1, projectId: 1, start: -1 });
 /** Per-member reads: the `memberIds` report filter, and the visibility clause
  * that restricts a member without `canViewOthersTime` to their own rows. */
 timeEntrySchema.index({ workspaceId: 1, authorId: 1, start: -1 });
+
+/** "Entries carrying any of these tags" — a multikey index over the array. */
+timeEntrySchema.index({ workspaceId: 1, tagIds: 1 });
+
+/** "What is still un-invoiced here" — the double-billing guard. */
+timeEntrySchema.index({ workspaceId: 1, invoiceId: 1 });
 
 /**
  * At most ONE running entry (`end === null`) per PERSON, across every
@@ -180,6 +206,10 @@ export function toClientTimeEntry(doc: TimeEntryDocLike): TimeEntryWire {
             : null,
         }
       : null,
+    // Documents written before these fields existed have neither key, so the
+    // fallbacks are load-bearing, not defensive noise.
+    tagIds: doc.tagIds ?? [],
+    invoiceId: doc.invoiceId ?? null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

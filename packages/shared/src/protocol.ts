@@ -32,7 +32,7 @@ export type SyncEvent =
   | { kind: "timer.stopped"; entry: TimeEntry }
   | {
       kind: "catalog.changed";
-      scope: "client" | "project" | "task";
+      scope: "client" | "project" | "task" | "tag";
       /**
        * Set when the change rewrote time entries too — a cascading delete
        * detaches every entry that pointed at the removed project or task, so
@@ -49,6 +49,12 @@ export type SyncEvent =
    * chip moved one slot to the left.
    */
   | { kind: "favorites.changed" }
+  /**
+   * An invoice was created, had its status changed, or was deleted. The id is
+   * enough — clients refetch rather than trusting a broadcast snapshot, since
+   * an invoice carries money and must never be rendered from stale gossip.
+   */
+  | { kind: "invoice.changed"; id: string }
   | { kind: "settings.changed" };
 
 /** Room name every sync event for a given owner is published to. */

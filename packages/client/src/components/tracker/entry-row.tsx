@@ -32,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { DurationInput } from "@/components/duration-input";
 import { ProjectPicker } from "@/components/project-picker";
+import { TagPicker } from "@/components/tags/tag-picker";
 import { BillableGlyph } from "@/components/tracker/billable-glyph";
 import { LiveDuration } from "@/components/tracker/live-duration";
 import { TimeField } from "@/components/tracker/time-field";
@@ -218,6 +219,19 @@ export function EntryRow({
           {entry.clientName}
         </span>
       ) : null}
+
+      {/* The chips ARE the trigger, so tagging costs one click and the row
+          keeps its height however many tags it carries — the overflow
+          collapses into "+N" rather than wrapping onto a second line. */}
+      <TagPicker
+        value={entry.tagIds}
+        disabled={syncing}
+        maxChips={2}
+        placeholder=""
+        className="h-8 max-w-44 border-0 px-2 shadow-none"
+        testId="entry-tags"
+        onChange={(ids) => mutations.updateEntry({ id: entry.id, tagIds: ids })}
+      />
 
       <Button
         type="button"

@@ -36,6 +36,8 @@ const entry = (overrides: Partial<DetailedEntry> = {}): DetailedEntry => {
     source: "web",
     timeZone: null,
     runaway: null,
+    tagIds: [],
+    invoiceId: null,
     createdAt: start,
     updatedAt: start,
     projectName: "tracktime",

@@ -114,6 +114,8 @@ export type OptimisticEntryArgs = {
   billable: boolean;
   start: string;
   end: string | null;
+  /** Tags the caller asked for. Omitted means untagged. */
+  tagIds?: string[];
 };
 
 /** The entry the server is about to create, as far as this client can tell. */
@@ -149,6 +151,11 @@ export const buildOptimisticEntry = (
     timeZone: deviceTimeZone(),
     // Server-owned: only the runaway guard ever writes it.
     runaway: null,
+    // Echo the tags the caller asked for, so the row is not briefly untagged
+    // before the server answers — which reads as the tag failing to stick.
+    tagIds: args.tagIds ?? [],
+    // Freshly created time is never on an invoice yet.
+    invoiceId: null,
     createdAt: stamp,
     updatedAt: stamp,
     projectName: project.projectName,

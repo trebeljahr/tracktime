@@ -19,6 +19,7 @@ import {
   MultiSelect,
   type MultiSelectOption,
 } from "@/components/reports/multi-select";
+import { TagFilter } from "@/components/tags/tag-filter";
 import {
   REPORT_PARAM,
   type BillableFilter,
@@ -262,6 +263,11 @@ export function ReportFiltersBar({
         searchPlaceholder="Search tasks..."
         className={cn(hasProjectSelection ? "w-[9.5rem]" : "w-[11.5rem]")}
         testId="filter-tasks"
+      />
+
+      <TagFilter
+        value={state.tagIds}
+        onChange={(ids) => setIds("tagIds", ids)}
       />
 
       <Select

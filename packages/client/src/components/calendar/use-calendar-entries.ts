@@ -212,6 +212,11 @@ export const useCalendarActions = (
         timeZone: variables.timeZone ?? null,
         // Server-owned: only the runaway guard ever writes it.
         runaway: null,
+        // Echo the tags the caller asked for, so the optimistic row is not
+        // briefly untagged before the server answers. Freshly created time is
+        // never on an invoice yet.
+        tagIds: variables.tagIds ?? [],
+        invoiceId: null,
         createdAt: now,
         updatedAt: now,
         ...projectMeta(projectId),

@@ -61,6 +61,20 @@ type MutationContext = {
   queued?: boolean;
 };
 
+/**
+ * The offline payloads plus the tags the picker supplied.
+ *
+ * `@starter/core`'s `OfflineStartInput`/`OfflineCreateInput`/`OfflineUpdateInput`
+ * predate tags and do not carry `tagIds`. The field rides along here rather
+ * than being dropped: the tRPC input schemas accept it, and a queued row is
+ * stored and replayed as plain JSON, so a tag applied while offline survives
+ * the replay. Widening the payload types in core would make this a plain
+ * `OfflineStartInput` again.
+ */
+type StartInput = OfflineStartInput & { tagIds?: string[] };
+type CreateInput = OfflineCreateInput & { tagIds?: string[] };
+type UpdateInput = OfflineUpdateInput & { tagIds?: string[] };
+
 const byStartDesc = (a: DetailedEntry, b: DetailedEntry): number => {
   const delta = Date.parse(b.start) - Date.parse(a.start);
   return delta !== 0 ? delta : b.id.localeCompare(a.id);
@@ -88,6 +102,8 @@ export type StartTimerArgs = {
   billable: boolean;
   /** ISO instant to open the entry at. Defaults to now. */
   start?: string;
+  /** Tags to stamp on the new entry. Omitted means untagged. */
+  tagIds?: string[];
 };
 
 export type ManualEntryArgs = StartTimerArgs & {
@@ -103,6 +119,8 @@ export type UpdateEntryArgs = {
   billable?: boolean;
   start?: string;
   end?: string | null;
+  /** Replaces the whole set — omit to leave the entry's tags untouched. */
+  tagIds?: string[];
 };
 
 /** One idle decision, applied as "close this, then maybe open that". */
@@ -311,7 +329,7 @@ export const useEntryMutations = (): EntryMutations => {
 
   const startMutation = trpc.entries.start.useMutation({
     onMutate: async (raw): Promise<MutationContext> => {
-      const input = raw as OfflineStartInput;
+      const input = raw as StartInput;
       const context = await snapshot();
       context.tempId = createTempId();
 
@@ -326,6 +344,7 @@ export const useEntryMutations = (): EntryMutations => {
         billable: input.billable,
         start: input.start,
         end: null,
+        tagIds: input.tagIds ?? [],
       });
       utils.entries.current.setData(undefined, optimistic);
       insertEntry(optimistic);
@@ -410,7 +429,7 @@ export const useEntryMutations = (): EntryMutations => {
 
   const createMutation = trpc.entries.create.useMutation({
     onMutate: async (raw): Promise<MutationContext> => {
-      const input = raw as OfflineCreateInput;
+      const input = raw as CreateInput;
       const context = await snapshot();
       context.tempId = createTempId();
       insertEntry(
@@ -422,6 +441,7 @@ export const useEntryMutations = (): EntryMutations => {
           billable: input.billable,
           start: input.start,
           end: input.end,
+          tagIds: input.tagIds ?? [],
         })
       );
       return context;
@@ -445,7 +465,7 @@ export const useEntryMutations = (): EntryMutations => {
 
   const updateMutation = trpc.entries.update.useMutation({
     onMutate: async (raw): Promise<MutationContext> => {
-      const input = raw as OfflineUpdateInput;
+      const input = raw as UpdateInput;
       const context = await snapshot();
       const settings = utils.settings.get.getData();
 
@@ -477,6 +497,9 @@ export const useEntryMutations = (): EntryMutations => {
             billable,
             start,
             end,
+            // Omitted leaves the entry's tags alone; a supplied list replaces
+            // the whole set, which is what the server does with it too.
+            tagIds: input.tagIds ?? entry.tagIds,
             durationSec,
             hourlyRate,
             updatedAt: nowIso(),
@@ -506,6 +529,9 @@ export const useEntryMutations = (): EntryMutations => {
                 : input.taskId ?? null,
             billable: input.billable ?? running.billable,
             start: input.start ?? running.start,
+            // The tracker bar seeds its tag picker from the running entry, so
+            // leaving this stale would bounce a just-added tag back off.
+            tagIds: input.tagIds ?? running.tagIds,
           });
         }
       }
@@ -563,14 +589,19 @@ export const useEntryMutations = (): EntryMutations => {
    * input came back rather than whenever the mutation happens to fire.
    */
   const startWith = React.useCallback(
-    (quick: QuickStart, now?: Date): void => {
+    (quick: QuickStart, now?: Date, tagIds?: string[]): void => {
       const input: OfflineStartInput = buildQuickStartInput(quick, {
         source: "web",
         timeZone: deviceTimeZone(),
         originId: ORIGIN_ID,
         now,
       });
-      startMutation.mutate(input);
+      // Tags ride alongside the QuickStart rather than inside it:
+      // `quickStartKey` dedupes favorites and recents on that shape, so
+      // folding tags in would split one recurring combination into a separate
+      // recent per set of labels.
+      const withTags: StartInput = { ...input, tagIds: tagIds ?? [] };
+      startMutation.mutate(withTags);
     },
     [startMutation]
   );
@@ -591,7 +622,8 @@ export const useEntryMutations = (): EntryMutations => {
           taskId: args.taskId ?? null,
           billable: args.billable,
         },
-        args.start === undefined ? undefined : new Date(args.start)
+        args.start === undefined ? undefined : new Date(args.start),
+        args.tagIds
       );
     },
     [startWith]
@@ -651,14 +683,17 @@ export const useEntryMutations = (): EntryMutations => {
 
       // Deliberately `start`, not `continue`: every field is already in hand,
       // so this works offline where a server-side copy could not.
-      startQuickStart(toQuickStart(entry));
+      // Continuing carries the labels over — the server's own `continue`
+      // copies them, and a client-side copy that dropped them would disagree
+      // with it.
+      startTimer({ ...toQuickStart(entry), tagIds: entry.tagIds });
     },
-    [startQuickStart]
+    [startTimer]
   );
 
   const createManualEntry = React.useCallback(
     (args: ManualEntryArgs): void => {
-      const input: OfflineCreateInput = {
+      const input: CreateInput = {
         description: args.description,
         projectId: args.projectId,
         taskId: args.taskId ?? null,
@@ -667,6 +702,7 @@ export const useEntryMutations = (): EntryMutations => {
         end: args.end,
         source: "web",
         timeZone: deviceTimeZone(),
+        tagIds: args.tagIds ?? [],
         originId: ORIGIN_ID,
       };
       createMutation.mutate(input);
@@ -683,7 +719,7 @@ export const useEntryMutations = (): EntryMutations => {
         toast.info("Still syncing — try again in a moment.");
         return;
       }
-      const input: OfflineUpdateInput = { ...args, originId: ORIGIN_ID };
+      const input: UpdateInput = { ...args, originId: ORIGIN_ID };
       updateMutation.mutate(input);
     },
     [updateMutation]
@@ -698,6 +734,7 @@ export const useEntryMutations = (): EntryMutations => {
         billable: entry.billable,
         start: entry.start,
         end: entry.end ?? nowIso(),
+        tagIds: entry.tagIds,
       });
     },
     [createManualEntry]

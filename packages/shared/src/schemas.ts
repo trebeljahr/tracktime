@@ -82,6 +82,7 @@ export const reportGroupBySchema = z.enum([
   "project",
   "client",
   "task",
+  "tag",
   "day",
   "week",
   "month",
@@ -90,6 +91,13 @@ export const reportGroupBySchema = z.enum([
 const originId = z.string().max(64).optional();
 const idString = z.string().min(1);
 const entryDescription = z.string().max(500);
+
+/**
+ * Tags on one entry. Capped at 20 because the cap is what keeps the write
+ * bounded — an unbounded array on a hot document is how a single entry ends
+ * up carrying a kilobyte of ids.
+ */
+const entryTagIds = z.array(idString).max(20).optional();
 
 /** Generic `{ id }` mutation input — archive / remove / continue / get. */
 export const idInputSchema = z.object({ id: idString, originId });
@@ -129,6 +137,26 @@ export const createClientSchema = z.object({
 export const updateClientSchema = z.object({
   id: idString,
   name: z.string().min(1).max(120).optional(),
+  color: hexColorSchema.optional(),
+  archived: z.boolean().optional(),
+  originId,
+});
+
+// ── tags ─────────────────────────────────────────────────────────────
+
+export const tagListSchema = z.object({
+  includeArchived: z.boolean().optional(),
+});
+
+export const createTagSchema = z.object({
+  name: z.string().min(1, "Name is required").max(60),
+  color: hexColorSchema.optional(),
+  originId,
+});
+
+export const updateTagSchema = z.object({
+  id: idString,
+  name: z.string().min(1).max(60).optional(),
   color: hexColorSchema.optional(),
   archived: z.boolean().optional(),
   originId,
@@ -214,6 +242,7 @@ export const startTimerSchema = z.object({
   start: isoDateTimeSchema.optional(),
   source: entrySourceSchema.optional(),
   timeZone: entryTimeZone,
+  tagIds: entryTagIds,
   originId,
 });
 
@@ -245,6 +274,7 @@ export const createEntrySchema = z
     end: isoDateTimeSchema,
     source: entrySourceSchema.optional(),
     timeZone: entryTimeZone,
+    tagIds: entryTagIds,
     originId,
   })
   .refine(endAfterStart, endAfterStartIssue);
@@ -259,6 +289,8 @@ export const updateEntrySchema = z
     start: isoDateTimeSchema.optional(),
     /** null keeps/creates a running entry. */
     end: isoDateTimeSchema.nullish(),
+    /** Replaces the whole set — omit to leave the entry's tags untouched. */
+    tagIds: entryTagIds,
     originId,
   })
   .refine(endAfterStart, endAfterStartIssue);
@@ -269,6 +301,8 @@ export const entryListSchema = z.object({
   projectIds: z.array(idString).optional(),
   clientIds: z.array(idString).optional(),
   taskIds: z.array(idString).optional(),
+  /** FILTER: keep entries carrying at least one of these tags. */
+  tagIds: z.array(idString).max(20).optional(),
   billable: z.boolean().optional(),
   search: z.string().max(200).optional(),
   cursor: z.string().optional(),
@@ -334,6 +368,8 @@ export const reportFiltersSchema = z.object({
   projectIds: z.array(idString).optional(),
   clientIds: z.array(idString).optional(),
   taskIds: z.array(idString).optional(),
+  /** FILTER: keep entries carrying at least one of these tags (OR). */
+  tagIds: z.array(idString).max(20).optional(),
   billable: z.boolean().optional(),
   search: z.string().max(200).optional(),
   /**
@@ -364,6 +400,70 @@ export const exportCsvSchema = reportFiltersSchema.extend({
   /** Required when `report === "weekly"`. */
   weekStart: isoDateOrDateTimeSchema.optional(),
 });
+
+/**
+ * Same surface as {@link exportCsvSchema} — the two exports answer the same
+ * question in two file formats, so keeping the inputs identical means a UI can
+ * flip between them without rebuilding the request.
+ */
+export const exportPdfSchema = reportFiltersSchema.extend({
+  report: z.enum(["summary", "detailed", "weekly"]),
+  /** Required when `report === "summary"`. */
+  groupBy: reportGroupBySchema.optional(),
+  /** Required when `report === "weekly"`. */
+  weekStart: isoDateOrDateTimeSchema.optional(),
+});
+
+// ── invoicing ────────────────────────────────────────────────────────
+
+/** Line granularity: one line per project, or one per task. */
+export const invoiceGroupBySchema = z.enum(["project", "task"]);
+
+export const invoiceStatusSchema = z.enum(["draft", "sent", "paid"]);
+
+/** Percent, e.g. 19 for 19% VAT. Null / absent means no tax line. */
+export const taxRateSchema = z.number().min(0).max(100);
+
+/**
+ * Dry run: roll billable time up into lines WITHOUT writing anything, so the
+ * UI can show exactly what would be invoiced before committing to a number.
+ */
+export const invoicePreviewSchema = z.object({
+  clientId: idString,
+  from: isoDateOrDateTimeSchema,
+  to: isoDateOrDateTimeSchema,
+  groupBy: invoiceGroupBySchema.default("project"),
+  taxRate: taxRateSchema.nullish(),
+});
+
+export const createInvoiceSchema = z.object({
+  clientId: idString,
+  from: isoDateOrDateTimeSchema,
+  to: isoDateOrDateTimeSchema,
+  groupBy: invoiceGroupBySchema.default("project"),
+  taxRate: taxRateSchema.nullish(),
+  issueDate: isoDateOrDateTimeSchema,
+  dueDate: isoDateOrDateTimeSchema,
+  /** Server-generated when omitted; must stay unique per owner. */
+  number: z.string().min(1).max(40).optional(),
+  notes: z.string().max(2_000).optional(),
+  originId,
+});
+
+export const updateInvoiceStatusSchema = z.object({
+  id: idString,
+  status: invoiceStatusSchema,
+  originId,
+});
+
+export const invoiceListSchema = z.object({
+  status: invoiceStatusSchema.optional(),
+  clientId: idString.optional(),
+  cursor: z.string().optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+});
+
+export const invoicePdfSchema = z.object({ id: idString });
 
 // ── settings & tokens ────────────────────────────────────────────────
 
@@ -464,6 +564,17 @@ export type SummaryReportSchemaInput = z.infer<typeof summaryReportSchema>;
 export type DetailedReportSchemaInput = z.infer<typeof detailedReportSchema>;
 export type WeeklyReportSchemaInput = z.infer<typeof weeklyReportSchema>;
 export type ExportCsvInput = z.infer<typeof exportCsvSchema>;
+export type ExportPdfInput = z.infer<typeof exportPdfSchema>;
+export type TagListInput = z.infer<typeof tagListSchema>;
+export type CreateTagInput = z.infer<typeof createTagSchema>;
+export type UpdateTagInput = z.infer<typeof updateTagSchema>;
+export type InvoicePreviewInput = z.infer<typeof invoicePreviewSchema>;
+export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
+export type UpdateInvoiceStatusInput = z.infer<
+  typeof updateInvoiceStatusSchema
+>;
+export type InvoiceListInput = z.infer<typeof invoiceListSchema>;
+export type InvoicePdfInput = z.infer<typeof invoicePdfSchema>;
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
 export type MaxDurationSettingsInput = z.infer<
   typeof maxDurationSettingsSchema

@@ -38,6 +38,7 @@ import {
 } from "@starter/shared";
 import { Client, type ClientDocLike } from "../../models/Client.js";
 import { Project, type ProjectDocLike } from "../../models/Project.js";
+import { Tag } from "../../models/Tag.js";
 import { Task, type TaskDocLike } from "../../models/Task.js";
 import {
   TimeEntry,
@@ -91,6 +92,58 @@ const badRequest = (message: string): TRPCError =>
   new TRPCError({ code: "BAD_REQUEST", message });
 
 /**
+ * The parts of an entry an invoice's line items are computed from.
+ *
+ * `description` and `tagIds` are deliberately absent: neither reaches a line
+ * item, so relabelling or re-tagging billed time is harmless and stays allowed.
+ * Everything listed here does reach one — changing it behind an issued invoice
+ * would leave that invoice claiming hours, a rate or a project the underlying
+ * time no longer has, with nothing on screen to say the two had diverged.
+ */
+const INVOICE_RELEVANT_FIELDS = [
+  "projectId",
+  "taskId",
+  "billable",
+  "start",
+  "end",
+] as const;
+
+/**
+ * Why an edit to an already-invoiced entry must be refused, or `null` when it
+ * is fine to proceed.
+ *
+ * `Invoice.entryIds` and `TimeEntry.invoiceId` keep the same time from being
+ * billed twice, but nothing stopped the billed time itself from moving after
+ * the fact. An invoice is a record of what was billed, so the entry is frozen
+ * in the ways the invoice depends on rather than the invoice being silently
+ * recomputed underneath the customer who already received it.
+ *
+ * Exported for the unit tests — the rule is worth pinning independently of a
+ * database.
+ */
+export function invoicedEntryEditRefusal(
+  invoiceId: string | null | undefined,
+  changedFields: readonly string[],
+): string | null {
+  if (!invoiceId) return null;
+
+  const blocked = INVOICE_RELEVANT_FIELDS.filter((field) =>
+    changedFields.includes(field),
+  );
+  if (blocked.length === 0) return null;
+
+  return (
+    `This time has already been invoiced, so its ${blocked.join(", ")} ` +
+    "cannot be changed — the invoice's line items were calculated from it. " +
+    "Delete the invoice while it is still a draft to release its time, then " +
+    "edit and bill it again. Its description and tags can still be changed."
+  );
+}
+
+const invoiceConflict = (message: string): TRPCError =>
+  new TRPCError({ code: "CONFLICT", message });
+
+/**
  * Ids arrive as untrusted strings; an id that cannot possibly address a
  * document must read as "missing", not as a 500 from a Mongo cast error.
  */
@@ -107,6 +160,88 @@ const isDuplicateKeyError = (error: unknown): boolean => {
 
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// ── tags ─────────────────────────────────────────────────────────────
+
+/**
+ * Hard cap on tags per entry, kept in lockstep with `entryTagIds` in
+ * @starter/shared. The schema already rejects an over-long array, so this is
+ * the second line of defence for the paths that build a list themselves
+ * (`continue` copies the source entry's tags).
+ */
+export const MAX_ENTRY_TAGS = 20;
+
+/**
+ * Clean a caller-supplied tag list WITHOUT touching the database.
+ *
+ * Deduplicates (first occurrence wins, so the order the user picked survives),
+ * drops nothing silently otherwise, and rejects anything that could not
+ * possibly address a Tag — a malformed id must read as a bad request, never
+ * as a Mongo cast error deep inside the write.
+ *
+ * `undefined` in means `undefined` out: "leave the entry's tags alone" is a
+ * different instruction from "set the entry's tags to none", and only an
+ * explicit `[]` means the latter.
+ */
+export const normalizeTagIds = (
+  tagIds: readonly string[] | undefined,
+): string[] | undefined => {
+  if (tagIds === undefined) return undefined;
+
+  const unique = [...new Set(tagIds)];
+  if (unique.length > MAX_ENTRY_TAGS) {
+    throw badRequest(`An entry can carry at most ${MAX_ENTRY_TAGS} tags`);
+  }
+  if (unique.some((id) => !mongoose.isValidObjectId(id))) {
+    throw badRequest("Unknown tag");
+  }
+  return unique;
+};
+
+/**
+ * Normalize, then prove every id belongs to the caller.
+ *
+ * One `countDocuments` scoped by `workspaceId` answers both "does it exist?"
+ * and "is it in this workspace?" — a mismatch is a BAD_REQUEST rather than a
+ * NOT_FOUND because the caller told us about a tag we cannot honour, and
+ * answering "not found" would leak that another workspace's tag has that id.
+ */
+const resolveTagIds = async (
+  workspaceId: string,
+  tagIds: readonly string[] | undefined,
+): Promise<string[] | undefined> => {
+  const unique = normalizeTagIds(tagIds);
+  if (unique === undefined || unique.length === 0) return unique;
+
+  const found = await Tag.countDocuments({
+    workspaceId,
+    _id: { $in: unique },
+  });
+  if (found !== unique.length) {
+    throw badRequest("One or more tags do not exist");
+  }
+  return unique;
+};
+
+/**
+ * The lenient counterpart, for ids the SERVER copied rather than the caller
+ * supplying them (`continue`). A tag that vanished between the original entry
+ * and now must not make continuing that work fail — the right answer is to
+ * carry forward the labels that still exist and drop the ones that do not.
+ */
+const filterKnownTagIds = async (
+  workspaceId: string,
+  tagIds: readonly string[] | undefined,
+): Promise<string[]> => {
+  const unique = normalizeTagIds(tagIds) ?? [];
+  if (unique.length === 0) return [];
+
+  const known = await Tag.find({ workspaceId, _id: { $in: unique } })
+    .select("_id")
+    .lean();
+  const knownIds = new Set(known.map((tag) => String(tag._id)));
+  return unique.filter((id) => knownIds.has(id));
+};
 
 // ── reference validation ─────────────────────────────────────────────
 
@@ -206,6 +341,8 @@ type StartArgs = {
   source: EntrySource;
   /** IANA zone the caller is in. See TimeEntry.timeZone in @starter/shared. */
   timeZone?: string | null;
+  /** Tags to open the entry with; `undefined` means none. */
+  tagIds?: readonly string[];
   originId?: string;
 };
 
@@ -215,6 +352,7 @@ type StartArgs = {
  */
 const startNewEntry = async (args: StartArgs): Promise<TimeEntryWire> => {
   const refs = await resolveRefs(args.workspaceId, args.projectId, args.taskId);
+  const tagIds = (await resolveTagIds(args.workspaceId, args.tagIds)) ?? [];
   const billable =
     args.billable ?? refs.project?.billableDefault ?? false;
   const settings = await getOrCreateWorkspaceSettings(args.workspaceId);
@@ -239,6 +377,7 @@ const startNewEntry = async (args: StartArgs): Promise<TimeEntryWire> => {
       currency,
       source: args.source,
       timeZone: args.timeZone ?? null,
+      tagIds,
     });
     return toClientTimeEntry(created);
   };
@@ -354,6 +493,15 @@ export const entriesRouter = router({
       if (projectIds) conditions.push({ projectId: { $in: projectIds } });
 
       if (input.taskIds) conditions.push({ taskId: { $in: input.taskIds } });
+
+      // OR within itself, AND with everything else: an entry matches when it
+      // carries ANY of the requested tags. An EMPTY array is deliberately not
+      // a filter at all — it means "no tag filter", never "untagged only",
+      // because that is what an untouched multi-select sends.
+      if (input.tagIds && input.tagIds.length > 0) {
+        conditions.push({ tagIds: { $in: input.tagIds } });
+      }
+
       if (typeof input.billable === "boolean") {
         conditions.push({ billable: input.billable });
       }
@@ -581,6 +729,7 @@ export const entriesRouter = router({
         start,
         source: input.source ?? "web",
         timeZone: input.timeZone ?? null,
+        ...(input.tagIds ? { tagIds: input.tagIds } : {}),
         originId: input.originId,
       });
 
@@ -802,6 +951,11 @@ export const entriesRouter = router({
         // A continued entry is being recorded NOW, wherever the person now is,
         // so it takes the caller's zone rather than inheriting the original's.
         timeZone: input.timeZone ?? null,
+        // Tags go the OTHER way: continuing is "more of this same work", so
+        // the labels that described it still describe it. A tag deleted since
+        // then is dropped rather than copied forward dead — see
+        // `filterKnownTagIds` for why this path is lenient.
+        tagIds: await filterKnownTagIds(ctx.workspaceId, source.tagIds),
         originId: input.originId,
       });
 
@@ -832,6 +986,7 @@ export const entriesRouter = router({
         input.projectId ?? null,
         input.taskId ?? null,
       );
+      const tagIds = (await resolveTagIds(workspaceId, input.tagIds)) ?? [];
       const billable =
         input.billable ?? refs.project?.billableDefault ?? false;
       const settings = await getOrCreateWorkspaceSettings(workspaceId);
@@ -855,6 +1010,7 @@ export const entriesRouter = router({
         currency,
         source: input.source ?? "web",
         timeZone: input.timeZone ?? null,
+        tagIds,
       });
 
       const entry = toClientTimeEntry(created);
@@ -879,6 +1035,14 @@ export const entriesRouter = router({
         authorId: ctx.user.id,
       }).lean();
       if (!existing) throw notFound();
+
+      // Refuse before doing any work: an entry on an issued invoice is frozen
+      // in the ways that invoice was calculated from.
+      const refusal = invoicedEntryEditRefusal(
+        existing.invoiceId,
+        INVOICE_RELEVANT_FIELDS.filter((field) => input[field] !== undefined),
+      );
+      if (refusal) throw invoiceConflict(refusal);
 
       const projectChanged = input.projectId !== undefined;
       const taskChanged = input.taskId !== undefined;
@@ -920,6 +1084,11 @@ export const entriesRouter = router({
       const billable = input.billable ?? existing.billable;
       const durationSec = end ? durationBetween(start, end) : 0;
 
+      // `tagIds` REPLACES the whole set when present. Omitting the key leaves
+      // the entry's tags exactly as they were, so a partial edit (rename the
+      // description, nudge the end time) can never silently untag an entry.
+      const tagIds = await resolveTagIds(ctx.workspaceId, input.tagIds);
+
       // Re-snapshot when the money inputs change, or when this edit is what
       // stops a running entry. Otherwise the historical snapshot stands.
       const stoppedByThisEdit = existing.end === null && end !== null;
@@ -954,6 +1123,7 @@ export const entriesRouter = router({
               durationSec,
               hourlyRate,
               currency,
+              ...(tagIds !== undefined ? { tagIds } : {}),
             },
           },
           { returnDocument: "after" },
@@ -982,9 +1152,30 @@ export const entriesRouter = router({
     .input(idInputSchema)
     .mutation(
       async ({ ctx, input }): Promise<{ success: true; id: string }> => {
+        const entryId = requireObjectId(input.id, "Entry not found");
+
+        // Deleting billed time is the worst version of the divergence the
+        // update guard prevents: the invoice would go on claiming hours whose
+        // entry no longer exists, so it cannot be reconciled at all.
         // Author-only, for the same reason as `update`.
+        const existing = await TimeEntry.findOne({
+          _id: entryId,
+          workspaceId: ctx.workspaceId,
+          authorId: ctx.user.id,
+        })
+          .select("invoiceId")
+          .lean();
+        if (!existing) throw notFound();
+        if (existing.invoiceId) {
+          throw invoiceConflict(
+            "This time has already been invoiced and cannot be deleted. " +
+              "Delete the invoice while it is still a draft to release its " +
+              "time, then delete the entry.",
+          );
+        }
+
         const result = await TimeEntry.deleteOne({
-          _id: requireObjectId(input.id, "Entry not found"),
+          _id: entryId,
           workspaceId: ctx.workspaceId,
           authorId: ctx.user.id,
         });

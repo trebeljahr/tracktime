@@ -276,11 +276,19 @@ test.describe("Projects catalog", () => {
       "data-state",
       "running",
     );
+    // `data-state` flips optimistically, so waiting on it alone lets the test
+    // navigate while `entries.stop` is still in flight; the request is then
+    // aborted and the entry stays open, with nothing on screen to say so.
+    const stopped = page.waitForResponse(
+      (response) =>
+        response.url().includes("entries.stop") && response.status() === 200,
+    );
     await page.getByTestId("tracker-toggle").click();
     await expect(page.getByTestId("tracker-toggle")).toHaveAttribute(
       "data-state",
       "idle",
     );
+    await stopped;
 
     await page.goto("/projects");
     await expect(page.getByTestId(`project-entries-${projectId}`)).toHaveText(

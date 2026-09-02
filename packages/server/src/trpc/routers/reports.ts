@@ -23,6 +23,7 @@ import {
   entryAmount,
   entryDurationSec,
   exportCsvSchema,
+  exportPdfSchema,
   formatDuration,
   summaryReportSchema,
   sumAmounts,
@@ -37,6 +38,7 @@ import {
   type DayKey,
   weeklyReportSchema,
   type CsvExportResult,
+  type PdfExportResult,
   type DetailedEntry,
   type DetailedReportResult,
   type ReportFilters,
@@ -51,6 +53,7 @@ import {
 } from "@starter/shared";
 import { Client, type ClientDocLike } from "../../models/Client.js";
 import { Project, type ProjectDocLike } from "../../models/Project.js";
+import { Tag } from "../../models/Tag.js";
 import { Task, type TaskDocLike } from "../../models/Task.js";
 import {
   TimeEntry,
@@ -60,6 +63,12 @@ import {
 import { getOrCreateWorkspaceSettings } from "../../models/Settings.js";
 import { authorScopeFilter } from "../../models/WorkspaceMember.js";
 import { csvFilename, toCsv, type CsvColumn, type CsvRow } from "../../services/csv.js";
+import {
+  renderDetailedPdf,
+  renderSummaryPdf,
+  renderWeeklyPdf,
+  type PdfReportMeta,
+} from "../../services/pdf.js";
 import { workspaceProcedure, router } from "../trpc.js";
 
 /**
@@ -232,6 +241,19 @@ const buildMatchConditions = async (
   if (filters.taskIds) {
     if (filters.taskIds.length === 0) return null;
     conditions.push({ taskId: { $in: filters.taskIds } });
+  }
+
+  // Tags are OR within themselves and AND with every other filter: keep the
+  // entries carrying AT LEAST ONE of the requested tags.
+  //
+  // Note the deliberate difference from `taskIds` two lines up: an empty
+  // array here is NOT "matches nothing", it is "no tag filter". A task filter
+  // is built from a picker that cannot be emptied without meaning it, while
+  // the tag multi-select sends `[]` for its untouched, everything-passes
+  // state — reading that as "match nothing" would blank every report the
+  // moment the tag control mounted.
+  if (filters.tagIds && filters.tagIds.length > 0) {
+    conditions.push({ tagIds: { $in: filters.tagIds } });
   }
 
   if (typeof filters.billable === "boolean") {
@@ -422,7 +444,7 @@ const measureEntry = (
 
 // ── grouping ─────────────────────────────────────────────────────────
 
-type GroupIdentity = { key: string; label: string; color: string | null };
+export type GroupIdentity = { key: string; label: string; color: string | null };
 
 const NO_PROJECT: GroupIdentity = {
   key: "none",
@@ -430,9 +452,75 @@ const NO_PROJECT: GroupIdentity = {
   color: null,
 };
 
+/**
+ * The bucket for entries carrying no tags at all.
+ *
+ * Key `"none"` is the same convention `groupIdentity` already uses for a
+ * missing project / client / task, so the client's "is this the unassigned
+ * bucket?" check keeps working unchanged for tags.
+ */
+export const NO_TAG: GroupIdentity = {
+  key: "none",
+  label: "No tag",
+  color: null,
+};
+
+/** Just enough of a Tag to label a group — name and color. */
+export type TagLabel = { name: string; color: string };
+
+/**
+ * TAG GROUPING FANS ONE ENTRY OUT ACROSS SEVERAL GROUPS. READ THIS BEFORE
+ * "FIXING" THE ARITHMETIC.
+ *
+ * Every other grouping in this file partitions the entries: an entry belongs
+ * to exactly one project, one client, one day. Tags do not — they are
+ * cross-cutting labels and an entry can carry any number of them. So a
+ * two-hour entry tagged `deep-work` AND `billable-ish` contributes its FULL
+ * two hours to both groups, which means:
+ *
+ *     sum(group.seconds) >= result.totalSec
+ *
+ * with equality only when no entry carries more than one tag. This is the
+ * correct answer to the question people actually ask a tag report ("how much
+ * time carries the `deep-work` label?"), and splitting the two hours into two
+ * one-hour halves would answer nothing anybody asked.
+ *
+ * `totalSec` / `billableSec` / `totalAmount` are accumulated ONCE PER ENTRY,
+ * outside this fan-out, so the report totals stay the true, un-double-counted
+ * numbers. It is the group column that over-sums, on purpose. Any UI that
+ * renders a group as a percentage of the total has to say so, or the reader
+ * will assume the percentages add to 100%.
+ *
+ * An id with no matching tag (deleted, or belonging to somebody else) is
+ * dropped rather than shown as a blank group; if that leaves the entry with
+ * no tags at all it falls into {@link NO_TAG}, exactly as an untagged entry
+ * does.
+ */
+export const tagGroupIdentities = (
+  tagIds: readonly string[] | undefined,
+  tags: ReadonlyMap<string, TagLabel>,
+): GroupIdentity[] => {
+  const identities: GroupIdentity[] = [];
+  const seen = new Set<string>();
+
+  for (const id of tagIds ?? []) {
+    if (seen.has(id)) continue;
+    const tag = tags.get(id);
+    if (!tag) continue;
+    seen.add(id);
+    identities.push({ key: id, label: tag.name, color: tag.color });
+  }
+
+  return identities.length > 0 ? identities : [NO_TAG];
+};
+
 const groupIdentity = (
   measured: MeasuredEntry,
-  groupBy: ReportGroupBy,
+  // "tag" is excluded on purpose: it is the one grouping that cannot produce
+  // ONE identity per entry, so it never reaches this function — see
+  // `tagGroupIdentities`. Excluding it here keeps the switch below exhaustive
+  // without a lying placeholder arm.
+  groupBy: Exclude<ReportGroupBy, "tag">,
   workspaceId: string,
   calendar: Calendar,
 ): GroupIdentity => {
@@ -485,11 +573,60 @@ const groupIdentity = (
   }
 };
 
-type GroupAccumulator = GroupIdentity & {
+export type GroupAccumulator = GroupIdentity & {
   seconds: number;
   billableSec: number;
   amounts: number[];
 };
+
+/** What one measured entry contributes to whichever groups it lands in. */
+export type GroupContribution = {
+  seconds: number;
+  billableSec: number;
+  amount: number;
+};
+
+/**
+ * Add one entry's numbers to every group it belongs to.
+ *
+ * For the partitioning groupings `identities` always holds exactly one entry
+ * and this is a plain accumulate. For `groupBy: "tag"` it holds one per tag,
+ * and the entry's seconds land in each of them — see `tagGroupIdentities` for
+ * why that is the intended arithmetic rather than double counting.
+ */
+export const accumulateGroups = (
+  groups: Map<string, GroupAccumulator>,
+  identities: readonly GroupIdentity[],
+  contribution: GroupContribution,
+): void => {
+  for (const identity of identities) {
+    const group = groups.get(identity.key) ?? {
+      ...identity,
+      seconds: 0,
+      billableSec: 0,
+      amounts: [],
+    };
+    group.seconds += contribution.seconds;
+    group.billableSec += contribution.billableSec;
+    if (contribution.amount !== 0) group.amounts.push(contribution.amount);
+    groups.set(identity.key, group);
+  }
+};
+
+/** Biggest first, ties broken by key so the order is stable across calls. */
+export const sortGroups = (
+  groups: Iterable<GroupAccumulator>,
+): SummaryGroup[] =>
+  [...groups]
+    .map(({ key, label, color, seconds, billableSec, amounts }) => ({
+      key,
+      label,
+      color,
+      seconds,
+      billableSec,
+      amount: sumAmounts(amounts),
+    }))
+    .sort((a, b) => b.seconds - a.seconds || a.key.localeCompare(b.key));
 
 // ── report bodies (shared by the queries and by exportCsv) ───────────
 
@@ -526,6 +663,21 @@ const buildSummary = async (
 
   const docs = await runJoinedQuery(workspaceId, conditions);
 
+  // Tag labels come from ONE query, not from a join per entry: the tag list is
+  // small, bounded by the workspace's own catalog, and every entry in the report
+  // draws its labels from the same table. Archived tags are included on
+  // purpose — an archived tag still labels the history it was applied to, and
+  // dropping it would move that time into "No tag".
+  const tagIndex = new Map<string, TagLabel>();
+  if (groupBy === "tag") {
+    const tags = await Tag.find({ workspaceId })
+      .select("name color")
+      .lean();
+    for (const tag of tags) {
+      tagIndex.set(String(tag._id), { name: tag.name, color: tag.color });
+    }
+  }
+
   const timeline = new Map<string, SummaryTimelinePoint>();
   for (const date of dayKeysInRange(range.fromMs, range.toMs, calendar.timeZone)) {
     timeline.set(date, { date, seconds: 0, billableSec: 0 });
@@ -540,21 +692,22 @@ const buildSummary = async (
     const measured = measureEntry(doc, range, nowMs, calendar);
     if (!measured) continue;
 
+    // ONCE per entry, whatever the grouping — these are the true totals and
+    // must not inherit the tag fan-out's deliberate over-count.
     totalSec += measured.seconds;
     billableSec += measured.billableSec;
     if (measured.amount !== 0) amounts.push(measured.amount);
 
-    const identity = groupIdentity(measured, groupBy, workspaceId, calendar);
-    const group = groups.get(identity.key) ?? {
-      ...identity,
-      seconds: 0,
-      billableSec: 0,
-      amounts: [],
-    };
-    group.seconds += measured.seconds;
-    group.billableSec += measured.billableSec;
-    if (measured.amount !== 0) group.amounts.push(measured.amount);
-    groups.set(identity.key, group);
+    const identities =
+      groupBy === "tag"
+        ? tagGroupIdentities(measured.doc.tagIds, tagIndex)
+        : [groupIdentity(measured, groupBy, workspaceId, calendar)];
+
+    accumulateGroups(groups, identities, {
+      seconds: measured.seconds,
+      billableSec: measured.billableSec,
+      amount: measured.amount,
+    });
 
     for (const slice of measured.slices) {
       // A slice can fall outside the timeline only if the clip math and the
@@ -566,16 +719,7 @@ const buildSummary = async (
     }
   }
 
-  const sortedGroups: SummaryGroup[] = [...groups.values()]
-    .map(({ key, label, color, seconds, billableSec: groupBillable, amounts: groupAmounts }) => ({
-      key,
-      label,
-      color,
-      seconds,
-      billableSec: groupBillable,
-      amount: sumAmounts(groupAmounts),
-    }))
-    .sort((a, b) => b.seconds - a.seconds || a.key.localeCompare(b.key));
+  const sortedGroups: SummaryGroup[] = sortGroups(groups.values());
 
   return {
     totalSec,
@@ -917,6 +1061,17 @@ const exportFilename = (
     dayKeyInZone(range.toMs - 1, timeZone),
   );
 
+/**
+ * Same name, different extension. `csvFilename` hard-codes ".csv", so this
+ * swaps the suffix rather than duplicating the sanitising rules — one place
+ * decides what characters survive into a filename.
+ */
+const pdfFilename = (
+  report: string,
+  range: Range,
+  timeZone: string,
+): string => `${exportFilename(report, range, timeZone).replace(/\.csv$/, "")}.pdf`;
+
 type CsvExport = CsvExportResult & { mimeType: "text/csv" };
 
 // ── router ───────────────────────────────────────────────────────────
@@ -1023,5 +1178,92 @@ export const reportsRouter = router({
         ),
         mimeType: "text/csv",
       };
+    }),
+
+  /**
+   * The same three reports, rendered to PDF on the server.
+   *
+   * Mirrors `exportCsv` deliberately, branch for branch — same range parsing,
+   * same zone resolution, same full-range pagination for the detailed report.
+   * The two exports answer the same question in two file formats, so any
+   * divergence between them would be a bug, not a feature.
+   *
+   * Bytes come back base64-encoded because tRPC's transport is JSON; see
+   * `PdfExportResult` in @starter/shared for why that beats a second binary
+   * HTTP route.
+   */
+  exportPdf: workspaceProcedure
+    .input(exportPdfSchema)
+    .query(async ({ ctx, input }): Promise<PdfExportResult> => {
+      const scope = reportScope(ctx);
+      const range = parseRange(input);
+      const exportZone = resolveTimeZone(input.timeZone);
+      const generatedAt = new Date().toISOString();
+
+      const meta = (title: string, currency: string): PdfReportMeta => ({
+        title,
+        from: dayKeyInZone(range.fromMs, exportZone),
+        to: dayKeyInZone(range.toMs - 1, exportZone),
+        timeZone: exportZone,
+        currency,
+        generatedAt,
+      });
+
+      const encode = (
+        report: string,
+        bytes: Buffer,
+      ): PdfExportResult => ({
+        filename: pdfFilename(report, range, exportZone),
+        base64: bytes.toString("base64"),
+        mimeType: "application/pdf",
+      });
+
+      if (input.report === "summary") {
+        const groupBy = input.groupBy ?? "project";
+        const result = await buildSummary(scope, input, groupBy);
+        const bytes = await renderSummaryPdf(
+          result,
+          meta(`Summary report by ${groupBy}`, result.currency),
+        );
+        return encode("summary", bytes);
+      }
+
+      if (input.report === "weekly") {
+        const weekStart =
+          input.weekStart ?? dayKeyInZone(range.fromMs, exportZone);
+        const result = await buildWeekly(scope, input, weekStart);
+        const settings = await getOrCreateWorkspaceSettings(scope.workspaceId);
+        const bytes = await renderWeeklyPdf(
+          result,
+          meta("Weekly timesheet", settings.currency),
+        );
+        return encode("weekly", bytes);
+      }
+
+      // Detailed: paginate through the whole range so the export is complete,
+      // not just the page the UI happens to be showing.
+      const entries: DetailedEntry[] = [];
+      let currency = "";
+      let cursor: string | undefined;
+      let guard = 0;
+
+      do {
+        const pageResult: DetailedReportResult = await buildDetailed(
+          scope,
+          input,
+          { limit: EXPORT_PAGE_SIZE, ...(cursor ? { cursor } : {}) },
+          false,
+        );
+        entries.push(...pageResult.entries);
+        currency = pageResult.currency;
+        cursor = pageResult.nextCursor;
+        guard += 1;
+      } while (cursor && guard < MAX_EXPORT_PAGES);
+
+      const bytes = await renderDetailedPdf(
+        { entries, totalSec: 0, totalAmount: 0, currency },
+        meta("Detailed report", currency),
+      );
+      return encode("detailed", bytes);
     }),
 });

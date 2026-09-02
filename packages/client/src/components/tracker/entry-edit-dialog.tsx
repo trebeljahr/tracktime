@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { DurationInput } from "@/components/duration-input";
 import { ProjectPicker } from "@/components/project-picker";
+import { TagPicker } from "@/components/tags/tag-picker";
 import { TimeField } from "@/components/tracker/time-field";
 import type { EntryMutations } from "@/components/tracker/use-entry-mutations";
 import { useFormatSettings } from "@/lib/format";
@@ -56,6 +57,7 @@ export function EntryEditDialog({
   const [description, setDescription] = React.useState("");
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [billable, setBillable] = React.useState(false);
+  const [tagIds, setTagIds] = React.useState<string[]>([]);
   const [start, setStart] = React.useState<string>(() =>
     new Date().toISOString()
   );
@@ -78,6 +80,7 @@ export function EntryEditDialog({
       setDescription(entry.description);
       setProjectId(entry.projectId);
       setBillable(entry.billable);
+      setTagIds(entry.tagIds);
       setStart(entry.start);
       setEnd(entry.end ?? new Date().toISOString());
     }
@@ -99,12 +102,23 @@ export function EntryEditDialog({
       description,
       projectId,
       billable,
+      tagIds,
       start,
       // A running entry keeps running unless it already had an end.
       end: entry.end === null ? null : safeEnd,
     });
     onClose();
-  }, [billable, description, end, entry, mutations, onClose, projectId, start]);
+  }, [
+    billable,
+    description,
+    end,
+    entry,
+    mutations,
+    onClose,
+    projectId,
+    start,
+    tagIds,
+  ]);
 
   return (
     <Dialog
@@ -140,6 +154,18 @@ export function EntryEditDialog({
               onChange={setProjectId}
               className="w-full"
               testId="entry-edit-project"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Tags</Label>
+            <TagPicker
+              value={tagIds}
+              onChange={setTagIds}
+              variant="count"
+              maxChips={4}
+              className="w-full"
+              testId="entry-edit-tags"
             />
           </div>
 

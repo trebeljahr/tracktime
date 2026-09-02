@@ -74,6 +74,10 @@ const optimisticEntry = (
   timeZone: input.timeZone,
   // Server-owned: only the runaway guard ever writes it.
   runaway: null,
+  // The popup cannot pick tags yet, and nothing is invoiced at the moment it
+  // starts — both are filled in by the server echo if they ever change.
+  tagIds: [],
+  invoiceId: null,
   createdAt: input.start,
   updatedAt: input.start,
 });

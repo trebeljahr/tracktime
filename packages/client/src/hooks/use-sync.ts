@@ -75,6 +75,7 @@ const invalidateFor = (utils: Utils, event: SyncEvent): void => {
       void utils.clients.invalidate();
       void utils.projects.invalidate();
       void utils.tasks.invalidate();
+      void utils.tags.invalidate();
       void utils.reports.invalidate();
       // A cascading delete rewrites the entries it detached, and publishes no
       // entry event of its own.
@@ -83,9 +84,25 @@ const invalidateFor = (utils: Utils, event: SyncEvent): void => {
     case "favorites.changed":
       void utils.favorites.invalidate();
       return;
+    case "invoice.changed":
+      // Invoicing stamps `invoiceId` onto the entries it bills, so a write
+      // here changes what is still billable — entries and reports go stale
+      // alongside the ledger itself.
+      void utils.invoices.invalidate();
+      void utils.entries.invalidate();
+      void utils.reports.invalidate();
+      return;
     case "settings.changed":
       void utils.settings.invalidate();
       return;
+    default: {
+      // A new SyncEvent kind with no case here would otherwise be a silent
+      // cross-device staleness bug that no test catches. Fail the BUILD
+      // instead: this line stops compiling the moment the union grows.
+      const unhandled: never = event;
+      void unhandled;
+      return;
+    }
   }
 };
 

@@ -20,7 +20,6 @@ import { useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { ExportMenu } from "@/components/reports/export-menu";
 import { KpiRow, type KpiItem } from "@/components/reports/kpi-row";
-import { openPrintView } from "@/components/reports/print-report";
 import { ReportFiltersBar } from "@/components/reports/report-filters";
 import {
   KpiRowSkeleton,
@@ -82,48 +81,6 @@ function WeeklyReport(): React.JSX.Element {
   const result = query.data;
 
   // ── export ─────────────────────────────────────────────────────────
-  const handlePrint = React.useCallback((): void => {
-    if (!result) return;
-    const ok = openPrintView({
-      title: "Weekly timesheet",
-      subtitle: formatRangeLabel({ from: weekStart, to: weekEnd }),
-      stats: [
-        { label: "Week total", value: fmt.duration(result.totalSec) },
-        {
-          label: "Rows",
-          value: String(result.rows.length),
-        },
-      ],
-      columns: [
-        { key: "label", header: "Project / Task" },
-        ...result.days.map((day) => ({
-          key: day,
-          header: format(parseISO(day), "EEE d"),
-          align: "right" as const,
-        })),
-        { key: "total", header: "Total", align: "right" as const },
-      ],
-      rows: result.rows.map((row) => {
-        const printRow: Record<string, string> = {
-          label: row.label,
-          total: fmt.duration(row.totalSec),
-        };
-        result.days.forEach((day, index) => {
-          printRow[day] = fmt.duration(row.daySeconds[index] ?? 0);
-        });
-        return printRow;
-      }),
-      totals: result.days.reduce<Record<string, string>>(
-        (accumulator, day, index) => {
-          accumulator[day] = fmt.duration(result.dayTotals[index] ?? 0);
-          return accumulator;
-        },
-        { label: "Total", total: fmt.duration(result.totalSec) }
-      ),
-    });
-    if (!ok) toast.error("Allow pop-ups to open the print view");
-  }, [fmt, result, weekEnd, weekStart]);
-
   const daysWithTime = (result?.dayTotals ?? []).filter(
     (seconds) => seconds > 0
   ).length;
@@ -216,7 +173,6 @@ function WeeklyReport(): React.JSX.Element {
               report="weekly"
               filters={weekFilters}
               weekStart={weekStart}
-              onPrint={handlePrint}
               disabled={result === undefined}
             />
           </>

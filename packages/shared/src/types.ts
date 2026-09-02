@@ -113,9 +113,36 @@ export type ReportGroupBy =
   | "project"
   | "client"
   | "task"
+  /**
+   * Tags are many-per-entry, so a tag-grouped summary is the one dimension
+   * whose groups do NOT partition the entries: an entry carrying two tags
+   * contributes its seconds to both groups, and an untagged entry lands in a
+   * single "No tag" bucket. Group totals therefore sum to more than
+   * `totalSec` — that is correct, not a bug, and the UI has to say so.
+   */
+  | "tag"
   | "day"
   | "week"
   | "month";
+
+/**
+ * A cross-cutting label. Tags are deliberately OUTSIDE the
+ * Client > Project > Task hierarchy: an entry belongs to exactly one place in
+ * that tree, but can carry any number of tags ("billable-review", "on-site",
+ * "bugfix"), which is what makes them useful for slicing across projects.
+ */
+export type Tag = {
+  id: string;
+  workspaceId: string;
+  /** Audit only — never used for scoping. */
+  createdBy: string;
+  name: string;
+  /** Hex color, e.g. "#4f46e5". */
+  color: string;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
 
 /** A billable customer that projects belong to. */
 export type Client = {
@@ -236,6 +263,14 @@ export type TimeEntry = {
    * a cap can be seen, explained and put back.
    */
   runaway: RunawayMark | null;
+  /** Ids of the {@link Tag}s on this entry. Empty array = untagged. */
+  tagIds: string[];
+  /**
+   * The {@link Invoice} this entry has been billed on, or null while it is
+   * still billable. See the note on the Mongoose field: `Invoice.entryIds` is
+   * the source of truth and this is its denormalized index.
+   */
+  invoiceId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -428,4 +463,77 @@ export type DeviceSession = {
   expiresAt: string;
   /** True for the session making the request — it cannot be revoked blindly. */
   current: boolean;
+};
+
+// ── invoicing ────────────────────────────────────────────────────────
+//
+// An invoice is a SNAPSHOT, not a view. Every number on it — the rate, the
+// currency, the client's name, the seconds billed — is copied onto the
+// document when it is created, so editing a project's rate or renaming a
+// client afterwards never silently rewrites a document somebody has already
+// sent to a customer.
+
+/**
+ * Lifecycle of an invoice. Deliberately three states and no more: "draft"
+ * is still editable, "sent" has left the building, "paid" is done. Anything
+ * finer (overdue, partially paid, void) is bookkeeping this app does not do.
+ */
+export type InvoiceStatus = "draft" | "sent" | "paid";
+
+/** One billable line — a project or a task, rolled up over the range. */
+export type InvoiceLineItem = {
+  /** Stable identity within the invoice: the project/task id, or "none". */
+  key: string;
+  label: string;
+  projectId: string | null;
+  taskId: string | null;
+  /** Exact billed seconds, so the invoice can be re-derived. */
+  seconds: number;
+  /** `seconds` as decimal hours, rounded the way the line is billed. */
+  hours: number;
+  /** Snapshot of the rate the line was billed at. */
+  hourlyRate: number;
+  currency: string;
+  /** `hours × hourlyRate`, rounded to 2dp. */
+  amount: number;
+};
+
+/** A generated invoice for one client over one date range. */
+export type Invoice = {
+  id: string;
+  workspaceId: string;
+  /** Audit only — never used for scoping. */
+  createdBy: string;
+  /** Human-facing number, unique per workspace, e.g. "2026-014". */
+  number: string;
+  clientId: string;
+  /** Snapshot of the client's name at issue time. */
+  clientName: string;
+  status: InvoiceStatus;
+  /** ISO date. */
+  issueDate: string;
+  /** ISO date. */
+  dueDate: string;
+  /** ISO date or datetime — start of the billed range, inclusive. */
+  from: string;
+  /** ISO date or datetime — end of the billed range. */
+  to: string;
+  /** Whether lines are one-per-project or one-per-task. */
+  groupBy: "project" | "task";
+  lineItems: InvoiceLineItem[];
+  subtotal: number;
+  /** Percent, e.g. 19 for 19% VAT. Null = no tax line. */
+  taxRate: number | null;
+  taxAmount: number;
+  total: number;
+  currency: string;
+  /**
+   * Every entry billed on this invoice. Source of truth for the
+   * double-billing guard — `TimeEntry.invoiceId` is the denormalized index
+   * over it.
+   */
+  entryIds: string[];
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
 };

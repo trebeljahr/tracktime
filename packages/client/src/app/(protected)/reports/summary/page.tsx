@@ -16,7 +16,6 @@ import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { ExportMenu } from "@/components/reports/export-menu";
 import { KpiRow, type KpiItem } from "@/components/reports/kpi-row";
-import { openPrintView } from "@/components/reports/print-report";
 import { ReportFiltersBar } from "@/components/reports/report-filters";
 import {
   ChartSkeleton,
@@ -39,6 +38,7 @@ const GROUP_BY_OPTIONS: { id: ReportGroupBy; label: string }[] = [
   { id: "project", label: "Project" },
   { id: "client", label: "Client" },
   { id: "task", label: "Task" },
+  { id: "tag", label: "Tag" },
   { id: "day", label: "Day" },
   { id: "week", label: "Week" },
   { id: "month", label: "Month" },
@@ -136,54 +136,6 @@ function SummaryReport(): React.JSX.Element {
     ];
   }, [fmt, result]);
 
-  const handlePrint = React.useCallback((): void => {
-    if (!result) return;
-    const ok = openPrintView({
-      title: `Summary report by ${dimension.toLowerCase()}`,
-      subtitle: formatRangeLabel(state.range),
-      stats: [
-        { label: "Total tracked", value: fmt.duration(result.totalSec) },
-        { label: "Billable", value: fmt.duration(result.billableSec) },
-        { label: "Amount", value: fmt.money(result.totalAmount) },
-      ],
-      meta: [
-        state.projectIds.length > 0
-          ? `${state.projectIds.length} project filter(s)`
-          : "All projects",
-        state.clientIds.length > 0
-          ? `${state.clientIds.length} client filter(s)`
-          : "All clients",
-        state.billable === "all"
-          ? "Billable and non-billable"
-          : state.billable === "yes"
-            ? "Billable only"
-            : "Non-billable only",
-        ...(state.search.trim() === "" ? [] : [`Search: ${state.search}`]),
-      ],
-      columns: [
-        { key: "label", header: dimension },
-        { key: "billable", header: "Billable", align: "right" },
-        { key: "duration", header: "Duration", align: "right" },
-        { key: "amount", header: "Amount", align: "right" },
-      ],
-      rows: [...result.groups]
-        .sort((a, b) => b.seconds - a.seconds)
-        .map((group) => ({
-          label: group.label,
-          billable: fmt.duration(group.billableSec),
-          duration: fmt.duration(group.seconds),
-          amount: fmt.money(group.amount),
-        })),
-      totals: {
-        label: "Total",
-        billable: fmt.duration(result.billableSec),
-        duration: fmt.duration(result.totalSec),
-        amount: fmt.money(result.totalAmount),
-      },
-    });
-    if (!ok) toast.error("Allow pop-ups to open the print view");
-  }, [dimension, fmt, result, state]);
-
   const isLoading = query.isPending;
   const isEmpty = result !== undefined && result.totalSec === 0;
 
@@ -205,13 +157,19 @@ function SummaryReport(): React.JSX.Element {
             report="summary"
             filters={reportFilters}
             groupBy={groupBy}
-            onPrint={handlePrint}
             disabled={result === undefined}
           />
         }
       />
 
       {isLoading ? <KpiRowSkeleton /> : <KpiRow items={kpis} />}
+
+      {/*
+        Budgets sit under the KPIs and above the group-by switch: they are a
+        property of the projects in view, not of the grouping, so re-grouping
+        the report must not look like it changed them. Renders null until any
+        project has a budget set.
+      */}
 
       <div
         className="flex flex-wrap items-center gap-1 rounded-lg border border-border bg-card p-1"
@@ -287,6 +245,10 @@ function SummaryReport(): React.JSX.Element {
               money={fmt.money}
               dimensionLabel={dimension}
               budgetFor={budgetFor}
+              // Stated from the grouping itself, not inferred from the label,
+              // so renaming "Tag" cannot silently drop the double-counting
+              // caveat.
+              groupsOverlap={groupBy === "tag"}
             />
           )}
         </CardContent>

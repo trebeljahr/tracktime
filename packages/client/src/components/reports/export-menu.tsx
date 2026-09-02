@@ -1,8 +1,15 @@
 "use client";
 
 import * as React from "react";
-import { Download, FileSpreadsheet, Loader2, Printer } from "lucide-react";
-import type { ReportFilters, ReportGroupBy } from "@starter/shared";
+import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
+import type {
+  CsvExportResult,
+  ExportCsvInput,
+  ExportPdfInput,
+  PdfExportResult,
+  ReportFilters,
+  ReportGroupBy,
+} from "@starter/shared";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/ui/sonner";
+import { downloadBase64, downloadBlob } from "@/lib/download";
 import { trpc } from "@/lib/trpc";
 
 export type ExportReportKind = "summary" | "detailed" | "weekly";
@@ -25,74 +33,148 @@ export type ExportMenuProps = {
   groupBy?: ReportGroupBy;
   /** Required by the server for `report === "weekly"`. */
   weekStart?: string;
-  /** Builds and prints the paper view. Supplied by each report screen. */
-  onPrint: () => void;
   disabled?: boolean;
 };
 
-/** Hand a generated CSV to the browser as a download. */
-const downloadCsv = (filename: string, csv: string): void => {
-  // The BOM keeps Excel from mangling non-ASCII project names.
-  const blob = new Blob([`\uFEFF${csv}`], {
-    type: "text/csv;charset=utf-8;",
-  });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.rel = "noopener";
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  // Revoking synchronously can race Safari's download start.
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
-};
+/**
+ * Whether this runtime can actually receive a generated file.
+ *
+ * The download path is the object-URL + `<a download>` dance in
+ * `@/lib/download`. A browser tab honours it, and so does Electron — its
+ * renderer is Chromium, which routes blob downloads through the session's
+ * download manager even when the app was loaded from `file://`. Capacitor's
+ * web views do NOT: WKWebView ignores the `download` attribute outright and
+ * Android's WebView needs a native DownloadListener that this shell does not
+ * register (see `packages/client/src/mobile/bridge.ts` — it wires lifecycle,
+ * splash and orientation, and nothing that can write a file).
+ *
+ * So on native mobile the click would be a silent no-op. Detect it up front
+ * and say so instead, rather than spinning and pretending it worked.
+ */
+export function canDownloadFiles(): boolean {
+  if (typeof window === "undefined") return false;
+  const capacitor = (
+    window as unknown as {
+      Capacitor?: { isNativePlatform?: () => boolean };
+    }
+  ).Capacitor;
+  try {
+    return capacitor?.isNativePlatform?.() !== true;
+  } catch {
+    // A shell that throws out of its own bridge is not one we can save through.
+    return false;
+  }
+}
+
+const unsupportedMessage = (what: string): string =>
+  `This app can't save files yet — open the report in a browser to download the ${what}.`;
 
 /**
- * CSV + print export, shared by all three report screens. The CSV is rendered
- * server-side (`reports.exportCsv`) so the file always covers the whole
- * filtered range, not just the page currently on screen.
+ * Fetch the server-rendered CSV and hand it to the browser.
+ *
+ * Takes the fetcher rather than reaching for `trpc.useUtils()` itself so the
+ * whole path — request shape, filename, failure handling — is testable without
+ * a tRPC provider. Never throws: every outcome becomes a toast.
  */
-export function ExportMenu({
-  report,
-  filters,
-  groupBy,
-  weekStart,
-  onPrint,
-  disabled = false,
-}: ExportMenuProps): React.JSX.Element {
+export async function exportCsvReport(
+  fetchCsv: (input: ExportCsvInput) => Promise<CsvExportResult>,
+  input: ExportCsvInput,
+): Promise<void> {
+  if (!canDownloadFiles()) {
+    toast.error(unsupportedMessage("CSV"));
+    return;
+  }
+  try {
+    const result = await fetchCsv(input);
+    // The BOM keeps Excel from mangling non-ASCII project names.
+    downloadBlob(
+      result.filename,
+      new Blob([`\uFEFF${result.csv}`], { type: "text/csv;charset=utf-8;" }),
+    );
+    toast.success(`Exported ${result.filename}`);
+  } catch (error) {
+    toast.error(
+      error instanceof Error ? error.message : "Could not export the report",
+    );
+  }
+}
+
+/**
+ * Fetch the server-rendered PDF and hand it to the browser.
+ *
+ * The bytes arrive base64-encoded because the tRPC transport is JSON; the
+ * decoding lives in `@/lib/download` so the invoice PDF can reuse it. Never
+ * throws: every outcome becomes a toast.
+ */
+export async function exportPdfReport(
+  fetchPdf: (input: ExportPdfInput) => Promise<PdfExportResult>,
+  input: ExportPdfInput,
+): Promise<void> {
+  if (!canDownloadFiles()) {
+    toast.error(unsupportedMessage("PDF"));
+    return;
+  }
+  try {
+    const result = await fetchPdf(input);
+    downloadBase64(result.filename, result.base64, result.mimeType);
+    toast.success(`Exported ${result.filename}`);
+  } catch (error) {
+    toast.error(
+      error instanceof Error ? error.message : "Could not export the report",
+    );
+  }
+}
+
+/**
+ * CSV + PDF export, shared by all three report screens. Both files are
+ * rendered server-side (`reports.exportCsv` / `reports.exportPdf`) so they
+ * always cover the whole filtered range, not just the page currently on
+ * screen — and so the PDF is a real document rather than whatever the
+ * browser's print dialog made of the live DOM.
+ */
+export function ExportMenu(props: ExportMenuProps): React.JSX.Element {
+  const { report, filters, groupBy, weekStart, disabled = false } = props;
   const utils = trpc.useUtils();
   const [pending, setPending] = React.useState(false);
 
-  const handleCsv = React.useCallback((): void => {
+  const input = React.useMemo(
+    (): ExportCsvInput => ({
+      ...filters,
+      report,
+      ...(groupBy ? { groupBy } : {}),
+      ...(weekStart ? { weekStart } : {}),
+    }),
+    [filters, groupBy, report, weekStart],
+  );
+
+  const run = React.useCallback((task: () => Promise<void>): void => {
     setPending(true);
     void (async () => {
       try {
-        const result = await utils.reports.exportCsv.fetch({
-          ...filters,
-          report,
-          ...(groupBy ? { groupBy } : {}),
-          ...(weekStart ? { weekStart } : {}),
-        });
-        downloadCsv(result.filename, result.csv);
-        toast.success(`Exported ${result.filename}`);
-      } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Could not export the report"
-        );
+        await task();
       } finally {
         setPending(false);
       }
     })();
-  }, [filters, groupBy, report, utils, weekStart]);
+  }, []);
 
-  const handlePrint = React.useCallback((): void => {
-    try {
-      onPrint();
-    } catch {
-      toast.error("Could not open the print view");
-    }
-  }, [onPrint]);
+  const handleCsv = React.useCallback((): void => {
+    run(() =>
+      exportCsvReport(
+        (payload) => utils.reports.exportCsv.fetch(payload),
+        input,
+      ),
+    );
+  }, [input, run, utils]);
+
+  const handlePdf = React.useCallback((): void => {
+    run(() =>
+      exportPdfReport(
+        (payload) => utils.reports.exportPdf.fetch(payload),
+        input,
+      ),
+    );
+  }, [input, run, utils]);
 
   return (
     <DropdownMenu>
@@ -114,19 +196,13 @@ export function ExportMenu({
       <DropdownMenuContent align="end" data-testid="report-export-menu">
         <DropdownMenuLabel>Export report</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={handleCsv}
-          data-testid="report-export-csv"
-        >
+        <DropdownMenuItem onSelect={handleCsv} data-testid="report-export-csv">
           <FileSpreadsheet className="size-4" />
           Download CSV
         </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={handlePrint}
-          data-testid="report-export-print"
-        >
-          <Printer className="size-4" />
-          Print / PDF
+        <DropdownMenuItem onSelect={handlePdf} data-testid="report-export-pdf">
+          <FileText className="size-4" />
+          Download PDF
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

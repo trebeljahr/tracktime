@@ -93,6 +93,8 @@ const provisionalEntry = (
     source: "extension",
     timeZone: deviceTimeZone(),
     runaway: null,
+    tagIds: [],
+    invoiceId: null,
     createdAt: now,
     updatedAt: now,
   };

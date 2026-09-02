@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { DurationInput } from "@/components/duration-input";
 import { ProjectPicker } from "@/components/project-picker";
 import { TaskPicker } from "@/components/task-picker";
+import { TagPicker } from "@/components/tags/tag-picker";
 import { BillableGlyph } from "@/components/tracker/billable-glyph";
 import { QuickStartRow } from "@/components/tracker/quick-start-row";
 import { TimeField } from "@/components/tracker/time-field";
@@ -63,6 +64,7 @@ export function TrackerBar(): React.JSX.Element {
   const [projectId, setProjectId] = React.useState<string | null>(null);
   const [taskId, setTaskId] = React.useState<string | null>(null);
   const [billable, setBillable] = React.useState(false);
+  const [tagIds, setTagIds] = React.useState<string[]>([]);
   const [manual, setManual] = React.useState(defaultManualRange);
 
   const isRunning = running !== null;
@@ -79,6 +81,7 @@ export function TrackerBar(): React.JSX.Element {
     setProjectId(running?.projectId ?? null);
     setTaskId(running?.taskId ?? null);
     setBillable(running?.billable ?? false);
+    setTagIds(running?.tagIds ?? []);
   }
 
   const pomodoro = usePomodoro({
@@ -143,6 +146,18 @@ export function TrackerBar(): React.JSX.Element {
     [isRunning, mutations, running]
   );
 
+  const handleTagsChange = React.useCallback(
+    (next: string[]): void => {
+      setTagIds(next);
+      // Labelling a running entry has to stick immediately — the whole point
+      // of tagging as you go is that you do it while the timer runs.
+      if (isRunning && running) {
+        mutations.updateEntry({ id: running.id, tagIds: next });
+      }
+    },
+    [isRunning, mutations, running]
+  );
+
   const handleBillableToggle = React.useCallback((): void => {
     const next = !billable;
     setBillable(next);
@@ -159,8 +174,8 @@ export function TrackerBar(): React.JSX.Element {
 
   const start = React.useCallback((): void => {
     requestPomodoroPermission(format.settings.pomodoro);
-    mutations.startTimer({ description, projectId, taskId, billable });
-  }, [billable, description, mutations, projectId, taskId]);
+    mutations.startTimer({ description, projectId, taskId, billable, tagIds });
+  }, [billable, description, mutations, projectId, tagIds, taskId]);
 
   const stop = React.useCallback((): void => {
     mutations.stopTimer();
@@ -178,12 +193,16 @@ export function TrackerBar(): React.JSX.Element {
       projectId,
       taskId,
       billable,
+      tagIds,
       start: manual.start,
       end,
     });
     setDescription("");
+    // Tags deliberately survive: consecutive manual entries are usually the
+    // same kind of work, and re-picking the label every time is what stops
+    // people from tagging at all.
     setManual(defaultManualRange());
-  }, [billable, description, manual, mutations, projectId, taskId]);
+  }, [billable, description, manual, mutations, projectId, tagIds, taskId]);
 
   const submit = React.useCallback((): void => {
     if (mode === "manual") addManual();
@@ -264,6 +283,14 @@ export function TrackerBar(): React.JSX.Element {
           onChange={handleTaskChange}
           className="h-10 border-0 shadow-none"
           testId="tracker-task"
+        />
+
+        <TagPicker
+          value={tagIds}
+          onChange={handleTagsChange}
+          maxChips={2}
+          className="h-10 border-0 shadow-none"
+          testId="tracker-tags"
         />
 
         <Button

@@ -15,7 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
 import { ORIGIN_ID } from "@/hooks/use-sync";
 import { CURRENCY_FALLBACK_ICON, currencyIcon } from "@/lib/currency";
-import { formatDayLabel, useFormatSettings } from "@/lib/format";
+import { useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { BulkActionBar } from "@/components/reports/bulk-action-bar";
 import {
@@ -28,7 +28,6 @@ import {
 } from "@/components/reports/detailed-table";
 import { ExportMenu } from "@/components/reports/export-menu";
 import { KpiRow, type KpiItem } from "@/components/reports/kpi-row";
-import { openPrintView } from "@/components/reports/print-report";
 import { ReportFiltersBar } from "@/components/reports/report-filters";
 import {
   KpiRowSkeleton,
@@ -296,56 +295,6 @@ function DetailedReport(): React.JSX.Element {
   }, [removeEntry, runBulk, selectedIds]);
 
   // ── export ─────────────────────────────────────────────────────────
-  const handlePrint = React.useCallback((): void => {
-    const ok = openPrintView({
-      title: "Detailed report",
-      subtitle: formatRangeLabel(state.range),
-      stats: [
-        { label: "Total tracked", value: fmt.duration(totals?.totalSec ?? 0) },
-        { label: "Amount", value: fmt.money(totals?.totalAmount ?? 0) },
-        { label: "Entries", value: String(entries.length) },
-      ],
-      meta: [
-        state.billable === "all"
-          ? "Billable and non-billable"
-          : state.billable === "yes"
-            ? "Billable only"
-            : "Non-billable only",
-        ...(state.search.trim() === "" ? [] : [`Search: ${state.search}`]),
-      ],
-      columns: [
-        { key: "date", header: "Date" },
-        { key: "description", header: "Description" },
-        { key: "project", header: "Project" },
-        { key: "client", header: "Client" },
-        { key: "task", header: "Task" },
-        { key: "billable", header: "Billable" },
-        { key: "time", header: "Start / End" },
-        { key: "duration", header: "Duration", align: "right" },
-        { key: "amount", header: "Amount", align: "right" },
-      ],
-      rows: entries.map((entry) => ({
-        date: formatDayLabel(entry.start),
-        description: entry.description === "" ? "No description" : entry.description,
-        project: entry.projectName ?? "No project",
-        client: entry.clientName ?? "",
-        task: entry.taskName ?? "",
-        billable: entry.billable ? "Yes" : "No",
-        time: `${fmt.clock(entry.start)} - ${
-          entry.end === null ? "running" : fmt.clock(entry.end)
-        }`,
-        duration: fmt.duration(entry.durationSec),
-        amount: fmt.money(entry.amount),
-      })),
-      totals: {
-        date: "Total",
-        duration: fmt.duration(totals?.totalSec ?? 0),
-        amount: fmt.money(totals?.totalAmount ?? 0),
-      },
-    });
-    if (!ok) toast.error("Allow pop-ups to open the print view");
-  }, [entries, fmt, state, totals]);
-
   const kpis = React.useMemo<KpiItem[]>(
     () => [
       {
@@ -392,7 +341,6 @@ function DetailedReport(): React.JSX.Element {
           <ExportMenu
             report="detailed"
             filters={reportFilters}
-            onPrint={handlePrint}
             disabled={isLoading}
           />
         }

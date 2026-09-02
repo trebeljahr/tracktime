@@ -31,7 +31,16 @@ export type SummaryTableProps = {
    * …), which is what hides the column.
    */
   budgetFor?: (groupKey: string) => BudgetView | null;
+  /**
+   * Whether the groups can overlap — true only for tags, where one entry
+   * carries several. Defaults to the tag dimension so the caller does not have
+   * to remember; pass it explicitly if a future dimension overlaps too.
+   */
+  groupsOverlap?: boolean;
 };
+
+/** The one dimension whose groups an entry can belong to more than once. */
+const OVERLAPPING_DIMENSION = "Tag";
 
 /** Grouped totals, biggest first, with an inline share-of-total bar. */
 export function SummaryTable({
@@ -43,6 +52,7 @@ export function SummaryTable({
   money,
   dimensionLabel,
   budgetFor,
+  groupsOverlap = dimensionLabel === OVERLAPPING_DIMENSION,
 }: SummaryTableProps): React.JSX.Element {
   const rows = React.useMemo(
     () => [...groups].sort((a, b) => b.seconds - a.seconds),
@@ -52,7 +62,21 @@ export function SummaryTable({
   const denominator = totalSec > 0 ? totalSec : 1;
 
   return (
-    <Table data-testid="summary-table">
+    <>
+      {/* An entry with two tags is counted under both, so the rows add up to
+          more than the total. Numbers that silently do not add up read as a
+          bug, so the table says so rather than leaving it to be discovered. */}
+      {groupsOverlap ? (
+        <p
+          className="mb-2 text-xs text-muted-foreground"
+          data-testid="summary-overlap-note"
+        >
+          An entry carrying several tags counts in each of them, so these rows
+          add up to more than the total below.
+        </p>
+      ) : null}
+
+      <Table data-testid="summary-table">
       <TableHeader>
         <TableRow>
           <TableHead>{dimensionLabel}</TableHead>
@@ -155,6 +179,7 @@ export function SummaryTable({
           {budgetFor ? <TableCell /> : null}
         </TableRow>
       </TableFooter>
-    </Table>
+      </Table>
+    </>
   );
 }
