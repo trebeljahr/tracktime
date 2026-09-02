@@ -9,7 +9,7 @@ import {
 import { DEFAULT_API_URL } from "../lib/config";
 import { describeError } from "./errors";
 import { SignInScreen } from "./sign-in-screen";
-import { TrackerScreen } from "./tracker-screen";
+import { TrackerScreen, type RunningPatch } from "./tracker-screen";
 
 /**
  * The whole popup.
@@ -127,6 +127,12 @@ export function App(): JSX.Element {
     [send],
   );
 
+  const updateRunning = useCallback(
+    (patch: RunningPatch): Promise<boolean> =>
+      send({ type: "timer:update", ...patch }),
+    [send],
+  );
+
   const unpinFavorite = useCallback(
     (id: string): Promise<boolean> => send({ type: "favorite:remove", id }),
     [send],
@@ -179,6 +185,7 @@ export function App(): JSX.Element {
             })
           }
           onStop={() => send({ type: "timer:stop" })}
+          onUpdateRunning={updateRunning}
           onPinFavorite={pinFavorite}
           onUnpinFavorite={unpinFavorite}
           onAnswerIdle={(answer) => send({ type: "idle:answer", answer })}

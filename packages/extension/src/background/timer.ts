@@ -1,7 +1,7 @@
 /**
- * Start and stop, with the offline queue underneath.
+ * Start, stop and edit-while-running, with the offline queue underneath.
  *
- * Both paths build exactly one input object and then either send it or queue
+ * Every path builds exactly one input object and then either sends it or queues
  * it, so a mutation replayed tomorrow is identical to the one that failed
  * today. The cached running entry moves either way: the popup has to show a
  * running timer with the network off, which is the entire point of queueing
@@ -10,8 +10,10 @@
 import {
   createTempId,
   deviceTimeZone,
+  isTempId,
   type OfflineStartInput,
   type OfflineStopInput,
+  type OfflineUpdateInput,
   type TimeEntry,
 } from "@starter/core";
 import { renderBadge } from "./badge";
@@ -26,6 +28,7 @@ import {
   isTransportFailure,
   ORIGIN_ID,
   rememberOptimisticRunning,
+  resolveRunning,
   setCachedRunning,
 } from "./runtime";
 
@@ -206,4 +209,103 @@ const queueStop = async (input: OfflineStopInput): Promise<void> => {
   // a revived worker refetches and resurrects the entry this stop closed.
   await rememberOptimisticRunning(null);
   await renderBadge(null);
+};
+
+/**
+ * An edit to the running entry. Absent fields are left alone — the same
+ * contract `entries.update` has server-side, which is what lets a queued patch
+ * replay as the edit that was made rather than as a whole-entry overwrite.
+ */
+export type RunningPatch = {
+  description?: string;
+  projectId?: string | null;
+  taskId?: string | null;
+  billable?: boolean;
+  tagIds?: string[];
+};
+
+/**
+ * What the server would answer with, applied locally so the popup's next
+ * snapshot already shows the edit.
+ *
+ * `undefined` means "not in the patch" for every field, which is why the two
+ * nullable ids are compared against `undefined` explicitly: `?? entry.taskId`
+ * would turn a deliberate "no task" into "keep the old task".
+ */
+const patched = (entry: TimeEntry, patch: RunningPatch): TimeEntry => ({
+  ...entry,
+  description: patch.description ?? entry.description,
+  projectId: patch.projectId === undefined ? entry.projectId : patch.projectId,
+  taskId: patch.taskId === undefined ? entry.taskId : patch.taskId,
+  billable: patch.billable ?? entry.billable,
+  tagIds: patch.tagIds ?? entry.tagIds,
+  updatedAt: new Date().toISOString(),
+});
+
+/**
+ * Edit the entry that is currently running.
+ *
+ * The entry is resolved here rather than named by the popup: the popup's
+ * snapshot can be a few seconds old, and an id from before another device
+ * stopped the timer would edit a row that is no longer running.
+ */
+export async function updateRunning(patch: RunningPatch): Promise<void> {
+  const current = await ensureReady();
+  if (!current.session) throw notSignedIn();
+
+  const running = await resolveRunning();
+  if (running === null) {
+    throw new BackgroundError(
+      "NOT_RUNNING",
+      "No timer is running, so there is nothing to edit.",
+    );
+  }
+
+  // A timer started offline exists only as a queued `entries.start`, so an
+  // update naming its temp id would be refused on replay and the edit lost.
+  // The queued start still carries the fields it was opened with, so nothing
+  // is stuck — the edit just has to wait for the entry to become real.
+  if (isTempId(running.id)) {
+    throw new BackgroundError(
+      "STILL_SYNCING",
+      "That timer has not reached the server yet. Try again in a moment.",
+    );
+  }
+
+  const input: OfflineUpdateInput = {
+    ...patch,
+    id: running.id,
+    originId: ORIGIN_ID,
+  };
+  const optimistic = patched(running, patch);
+
+  // Drain first, for the same reason start and stop do: a live edit sent ahead
+  // of older queued mutations would be overwritten when they replay.
+  if ((await flushQueue()) > 0) {
+    await queueUpdate(input, optimistic);
+    return;
+  }
+
+  try {
+    const entry = await current.api.mutate<TimeEntry>("entries.update", input);
+    setCachedRunning(entry);
+    // Recents are derived from the entry log, and this edit changed what the
+    // most recent combination is labelled with.
+    invalidateRecents();
+  } catch (error) {
+    if (!isTransportFailure(error)) throw error;
+    await queueUpdate(input, optimistic);
+  }
+}
+
+const queueUpdate = async (
+  input: OfflineUpdateInput,
+  optimistic: TimeEntry,
+): Promise<void> => {
+  await enqueueOffline("entries.update", input);
+  setCachedRunning(optimistic);
+  // On disk as well as in memory: the queued row outlives this worker, so the
+  // edited entry it implies has to outlive it too, or a revived worker would
+  // show the pre-edit fields until the queue drains.
+  await rememberOptimisticRunning(optimistic);
 };

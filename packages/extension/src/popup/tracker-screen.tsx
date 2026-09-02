@@ -19,6 +19,15 @@ import { Menu } from "./menu";
 import { QuickStartList } from "./quick-start-list";
 import { useElapsedSec } from "./use-elapsed";
 
+/** An edit to the running entry. Absent fields are left alone. */
+export type RunningPatch = {
+  description?: string;
+  projectId?: string | null;
+  taskId?: string | null;
+  billable?: boolean;
+  tagIds?: string[];
+};
+
 export type TrackerScreenProps = {
   state: BackgroundState;
   /** The last failure, already translated into human terms. */
@@ -32,6 +41,8 @@ export type TrackerScreenProps = {
     tagIds?: string[],
   ) => Promise<boolean>;
   onStop: () => Promise<boolean>;
+  /** Edits the entry that is running. The worker resolves which one that is. */
+  onUpdateRunning: (patch: RunningPatch) => Promise<boolean>;
   onPinFavorite: (quick: QuickStart) => Promise<boolean>;
   onUnpinFavorite: (id: string) => Promise<boolean>;
   /** Resolves the idle span the worker parked while the popup was closed. */
@@ -120,15 +131,16 @@ const describeSync = (
 
 /**
  * The entry the popup shows the instant Start is pressed, before the worker
- * has answered. Only description, project and start are ever read from it;
- * the server-owned fields are placeholders that the real snapshot overwrites
- * a moment later.
+ * has answered. Only the fields the composer renders are ever read from it;
+ * the server-owned ones are placeholders that the real snapshot overwrites a
+ * moment later.
  */
 const provisionalEntry = (
   description: string,
   projectId: string | null,
   taskId: string | null,
-  tagIds: string[] = [],
+  billable: boolean,
+  tagIds: string[],
 ): TimeEntry => {
   const now = new Date().toISOString();
   return {
@@ -138,7 +150,7 @@ const provisionalEntry = (
     description,
     projectId,
     taskId,
-    billable: false,
+    billable,
     start: now,
     end: null,
     durationSec: 0,
@@ -171,30 +183,30 @@ const projectOptions = (
     hint: clientName(clients, project.clientId),
   }));
 
-function ProjectLabel({
-  projects,
-  projectId,
-}: {
-  projects: Project[];
-  projectId: string | null;
-}): JSX.Element | null {
-  const project = projects.find((candidate) => candidate.id === projectId);
-  // An archived project is not in the list the worker sends; showing nothing
-  // beats showing a raw id.
-  if (!project) return null;
+/**
+ * The rule the server applies to an omitted `billable`, reproduced here.
+ *
+ * The composer now has a toggle, so it always sends a concrete value — and
+ * that value has to start where the server would have put it, or picking a
+ * billable project would quietly track unbillable time.
+ */
+const billableDefaultFor = (
+  projects: Project[],
+  projectId: string | null,
+): boolean => {
+  if (projectId === null) return false;
   return (
-    <span className="project" data-testid="tracker-project-label">
-      <span className="project__dot" style={{ backgroundColor: project.color }} />
-      {project.name}
-    </span>
+    projects.find((candidate) => candidate.id === projectId)
+      ?.billableDefault ?? false
   );
-}
+};
 
 export function TrackerScreen({
   state,
   error,
   onStart,
   onStop,
+  onUpdateRunning,
   onPinFavorite,
   onUnpinFavorite,
   onAnswerIdle,
@@ -210,6 +222,7 @@ export function TrackerScreen({
   const [projectId, setProjectId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [billable, setBillable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showApiUrl, setShowApiUrl] = useState(false);
 
@@ -228,16 +241,92 @@ export function TrackerScreen({
   const running = optimistic === null ? state.running : optimistic.running;
   const elapsedSec = useElapsedSec(running);
 
-  // Tasks belong to a project, so picking one has to go and fetch them. The
-  // worker holds the list; this only asks for it.
+  /**
+   * One set of fields, showing either a draft or the entry that is running.
+   *
+   * They are re-seeded whenever the timer's *identity* changes — which covers a
+   * start or a stop made on another device, not just in this popup — and never
+   * on a plain refresh, so an edit being typed here is not overwritten three
+   * seconds later by the poll. Done during render rather than in an effect so
+   * the fields are right on the first paint after a cross-device change.
+   */
+  const runningId = running?.id ?? null;
+  const [lastRunningId, setLastRunningId] = useState<string | null>(null);
+  if (lastRunningId !== runningId) {
+    setLastRunningId(runningId);
+    if (running !== null) {
+      setDescription(running.description);
+      setProjectId(running.projectId);
+      setTaskId(running.taskId);
+      setBillable(running.billable);
+      setTagIds(running.tagIds);
+    } else {
+      // The description and the task belonged to the entry that just ended.
+      // The project, its tags and its billable flag stay: the next block of
+      // work is usually the same kind of work, and re-picking every label
+      // would undo the point of a one-click toolbar.
+      setDescription("");
+      setTaskId(null);
+    }
+  }
+
+  // Tasks belong to a project, so whichever project is on screen — the running
+  // entry's or the draft's — has to have its task list fetched. The worker
+  // holds the list; this only asks for it.
   useEffect(() => {
     void onSelectProject(projectId);
   }, [projectId, onSelectProject]);
 
+  /**
+   * Push an edit at the running entry, or do nothing when composing a draft.
+   *
+   * Deliberately not gated on `busy` and not awaited: labelling work as you go
+   * is the whole point of editing a running timer, and a picker that refused
+   * the second change until the first round trip finished would feel broken.
+   */
+  const patchRunning = (patch: RunningPatch): void => {
+    if (running === null) return;
+    void onUpdateRunning(patch);
+  };
+
   const selectProject = (next: string | null): void => {
+    const changed = next !== projectId;
     setProjectId(next);
+    if (!changed) return;
     // A task from the old project would be silently wrong against the new one.
     setTaskId(null);
+
+    if (running !== null) {
+      patchRunning({ projectId: next, taskId: null });
+      return;
+    }
+    // Only a draft follows the project's default. Changing the project under a
+    // running entry must not silently re-decide whether that time is billable.
+    setBillable(billableDefaultFor(state.projects, next));
+  };
+
+  const selectTask = (next: string | null): void => {
+    setTaskId(next);
+    patchRunning({ taskId: next });
+  };
+
+  const selectTags = (next: string[]): void => {
+    setTagIds(next);
+    patchRunning({ tagIds: next });
+  };
+
+  const toggleBillable = (): void => {
+    const next = !billable;
+    setBillable(next);
+    patchRunning({ billable: next });
+  };
+
+  /** Save a typed description against the running entry, if it changed. */
+  const commitDescription = (): void => {
+    if (running === null) return;
+    const next = description.trim();
+    if (next === running.description) return;
+    patchRunning({ description: next });
   };
 
   const beginProject = async (name: string): Promise<void> => {
@@ -269,7 +358,7 @@ export function TrackerScreen({
   /**
    * Start a favorite or a recent.
    *
-   * Same call as the form's own submit — `timer:start` with the four fields
+   * Same call as the composer's own submit — `timer:start` with the fields
    * already chosen — so the worker's billable defaulting, offline queueing and
    * optimistic badge all apply unchanged. The only difference is that
    * `billable` is explicit, because a pin already decided it.
@@ -282,6 +371,11 @@ export function TrackerScreen({
         quick.description,
         quick.projectId,
         quick.taskId,
+        quick.billable,
+        // Quick starts open untagged on purpose: tags ride alongside a
+        // QuickStart rather than inside it, so one recurring combination does
+        // not fragment into a recent per set of labels.
+        [],
       ),
     });
     await onStart(
@@ -306,34 +400,30 @@ export function TrackerScreen({
     setBusy(false);
   };
 
-  const start = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
+  const start = async (): Promise<void> => {
     if (busy) return;
     setBusy(true);
     setOptimistic({
-      running: provisionalEntry(description.trim(), projectId, taskId, tagIds),
+      running: provisionalEntry(
+        description.trim(),
+        projectId,
+        taskId,
+        billable,
+        tagIds,
+      ),
     });
 
-    const started = await onStart(
-      description.trim(),
-      projectId,
-      taskId,
-      // The form has no billable toggle, so the project's default decides.
-      undefined,
-      tagIds,
-    );
+    // Explicit rather than omitted: the composer has a billable toggle now, so
+    // the flag on screen is what the entry has to open with — letting the
+    // server re-derive it from the project would ignore the toggle.
+    await onStart(description.trim(), projectId, taskId, billable, tagIds);
 
     // Either way the override goes: on success the worker's snapshot is the
-    // better truth, on failure dropping it reverts the UI to what is real.
+    // better truth, on failure dropping it reverts the UI to what is real. The
+    // fields are not cleared here — they now show the running entry, and the
+    // re-seed above keeps them in step with it.
     setOptimistic(null);
     setBusy(false);
-    if (started) {
-      setDescription("");
-      setTaskId(null);
-      // Project and tags survive a start on purpose — the next block of work
-      // is usually the same kind of work, and re-picking every label would
-      // undo the point of a one-click toolbar.
-    }
   };
 
   const answerIdle = async (answer: IdleAnswer): Promise<void> => {
@@ -352,6 +442,12 @@ export function TrackerScreen({
     await onStop();
     setOptimistic(null);
     setBusy(false);
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (running === null) void start();
+    else void stop();
   };
 
   const signOut = async (): Promise<void> => {
@@ -392,164 +488,176 @@ export function TrackerScreen({
           />
         ) : null}
 
+        {/* Hidden while a timer runs, where the row would only offer to stop
+            this one and start another. */}
         {running === null ? (
-          <form className="form" onSubmit={start} data-testid="tracker-start-form">
-            {/* Above the description field on purpose: the whole point is not
-                having to fill it in. */}
-            <QuickStartList
-              items={state.quickStarts}
-              disabled={busy}
-              onStart={(quick) => {
-                void startQuick(quick);
-              }}
-              onPin={(quick) => {
-                void pin(quick);
-              }}
-              onUnpin={(id) => {
-                void unpin(id);
-              }}
-            />
+          <QuickStartList
+            items={state.quickStarts}
+            disabled={busy}
+            onStart={(quick) => {
+              void startQuick(quick);
+            }}
+            onPin={(quick) => {
+              void pin(quick);
+            }}
+            onUnpin={(id) => {
+              void unpin(id);
+            }}
+          />
+        ) : null}
 
-            <div className="field">
-              <label className="field__label" htmlFor="description">
-                Description
-              </label>
-              <input
-                id="description"
-                className="input"
-                type="text"
-                autoFocus
-                autoComplete="off"
-                placeholder="What are you working on?"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                data-testid="tracker-description"
-              />
-            </div>
-
-            {pendingProject === null ? (
-              <Combobox
-                label="Project"
-                options={projectOptions(state.projects, state.clients)}
-                value={projectId}
-                onChange={selectProject}
-                emptyLabel="No project"
-                placeholder="Search projects…"
-                onCreate={beginProject}
-                createLabel={(name) => `Create project “${name}”`}
-                testId="tracker-project"
-              />
-            ) : (
-              <div className="panel" data-testid="tracker-new-project">
-                <p className="panel__title">New project “{pendingProject}”</p>
-
-                <Combobox
-                  label="Client"
-                  options={state.clients.map((client) => ({
-                    id: client.id,
-                    label: client.name,
-                    color: client.color,
-                  }))}
-                  value={pendingClientId}
-                  onChange={setPendingClientId}
-                  emptyLabel="No client"
-                  placeholder="Search clients…"
-                  onCreate={async (name) => {
-                    await onCreateClient(name);
-                  }}
-                  createLabel={(name) => `Create client “${name}”`}
-                  testId="tracker-new-project-client"
-                />
-
-                <div className="panel__actions">
-                  <button
-                    className="button"
-                    type="button"
-                    onClick={() => {
-                      setPendingProject(null);
-                      setPendingClientId(null);
-                    }}
-                    disabled={busy}
-                    data-testid="tracker-new-project-cancel"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="button button--primary"
-                    type="button"
-                    onClick={() => {
-                      void confirmProject();
-                    }}
-                    disabled={busy}
-                    data-testid="tracker-new-project-create"
-                  >
-                    Create
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <Combobox
-              label="Task"
-              options={tasks.map((task) => ({ id: task.id, label: task.name }))}
-              value={taskId}
-              onChange={setTaskId}
-              emptyLabel="No task"
-              placeholder="Search tasks…"
-              disabled={projectId === null}
-              disabledHint="Pick a project first"
-              onCreate={createTask}
-              createLabel={(name) => `Create task “${name}”`}
-              testId="tracker-task"
-            />
-
-            <TagPicker
-              tags={state.tags}
-              value={tagIds}
-              onChange={setTagIds}
-              onCreate={createTag}
-              testId="tracker-tags"
-            />
-
-            <button
-              className="button button--primary button--block"
-              type="submit"
-              disabled={busy || pendingProject !== null}
-              data-testid="tracker-start"
-            >
-              Start
-            </button>
-          </form>
-        ) : (
-          <div className="running" data-testid="tracker-running">
-            <span
-              className={
-                running.description.trim() === ""
-                  ? "running__description running__description--empty"
-                  : "running__description"
-              }
-            >
-              {running.description.trim() === ""
-                ? "No description"
-                : running.description}
-            </span>
-            <ProjectLabel projects={state.projects} projectId={running.projectId} />
+        {/* One form for both states. The fields are the same either way — a
+            draft's and a running entry's — so splitting them into two blocks
+            would mean two places for every field to drift out of step. */}
+        <form
+          className="form"
+          onSubmit={submit}
+          data-testid={running === null ? "tracker-start-form" : "tracker-running"}
+        >
+          {running !== null ? (
             <span className="elapsed" data-testid="tracker-elapsed">
               {formatElapsed(elapsedSec)}
             </span>
-            <button
-              className="button button--danger button--block"
-              type="button"
-              onClick={() => {
-                void stop();
+          ) : null}
+
+          <div className="field">
+            <label className="field__label" htmlFor="description">
+              Description
+            </label>
+            <input
+              id="description"
+              className="input"
+              type="text"
+              autoFocus
+              autoComplete="off"
+              placeholder="What are you working on?"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              // A running entry's description is saved when the field is left,
+              // the same as the web app — typing must not fire a mutation per
+              // keystroke.
+              onBlur={commitDescription}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setDescription(running?.description ?? "");
+                  event.currentTarget.blur();
+                }
               }}
-              disabled={busy}
-              data-testid="tracker-stop"
-            >
-              Stop
-            </button>
+              data-testid="tracker-description"
+            />
           </div>
-        )}
+
+          {pendingProject === null ? (
+            <Combobox
+              label="Project"
+              options={projectOptions(state.projects, state.clients)}
+              value={projectId}
+              onChange={selectProject}
+              emptyLabel="No project"
+              placeholder="Search projects…"
+              onCreate={beginProject}
+              createLabel={(name) => `Create project “${name}”`}
+              testId="tracker-project"
+            />
+          ) : (
+            <div className="panel" data-testid="tracker-new-project">
+              <p className="panel__title">New project “{pendingProject}”</p>
+
+              <Combobox
+                label="Client"
+                options={state.clients.map((client) => ({
+                  id: client.id,
+                  label: client.name,
+                  color: client.color,
+                }))}
+                value={pendingClientId}
+                onChange={setPendingClientId}
+                emptyLabel="No client"
+                placeholder="Search clients…"
+                onCreate={async (name) => {
+                  await onCreateClient(name);
+                }}
+                createLabel={(name) => `Create client “${name}”`}
+                testId="tracker-new-project-client"
+              />
+
+              <div className="panel__actions">
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => {
+                    setPendingProject(null);
+                    setPendingClientId(null);
+                  }}
+                  disabled={busy}
+                  data-testid="tracker-new-project-cancel"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="button button--primary"
+                  type="button"
+                  onClick={() => {
+                    void confirmProject();
+                  }}
+                  disabled={busy}
+                  data-testid="tracker-new-project-create"
+                >
+                  Create
+                </button>
+              </div>
+            </div>
+          )}
+
+          <Combobox
+            label="Task"
+            options={tasks.map((task) => ({ id: task.id, label: task.name }))}
+            value={taskId}
+            onChange={selectTask}
+            emptyLabel="No task"
+            placeholder="Search tasks…"
+            disabled={projectId === null}
+            disabledHint="Pick a project first"
+            onCreate={createTask}
+            createLabel={(name) => `Create task “${name}”`}
+            testId="tracker-task"
+          />
+
+          <TagPicker
+            tags={state.tags}
+            value={tagIds}
+            onChange={selectTags}
+            onCreate={createTag}
+            testId="tracker-tags"
+          />
+
+          <button
+            className={billable ? "billable billable--on" : "billable"}
+            type="button"
+            role="switch"
+            aria-checked={billable}
+            onClick={toggleBillable}
+            data-testid="tracker-billable"
+            data-billable={billable ? "true" : "false"}
+          >
+            <span aria-hidden="true" className="billable__mark" />
+            {billable ? "Billable" : "Not billable"}
+          </button>
+
+          <button
+            className={
+              running === null
+                ? "button button--primary button--block"
+                : "button button--danger button--block"
+            }
+            type="submit"
+            disabled={busy || pendingProject !== null}
+            data-testid={running === null ? "tracker-start" : "tracker-stop"}
+          >
+            {running === null ? "Start" : "Stop"}
+          </button>
+        </form>
 
         <p className="today">
           <span>Today</span>

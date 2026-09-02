@@ -48,6 +48,27 @@ export type PopupToBackground =
       tagIds?: string[];
     }
   | { type: "timer:stop" }
+  /**
+   * Edit the entry that is currently running.
+   *
+   * Every field is optional and absent means "leave it alone", which is the
+   * same contract `entries.update` has server-side — so a patch queued offline
+   * replays as exactly the edit that was made, not as a whole-entry overwrite
+   * that would clobber a change some other device made in between.
+   *
+   * The entry is named by the worker rather than the popup: the popup's copy of
+   * the running entry can be a few seconds stale, and an id from a snapshot
+   * taken before another device stopped the timer would edit the wrong row.
+   */
+  | {
+      type: "timer:update";
+      description?: string;
+      projectId?: string | null;
+      taskId?: string | null;
+      billable?: boolean;
+      /** Replaces the whole set; `[]` clears it. */
+      tagIds?: string[];
+    }
   /** Pin the given combination. Idempotent — pinning twice is one pin. */
   | { type: "favorite:add"; quick: QuickStart }
   | { type: "favorite:remove"; id: string }

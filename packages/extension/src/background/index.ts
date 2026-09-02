@@ -48,7 +48,7 @@ import {
   resolveRunning,
 } from "./runtime";
 import { buildState } from "./state";
-import { startTimer, stopTimer } from "./timer";
+import { startTimer, stopTimer, updateRunning } from "./timer";
 
 const BADGE_ALARM = "tracktime.badge";
 
@@ -215,6 +215,18 @@ const apply = async (message: PopupToBackground): Promise<void> => {
       return;
     case "timer:stop":
       return stopTimer();
+    case "timer:update":
+      // Listed field by field to drop the discriminant. The omitted ones
+      // arrive as explicit `undefined`, which is the same thing to the server
+      // and to the queue: both go through `JSON.stringify`, which leaves an
+      // `undefined` value out of the object entirely.
+      return updateRunning({
+        description: message.description,
+        projectId: message.projectId,
+        taskId: message.taskId,
+        billable: message.billable,
+        tagIds: message.tagIds,
+      });
     case "idle:answer":
       return answerIdle(message.answer);
     case "favorite:add":
