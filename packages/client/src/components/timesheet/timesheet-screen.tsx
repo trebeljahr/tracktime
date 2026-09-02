@@ -19,6 +19,7 @@ import {
 } from "@starter/shared";
 
 import { EmptyState } from "@/components/empty-state";
+import { useAuth } from "@/hooks/use-auth";
 import { ProjectPicker } from "@/components/project-picker";
 import { TaskPicker } from "@/components/task-picker";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,7 @@ export function TimesheetScreen(): React.JSX.Element {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const fmt = useFormatSettings();
+  const { user } = useAuth();
   const nowMs = useNow(RUNNING_TICK_MS);
 
   const todayKey = dayKeyInZone(nowMs, TIME_ZONE);
@@ -145,16 +147,34 @@ export function TimesheetScreen(): React.JSX.Element {
     });
   }, [pinnedRows, projectsQuery.data, tasksQuery.data]);
 
+  /**
+   * A timesheet is the caller's OWN week.
+   *
+   * `entries.list` answers with the whole workspace when the member may see
+   * other people's time, and mixing that into a row would be wrong twice over:
+   * the cell total would not be the hours this person is filing, and a cell
+   * holding a colleague's entry would look editable while `entries.update`
+   * rightly refuses to touch it. The team's week is what the weekly report is
+   * for.
+   */
+  const myEntries = React.useMemo(
+    () =>
+      (entriesQuery.data?.entries ?? []).filter(
+        (entry) => entry.authorId === user?.id
+      ),
+    [entriesQuery.data, user?.id]
+  );
+
   const grid = React.useMemo(
     () =>
       buildTimesheetGrid({
-        entries: entriesQuery.data?.entries ?? [],
+        entries: myEntries,
         days,
         timeZone: TIME_ZONE,
         nowMs,
         seeds,
       }),
-    [days, entriesQuery.data, nowMs, seeds]
+    [days, myEntries, nowMs, seeds]
   );
 
   /**
@@ -200,7 +220,9 @@ export function TimesheetScreen(): React.JSX.Element {
     setDraftTask(null);
   }, [draftProject, draftTask, pin]);
 
-  const isLoading = entriesQuery.isPending;
+  // Without a user id every entry filters out, so the grid would flash empty
+  // rather than merely unfilled.
+  const isLoading = entriesQuery.isPending || user === null;
 
   return (
     <div className="space-y-4" data-testid="timesheet-page">
