@@ -17,6 +17,7 @@ import {
   createOfflineQueue,
   createSyncClient,
   decodeOfflineMutation,
+  isPermanentRejection,
   OFFLINE_QUEUE_STORAGE_KEY,
   type ApiClient,
   type Client,
@@ -705,9 +706,19 @@ export async function flushQueue(): Promise<number> {
     // A row written by an older build cannot be replayed against today's
     // schema; resolving drops it rather than wedging everything behind it.
     if (decoded === null) return;
-    // The op string *is* the tRPC path, by design — so there is no dispatch
-    // table here to drift out of step with the queue contract.
-    await current.api.mutate(decoded.op, decoded.input);
+    try {
+      // The op string *is* the tRPC path, by design — so there is no dispatch
+      // table here to drift out of step with the queue contract.
+      await current.api.mutate(decoded.op, decoded.input);
+    } catch (error) {
+      // Anything the server can still accept later — a lapsed session, a 500,
+      // a dead network — keeps its place and wedges the rest deliberately, so
+      // ordering survives. A permanent refusal cannot: the server has already
+      // moved on (the runaway guard capping an entry this stop was going to
+      // close is exactly that), and stopping here would wedge the queue
+      // forever. Drop it and let the reconcile below pull the truth back.
+      if (!isPermanentRejection(error)) throw error;
+    }
   });
 
   // Drained: the server now holds everything the optimistic entry stood in for.

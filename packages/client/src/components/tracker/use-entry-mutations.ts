@@ -9,6 +9,7 @@ import {
   toQuickStart,
   type DetailedEntry,
   type QuickStart,
+  type RunawayResolution,
   type TimeEntry,
 } from "@starter/shared";
 
@@ -104,6 +105,14 @@ export type SplitAtIdleArgs = {
   resume: StartTimerArgs | null;
 };
 
+/** Answering the runaway prompt. See components/tracker/runaway-prompt.tsx. */
+export type ResolveRunawayArgs = {
+  id: string;
+  resolution: RunawayResolution;
+  /** ISO datetime, only for the `end-at` resolution. */
+  end?: string;
+};
+
 export type EntryMutations = {
   startTimer: (args: StartTimerArgs) => void;
   /**
@@ -120,6 +129,12 @@ export type EntryMutations = {
   removeEntry: (entry: DetailedEntry) => void;
   /** Truncate the running entry, then optionally reopen it. See idle guard. */
   splitAtIdle: (args: SplitAtIdleArgs) => void;
+  /**
+   * Answer the runaway prompt. Not optimistic on purpose: the server owns the
+   * boundary for every resolution but `end-at`, and guessing it here would
+   * mean the client and the server disagree about how much time was put back.
+   */
+  resolveRunaway: (args: ResolveRunawayArgs) => void;
   isBusy: boolean;
 };
 
@@ -309,6 +324,8 @@ export const useEntryMutations = (): EntryMutations => {
         currency: settings?.currency ?? "EUR",
         source: "web",
         timeZone: deviceTimeZone(),
+        // Server-owned: only the runaway guard ever writes it.
+        runaway: null,
         createdAt: stamp,
         updatedAt: stamp,
         projectName: project.projectName,
@@ -791,6 +808,26 @@ export const useEntryMutations = (): EntryMutations => {
     [dropEntry, removeMutation, utils]
   );
 
+  const resolveRunawayMutation = trpc.entries.resolveRunaway.useMutation({
+    onSuccess: (entry) => {
+      replaceEntry(entry.id, toDetailed(entry));
+      utils.entries.current.setData(undefined, entry.end === null ? entry : null);
+    },
+    onError: (error) => {
+      toast.error(error.message || "Could not update that entry");
+    },
+    onSettled: async () => {
+      await invalidate();
+    },
+  });
+
+  const resolveRunaway = React.useCallback(
+    (args: ResolveRunawayArgs): void => {
+      resolveRunawayMutation.mutate({ ...args, originId: ORIGIN_ID });
+    },
+    [resolveRunawayMutation]
+  );
+
   removeEntryRef.current = removeEntry;
 
   return {
@@ -803,11 +840,13 @@ export const useEntryMutations = (): EntryMutations => {
     duplicateEntry,
     removeEntry,
     splitAtIdle,
+    resolveRunaway,
     isBusy:
       startMutation.isPending ||
       stopMutation.isPending ||
       createMutation.isPending ||
       updateMutation.isPending ||
-      removeMutation.isPending,
+      removeMutation.isPending ||
+      resolveRunawayMutation.isPending,
   };
 };

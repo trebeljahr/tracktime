@@ -1,5 +1,9 @@
 import mongoose, { Schema, type Document } from "mongoose";
-import type { EntrySource, TimeEntry as TimeEntryWire } from "@starter/shared";
+import type {
+  EntrySource,
+  RunawayMark,
+  TimeEntry as TimeEntryWire,
+} from "@starter/shared";
 
 export interface ITimeEntry extends Document {
   workspaceId: string;
@@ -19,9 +23,23 @@ export interface ITimeEntry extends Document {
   currency: string;
   source: EntrySource;
   timeZone: string | null;
+  /** What the runaway guard did about this entry. See @starter/shared/runaway. */
+  runaway: RunawayDoc | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * The stored form of {@link RunawayMark}: same fields, with the two instants
+ * as Dates so Mongo can range-query them if a report ever wants to.
+ */
+export type RunawayDoc = {
+  detectedAt: Date;
+  elapsedSec: number;
+  limitSec: number;
+  action: RunawayMark["action"];
+  resolvedAt: Date | null;
+};
 
 /**
  * Structural shape accepted by {@link toClientTimeEntry} — satisfied by both a
@@ -42,9 +60,30 @@ export type TimeEntryDocLike = {
   currency: string;
   source: EntrySource;
   timeZone: string | null;
+  /** Absent on every entry written before the guard existed. */
+  runaway?: RunawayDoc | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+const runawaySchema = new Schema<RunawayDoc>(
+  {
+    detectedAt: { type: Date, required: true },
+    // Together with the entry's `start` these two are what make a cap
+    // reversible: `start + elapsedSec` is exactly the span the guard saw, so
+    // no truncation is ever unexplainable or unrecoverable.
+    elapsedSec: { type: Number, required: true, min: 0 },
+    limitSec: { type: Number, required: true, min: 0 },
+    action: {
+      // Must stay in lockstep with RunawayAction.
+      type: String,
+      enum: ["flagged", "capped", "stopped"],
+      required: true,
+    },
+    resolvedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
 
 const timeEntrySchema = new Schema<ITimeEntry>(
   {
@@ -77,6 +116,7 @@ const timeEntrySchema = new Schema<ITimeEntry>(
     },
     // See the note on TimeEntry.timeZone in @starter/shared.
     timeZone: { type: String, default: null },
+    runaway: { type: runawaySchema, default: null },
   },
   { timestamps: true },
 );
@@ -129,6 +169,17 @@ export function toClientTimeEntry(doc: TimeEntryDocLike): TimeEntryWire {
     currency: doc.currency,
     source: doc.source,
     timeZone: doc.timeZone ?? null,
+    runaway: doc.runaway
+      ? {
+          detectedAt: doc.runaway.detectedAt.toISOString(),
+          elapsedSec: doc.runaway.elapsedSec,
+          limitSec: doc.runaway.limitSec,
+          action: doc.runaway.action,
+          resolvedAt: doc.runaway.resolvedAt
+            ? doc.runaway.resolvedAt.toISOString()
+            : null,
+        }
+      : null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

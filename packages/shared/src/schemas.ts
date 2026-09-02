@@ -5,7 +5,14 @@ import {
   MAX_IDLE_THRESHOLD_MINUTES,
   MIN_IDLE_THRESHOLD_MINUTES,
 } from "./idle.js";
-import type { IdleBehavior } from "./types.js";
+import {
+  MAX_MAX_DURATION_HOURS,
+  MIN_MAX_DURATION_HOURS,
+  RUNAWAY_BEHAVIORS,
+  RUNAWAY_RESOLUTIONS,
+  type RunawayResolution,
+} from "./runaway.js";
+import type { IdleBehavior, RunawayBehavior } from "./types.js";
 
 export const updateProfileSchema = z.object({
   bio: z.string().max(500).optional(),
@@ -55,12 +62,20 @@ export const entrySourceSchema = z.enum([
   "api",
 ]);
 /**
- * Declared from the shared IDLE_BEHAVIORS list rather than repeating the
- * literals, so a fifth behaviour cannot be added to the type and silently
- * rejected by validation.
+ * Declared from the shared behaviour lists rather than repeating the literals,
+ * so a new behaviour cannot be added to a type and silently rejected by
+ * validation.
  */
 export const idleBehaviorSchema = z.enum(
   IDLE_BEHAVIORS as unknown as [IdleBehavior, ...IdleBehavior[]],
+);
+
+export const runawayBehaviorSchema = z.enum(
+  RUNAWAY_BEHAVIORS as unknown as [RunawayBehavior, ...RunawayBehavior[]],
+);
+
+export const runawayResolutionSchema = z.enum(
+  RUNAWAY_RESOLUTIONS as unknown as [RunawayResolution, ...RunawayResolution[]],
 );
 
 export const reportGroupBySchema = z.enum([
@@ -274,6 +289,20 @@ const quickStartFields = {
   billable: z.boolean().optional(),
 };
 
+/**
+ * Answering the runaway prompt.
+ *
+ * `end` is read only for the `end-at` resolution; `cap` and `restore` are
+ * recomputed on the server from the mark, so a stale client cannot move the
+ * boundary to an instant the guard never measured.
+ */
+export const resolveRunawaySchema = z.object({
+  id: idString,
+  resolution: runawayResolutionSchema,
+  end: isoDateTimeSchema.optional(),
+  originId,
+});
+
 export const createFavoriteSchema = z.object({ ...quickStartFields, originId });
 
 /**
@@ -358,6 +387,24 @@ export const idleSettingsSchema = z.object({
   lockIsImmediate: z.boolean(),
 });
 
+export const maxDurationSettingsSchema = z.object({
+  /**
+   * `0` is the off switch, which is why the minimum is not
+   * MIN_MAX_DURATION_HOURS. Anything between 0 and the minimum would be a
+   * guard that fires on entries nobody has finished starting yet.
+   */
+  maxHours: z
+    .number()
+    .int()
+    .refine(
+      (hours) =>
+        hours === 0 ||
+        (hours >= MIN_MAX_DURATION_HOURS && hours <= MAX_MAX_DURATION_HOURS),
+      `Maximum duration must be 0 (off) or between ${MIN_MAX_DURATION_HOURS} and ${MAX_MAX_DURATION_HOURS} hours`,
+    ),
+  behavior: runawayBehaviorSchema,
+});
+
 export const updateSettingsSchema = z.object({
   defaultHourlyRate: hourlyRateSchema.optional(),
   currency: z
@@ -369,6 +416,7 @@ export const updateSettingsSchema = z.object({
   durationFormat: z.enum(["hms", "decimal"]).optional(),
   pomodoro: pomodoroSettingsSchema.partial().optional(),
   idle: idleSettingsSchema.partial().optional(),
+  maxDuration: maxDurationSettingsSchema.partial().optional(),
   originId,
 });
 
@@ -417,6 +465,10 @@ export type DetailedReportSchemaInput = z.infer<typeof detailedReportSchema>;
 export type WeeklyReportSchemaInput = z.infer<typeof weeklyReportSchema>;
 export type ExportCsvInput = z.infer<typeof exportCsvSchema>;
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
+export type MaxDurationSettingsInput = z.infer<
+  typeof maxDurationSettingsSchema
+>;
+export type ResolveRunawayInput = z.infer<typeof resolveRunawaySchema>;
 export type RevokeDeviceInput = z.infer<typeof revokeDeviceSchema>;
 export type RevokeOtherDevicesInput = z.infer<typeof revokeOtherDevicesSchema>;
 export type DeviceCodeInput = z.infer<typeof deviceCodeSchema>;

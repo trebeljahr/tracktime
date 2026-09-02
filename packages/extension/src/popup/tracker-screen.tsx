@@ -92,6 +92,7 @@ const provisionalEntry = (
     currency: "",
     source: "extension",
     timeZone: deviceTimeZone(),
+    runaway: null,
     createdAt: now,
     updatedAt: now,
   };

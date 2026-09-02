@@ -3,6 +3,7 @@
 import * as React from "react";
 import {
   DEFAULT_IDLE_SETTINGS,
+  DEFAULT_MAX_DURATION_SETTINGS,
   entryDurationSec,
   formatDuration,
   formatDurationShort,
@@ -32,6 +33,7 @@ export const FALLBACK_SETTINGS: ResolvedSettings = {
     notify: true,
   },
   idle: DEFAULT_IDLE_SETTINGS,
+  maxDuration: DEFAULT_MAX_DURATION_SETTINGS,
 };
 
 /** Currency formatting, memoized — `Intl.NumberFormat` construction is costly. */

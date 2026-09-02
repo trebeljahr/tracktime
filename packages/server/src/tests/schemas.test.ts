@@ -11,7 +11,9 @@ import {
   hourlyRateSchema,
   isoDateOrDateTimeSchema,
   isoDateTimeSchema,
+  maxDurationSettingsSchema,
   pomodoroSettingsSchema,
+  resolveRunawaySchema,
   startTimerSchema,
   stopTimerSchema,
   updateEntrySchema,
@@ -241,4 +243,47 @@ test("pomodoroSettingsSchema bounds every interval", () => {
   assert.ok(!accepts(pomodoroSettingsSchema, { ...valid, notify: "yes" }));
   const { notify: _notify, ...missingNotify } = valid;
   assert.ok(!accepts(pomodoroSettingsSchema, missingNotify));
+});
+
+test("maxDurationSettingsSchema allows 0 as the off switch but nothing below the minimum", () => {
+  const valid = { maxHours: 12, behavior: "ask" };
+  assert.ok(accepts(maxDurationSettingsSchema, valid));
+  // 0 is the documented "off"; anything between 0 and the minimum would be a
+  // guard that fires on entries nobody has finished starting yet.
+  assert.ok(accepts(maxDurationSettingsSchema, { ...valid, maxHours: 0 }));
+  assert.ok(!accepts(maxDurationSettingsSchema, { ...valid, maxHours: -1 }));
+  assert.ok(!accepts(maxDurationSettingsSchema, { ...valid, maxHours: 169 }));
+  assert.ok(!accepts(maxDurationSettingsSchema, { ...valid, maxHours: 12.5 }));
+  assert.ok(!accepts(maxDurationSettingsSchema, { ...valid, behavior: "pause" }));
+  assert.ok(accepts(maxDurationSettingsSchema, { ...valid, behavior: "cap" }));
+  assert.ok(accepts(maxDurationSettingsSchema, { ...valid, behavior: "stop" }));
+});
+
+test("updateSettingsSchema takes a partial maxDuration block", () => {
+  assert.ok(accepts(updateSettingsSchema, { maxDuration: { maxHours: 0 } }));
+  assert.ok(accepts(updateSettingsSchema, { maxDuration: { behavior: "cap" } }));
+  assert.ok(!accepts(updateSettingsSchema, { maxDuration: { behavior: "nope" } }));
+});
+
+test("resolveRunawaySchema names every answer and demands an id", () => {
+  for (const resolution of ["keep", "cap", "restore", "end-at"]) {
+    assert.ok(accepts(resolveRunawaySchema, { id: "e1", resolution }));
+  }
+  assert.ok(!accepts(resolveRunawaySchema, { id: "e1", resolution: "delete" }));
+  assert.ok(!accepts(resolveRunawaySchema, { resolution: "keep" }));
+  // An end without a zone is ambiguous by exactly the offset it omits.
+  assert.ok(
+    accepts(resolveRunawaySchema, {
+      id: "e1",
+      resolution: "end-at",
+      end: "2026-08-28T22:30:00.000Z",
+    })
+  );
+  assert.ok(
+    !accepts(resolveRunawaySchema, {
+      id: "e1",
+      resolution: "end-at",
+      end: "2026-08-28T22:30:00",
+    })
+  );
 });

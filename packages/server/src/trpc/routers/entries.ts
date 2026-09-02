@@ -25,15 +25,16 @@ import {
   continueEntrySchema,
   idInputSchema,
   recentEntriesSchema,
-  resolveHourlyRate,
+  resolveRunawaySchema,
+  resolvedEndMs,
   startTimerSchema,
   stopTimerSchema,
   updateEntrySchema,
   type DetailedEntry,
   type EntrySource,
   type RecentEntry,
+  type RunawayMark,
   type TimeEntry as TimeEntryWire,
-  type WorkspaceSettings,
 } from "@starter/shared";
 import { Client, type ClientDocLike } from "../../models/Client.js";
 import { Project, type ProjectDocLike } from "../../models/Project.js";
@@ -45,6 +46,12 @@ import {
 } from "../../models/TimeEntry.js";
 import { getOrCreateWorkspaceSettings } from "../../models/Settings.js";
 import { authorScopeFilter } from "../../models/WorkspaceMember.js";
+import {
+  durationBetween,
+  finalizeStop,
+  snapshotRate,
+} from "../../services/entry-stop.js";
+import { enforceMaxEntryDuration } from "../../services/runaway.js";
 import { publishSync } from "../../ws/sync.js";
 import { router, workspaceProcedure } from "../trpc.js";
 import { loadCatalogLookup } from "./catalog-lookup.js";
@@ -157,68 +164,7 @@ const resolveRefs = async (
   return { projectId: effectiveProjectId, taskId, project };
 };
 
-// ── rate snapshots ───────────────────────────────────────────────────
-
-type RateSnapshot = { hourlyRate: number | null; currency: string };
-
-const snapshotRate = (
-  billable: boolean,
-  project: ProjectDocLike | null,
-  settings: WorkspaceSettings,
-): RateSnapshot => ({
-  hourlyRate: resolveHourlyRate({
-    billable,
-    projectRate: project?.hourlyRate ?? null,
-    defaultRate: settings.defaultHourlyRate,
-  }),
-  currency: settings.currency,
-});
-
 // ── running-timer helpers ────────────────────────────────────────────
-
-const durationBetween = (start: Date, end: Date): number =>
-  Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000));
-
-/**
- * Write the stop of one running entry: end, duration and the rate snapshot.
- * Returns `null` when the entry was already stopped by a concurrent request.
- *
- * Takes the entry itself rather than a scope id, because the entry being
- * stopped is not necessarily in the workspace the request is addressed to —
- * see `stopRunningEntry`. Its rate snapshot must come from ITS workspace.
- */
-const finalizeStop = async (
-  running: TimeEntryDocLike,
-  end: Date,
-): Promise<TimeEntryWire | null> => {
-  const settings = await getOrCreateWorkspaceSettings(running.workspaceId);
-  const project = running.projectId
-    ? await Project.findOne({
-        _id: running.projectId,
-        workspaceId: running.workspaceId,
-      }).lean()
-    : null;
-  const { hourlyRate, currency } = snapshotRate(
-    running.billable,
-    project,
-    settings,
-  );
-
-  const stopped = await TimeEntry.findOneAndUpdate(
-    { _id: String(running._id), authorId: running.authorId, end: null },
-    {
-      $set: {
-        end,
-        durationSec: durationBetween(running.start, end),
-        hourlyRate,
-        currency,
-      },
-    },
-    { returnDocument: "after" },
-  ).lean();
-
-  return stopped ? toClientTimeEntry(stopped) : null;
-};
 
 /**
  * Stop whatever this PERSON has running, at `at` (never before its start).
@@ -595,6 +541,16 @@ export const entriesRouter = router({
    */
   current: workspaceProcedure.query(
     async ({ ctx }): Promise<TimeEntryWire | null> => {
+      // Where the runaway guard is evaluated. There is no scheduler in this
+      // server and deliberately so — the read that would have shown a stale
+      // 63-hour timer is the read that deals with it. Author-scoped like the
+      // query below it, and for the same reason. See services/runaway.ts.
+      const outcome = await enforceMaxEntryDuration(ctx.user.id);
+      // The guard already holds the authoritative document; re-reading it
+      // would only re-race the write that just landed.
+      if (outcome.kind === "ended") return null;
+      if (outcome.kind === "flagged") return outcome.entry;
+
       const running = await TimeEntry.findOne({
         authorId: ctx.user.id,
         end: null,
@@ -608,6 +564,12 @@ export const entriesRouter = router({
     .mutation(async ({ ctx, input }): Promise<TimeEntryWire> => {
       const start = input.start ? new Date(input.start) : new Date();
       if (Number.isNaN(start.getTime())) throw badRequest("Invalid start");
+
+      // Before `startNewEntry` closes whatever is running at `now` and hides
+      // the evidence. A runaway that is merely superseded by the next start
+      // keeps all 63 hours and is never mentioned again; run it through the
+      // guard first so it is capped, or at least marked, either way.
+      await enforceMaxEntryDuration(ctx.user.id, start);
 
       const entry = await startNewEntry({
         workspaceId: ctx.workspaceId,
@@ -662,6 +624,130 @@ export const entriesRouter = router({
         input.originId,
       );
       return stopped;
+    }),
+
+  /**
+   * Answer the runaway prompt.
+   *
+   * The one thing this mutation exists to guarantee is that a cap is never
+   * final: `restore` puts back exactly the span the guard measured, because
+   * the mark kept `elapsedSec` alongside the entry's own `start`. Nothing the
+   * guard does is ever a one-way door.
+   *
+   * `cap` and `restore` recompute their instant here from the mark rather than
+   * trusting one off the wire; only `end-at` takes a client-supplied time, and
+   * it is validated like any other manual edit.
+   *
+   * Author-scoped, like `stop` and `discard`: the entry may be in a workspace
+   * the caller is not currently pointed at, and answering a question about
+   * your own timer must work from wherever you happen to be. The event goes
+   * into the entry's own workspace.
+   */
+  resolveRunaway: workspaceProcedure
+    .input(resolveRunawaySchema)
+    .mutation(async ({ ctx, input }): Promise<TimeEntryWire> => {
+      const authorId = ctx.user.id;
+      const existing = await TimeEntry.findOne({
+        _id: requireObjectId(input.id, "Entry not found"),
+        authorId,
+      }).lean();
+      if (!existing) throw notFound();
+      if (!existing.runaway) {
+        throw badRequest("Entry has no runaway timer to resolve");
+      }
+
+      const mark: RunawayMark = {
+        detectedAt: existing.runaway.detectedAt.toISOString(),
+        elapsedSec: existing.runaway.elapsedSec,
+        limitSec: existing.runaway.limitSec,
+        action: existing.runaway.action,
+        resolvedAt: null,
+      };
+
+      const suppliedEndMs =
+        input.end === undefined ? null : Date.parse(input.end);
+      if (suppliedEndMs !== null && Number.isNaN(suppliedEndMs)) {
+        throw badRequest("Invalid end");
+      }
+      if (input.resolution === "end-at" && suppliedEndMs === null) {
+        throw badRequest("An end is required to set the real end time");
+      }
+
+      const startMs = existing.start.getTime();
+      const endMs = resolvedEndMs(
+        input.resolution,
+        startMs,
+        mark,
+        suppliedEndMs,
+      );
+      const resolvedAt = new Date();
+
+      // "keep" — dismiss and change nothing. It means the same thing whether
+      // the entry is still running (keep running, this really is a long
+      // session) or already capped (the cap was right).
+      if (endMs === null) {
+        const kept = await TimeEntry.findOneAndUpdate(
+          { _id: String(existing._id), authorId },
+          { $set: { "runaway.resolvedAt": resolvedAt } },
+          { returnDocument: "after" },
+        ).lean();
+        if (!kept) throw notFound();
+
+        const entry = toClientTimeEntry(kept);
+        void publishSync(
+          existing.workspaceId,
+          { kind: "entry.upserted", entry },
+          input.originId,
+        );
+        return entry;
+      }
+
+      if (endMs <= startMs) throw badRequest("End must be after start");
+
+      // A running entry goes through the same stop path as any other stop, so
+      // the rate snapshot is taken exactly once and in exactly one place — and
+      // from the entry's workspace, not the caller's. An already-ended entry
+      // keeps the snapshot it was stopped with: only the boundary moves, and
+      // the money inputs did not change.
+      if (existing.end === null) {
+        const stopped = await finalizeStop(existing, new Date(endMs));
+        if (!stopped) throw badRequest("Entry is not running");
+
+        const resolved = await TimeEntry.findOneAndUpdate(
+          { _id: String(existing._id), authorId },
+          { $set: { "runaway.resolvedAt": resolvedAt } },
+          { returnDocument: "after" },
+        ).lean();
+        const entry = resolved ? toClientTimeEntry(resolved) : stopped;
+
+        void publishSync(
+          existing.workspaceId,
+          { kind: "timer.stopped", entry },
+          input.originId,
+        );
+        return entry;
+      }
+
+      const updated = await TimeEntry.findOneAndUpdate(
+        { _id: String(existing._id), authorId },
+        {
+          $set: {
+            end: new Date(endMs),
+            durationSec: durationBetween(existing.start, new Date(endMs)),
+            "runaway.resolvedAt": resolvedAt,
+          },
+        },
+        { returnDocument: "after" },
+      ).lean();
+      if (!updated) throw notFound();
+
+      const entry = toClientTimeEntry(updated);
+      void publishSync(
+        existing.workspaceId,
+        { kind: "entry.upserted", entry },
+        input.originId,
+      );
+      return entry;
     }),
 
   /** Delete the running entry instead of keeping it. */

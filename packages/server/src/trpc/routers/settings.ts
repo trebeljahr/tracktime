@@ -8,6 +8,7 @@ import { TRPCError } from "@trpc/server";
 import {
   updateSettingsSchema,
   type IdleSettings,
+  type MaxDurationSettings,
   type PomodoroSettings,
   type ResolvedSettings,
 } from "@starter/shared";
@@ -74,7 +75,8 @@ export const settingsRouter = router({
         input.timeFormat !== undefined ||
         input.durationFormat !== undefined ||
         input.pomodoro !== undefined ||
-        input.idle !== undefined;
+        input.idle !== undefined ||
+        input.maxDuration !== undefined;
 
       if (touchesUser) {
         const current = await getResolvedSettings(ctx.workspaceId, ctx.user.id);
@@ -86,6 +88,14 @@ export const settingsRouter = router({
           ...current.idle,
           ...(input.idle ?? {}),
         };
+        // A personal preference too, for the reason written on
+        // MaxDurationSettings: the guard acts on the one timer a person has
+        // running, wherever it lives, so the workspace does not get to decide
+        // how long their day may be.
+        const maxDuration: MaxDurationSettings = {
+          ...current.maxDuration,
+          ...(input.maxDuration ?? {}),
+        };
 
         await UserPreferencesModel.updateOne(
           { userId: ctx.user.id },
@@ -95,6 +105,7 @@ export const settingsRouter = router({
               durationFormat: input.durationFormat ?? current.durationFormat,
               pomodoro,
               idle,
+              maxDuration,
             },
           },
           { upsert: true },

@@ -72,6 +72,8 @@ const optimisticEntry = (
   currency: "EUR",
   source: input.source,
   timeZone: input.timeZone,
+  // Server-owned: only the runaway guard ever writes it.
+  runaway: null,
   createdAt: input.start,
   updatedAt: input.start,
 });

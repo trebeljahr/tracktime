@@ -210,6 +210,8 @@ export const useCalendarActions = (
         currency,
         source: "web",
         timeZone: variables.timeZone ?? null,
+        // Server-owned: only the runaway guard ever writes it.
+        runaway: null,
         createdAt: now,
         updatedAt: now,
         ...projectMeta(projectId),

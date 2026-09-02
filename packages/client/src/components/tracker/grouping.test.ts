@@ -35,6 +35,7 @@ const entry = (overrides: Partial<DetailedEntry> = {}): DetailedEntry => {
     currency: "EUR",
     source: "web",
     timeZone: null,
+    runaway: null,
     createdAt: start,
     updatedAt: start,
     projectName: "tracktime",

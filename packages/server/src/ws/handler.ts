@@ -2,6 +2,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Server } from "http";
 import type { ClientToServerMessage } from "@starter/shared";
 import { userRoomId } from "@starter/shared";
+import { enforceMaxEntryDuration } from "../services/runaway.js";
 import { authenticateUpgrade } from "./auth.js";
 import { RoomManager } from "./rooms.js";
 import { env, getTrustedOrigins } from "../config/env.js";
@@ -84,6 +85,14 @@ export function setupWebSocket(server: Server): WebSocketServer {
         ws.displayName ?? "Anonymous",
         ws,
       );
+
+      // A device reconnecting is one of the moments that resolves "what is
+      // running", so it is one of the moments the runaway guard is evaluated
+      // at — a laptop opened on Monday morning finds out about the Friday
+      // timer here, before it renders a clock that has been counting all
+      // weekend. Deliberately not awaited: the socket is live either way, and
+      // anything the guard does reaches this room as a normal sync event.
+      void enforceMaxEntryDuration(ws.userId);
     }
 
     // Ping/pong heartbeat

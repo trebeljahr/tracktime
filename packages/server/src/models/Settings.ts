@@ -14,13 +14,16 @@
 import mongoose, { Schema, type Document } from "mongoose";
 import {
   DEFAULT_IDLE_SETTINGS,
+  DEFAULT_MAX_DURATION_SETTINGS,
   IDLE_BEHAVIORS,
   MAX_IDLE_THRESHOLD_MINUTES,
   MIN_IDLE_THRESHOLD_MINUTES,
+  RUNAWAY_BEHAVIORS,
 } from "@starter/shared";
 import type {
   DurationFormat,
   IdleSettings,
+  MaxDurationSettings,
   PomodoroSettings,
   ResolvedSettings,
   TimeFormat,
@@ -47,11 +50,20 @@ export const DEFAULT_WORKSPACE_SETTINGS: Omit<WorkspaceSettings, "workspaceId"> 
 /** Re-exported under the model's naming so the two defaults read alike. */
 export const DEFAULT_IDLE: IdleSettings = DEFAULT_IDLE_SETTINGS;
 
+/**
+ * Unlike idle, the runaway guard ships ON — see the note in
+ * `@starter/shared/runaway`. Its default behaviour cannot lose a second, and a
+ * guard that is off by default catches nothing.
+ */
+export const DEFAULT_MAX_DURATION: MaxDurationSettings =
+  DEFAULT_MAX_DURATION_SETTINGS;
+
 export const DEFAULT_USER_PREFERENCES: Omit<UserPreferences, "userId"> = {
   timeFormat: "24h",
   durationFormat: "hms",
   pomodoro: DEFAULT_POMODORO,
   idle: DEFAULT_IDLE,
+  maxDuration: DEFAULT_MAX_DURATION,
 };
 
 // ── workspace settings ───────────────────────────────────────────────
@@ -103,6 +115,8 @@ export interface IUserPreferences extends Document {
   pomodoro: PomodoroSettings;
   /** Absent on documents written before idle detection existed. */
   idle?: IdleSettings | null;
+  /** Absent on documents written before the runaway guard existed. */
+  maxDuration?: MaxDurationSettings | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -129,6 +143,28 @@ const idleSchema = new Schema<IdleSettings>(
       type: Boolean,
       required: true,
       default: DEFAULT_IDLE.lockIsImmediate,
+    },
+  },
+  { _id: false },
+);
+
+const maxDurationSchema = new Schema<MaxDurationSettings>(
+  {
+    // No `min` beyond 0: 0 IS the off switch, so the bounds that reject a
+    // half-hour maximum live in the zod schema, where a rejection can say why.
+    maxHours: {
+      type: Number,
+      required: true,
+      default: DEFAULT_MAX_DURATION.maxHours,
+      min: 0,
+    },
+    behavior: {
+      type: String,
+      // Driven off the shared list, so a new behaviour cannot be accepted by
+      // the type and silently rejected by Mongoose.
+      enum: [...RUNAWAY_BEHAVIORS],
+      required: true,
+      default: DEFAULT_MAX_DURATION.behavior,
     },
   },
   { _id: false },
@@ -186,6 +222,11 @@ const userPreferencesSchema = new Schema<IUserPreferences>(
       type: idleSchema,
       required: true,
       default: (): IdleSettings => ({ ...DEFAULT_IDLE }),
+    },
+    maxDuration: {
+      type: maxDurationSchema,
+      required: true,
+      default: (): MaxDurationSettings => ({ ...DEFAULT_MAX_DURATION }),
     },
   },
   { timestamps: true },
@@ -256,6 +297,13 @@ export async function getOrCreateUserPreferences(
         lockIsImmediate:
           existing.idle?.lockIsImmediate ?? DEFAULT_IDLE.lockIsImmediate,
       },
+      // Same story: a document written before the guard existed has no
+      // sub-document, and the guard reads `maxHours` as a number.
+      maxDuration: {
+        maxHours: existing.maxDuration?.maxHours ?? DEFAULT_MAX_DURATION.maxHours,
+        behavior:
+          existing.maxDuration?.behavior ?? DEFAULT_MAX_DURATION.behavior,
+      },
     };
   }
 
@@ -273,12 +321,17 @@ export async function getOrCreateUserPreferences(
         durationFormat: created.durationFormat,
         pomodoro: { ...created.pomodoro },
         idle: { ...DEFAULT_IDLE, ...(created.idle ?? {}) },
+        maxDuration: {
+          ...DEFAULT_MAX_DURATION,
+          ...(created.maxDuration ?? {}),
+        },
       }
     : {
         userId,
         ...DEFAULT_USER_PREFERENCES,
         pomodoro: { ...DEFAULT_POMODORO },
         idle: { ...DEFAULT_IDLE },
+        maxDuration: { ...DEFAULT_MAX_DURATION },
       };
 }
 
@@ -302,5 +355,6 @@ export async function getResolvedSettings(
     durationFormat: user.durationFormat,
     pomodoro: user.pomodoro,
     idle: user.idle,
+    maxDuration: user.maxDuration,
   };
 }

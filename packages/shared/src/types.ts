@@ -230,6 +230,12 @@ export type TimeEntry = {
    * viewer's own zone for those.
    */
   timeZone: string | null;
+  /**
+   * What the runaway-timer guard did about this entry, or null if it never
+   * looked at it. See `runaway.ts` — it is kept after the fact on purpose, so
+   * a cap can be seen, explained and put back.
+   */
+  runaway: RunawayMark | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -253,7 +259,7 @@ export type IdleBehavior =
   | "stop";
 
 /**
- * Idle-detection configuration, nested inside workspace settings.
+ * Idle-detection configuration, nested inside a person's preferences.
  *
  * Detection is per-device; this is the shared policy every device applies to
  * its own signal. See `@starter/core/idle` for the rule that keeps one sleeping
@@ -269,6 +275,70 @@ export type IdleSettings = {
    * threshold. Locking is deliberate in a way that "no keys pressed" is not.
    */
   lockIsImmediate: boolean;
+};
+
+/**
+ * What to do about an entry that has been running longer than any single
+ * sitting plausibly lasts.
+ *
+ * `ask` is the default and the only behaviour that cannot lose time. The
+ * other two both close the entry, and they differ in what happens to the
+ * overrun: `cap` throws it away, `stop` keeps all of it.
+ *
+ * There is no `keep-running` member, because `maxHours: 0` already says that
+ * and one off-switch is enough.
+ */
+export type RunawayBehavior =
+  /** Flag it and offer the choice. The timer keeps running until answered. */
+  | "ask"
+  /** End the entry at the maximum, discarding the overrun (recoverably). */
+  | "cap"
+  /** End the entry where it had got to, keeping every second. */
+  | "stop";
+
+/** What the guard actually did, recorded on the entry. */
+export type RunawayAction = "flagged" | "capped" | "stopped";
+
+/**
+ * The guard's record of one intervention, kept on the entry itself.
+ *
+ * It exists so that no time is ever silently deleted: `start + elapsedSec`
+ * reconstructs the exact span the guard measured, so a cap is always
+ * reversible and always explainable. `resolvedAt` is set once the person has
+ * answered the prompt; until then every client that shows the entry offers it.
+ */
+export type RunawayMark = {
+  /** ISO datetime the guard evaluated and acted. */
+  detectedAt: string;
+  /** Seconds the entry had already been running when the guard noticed. */
+  elapsedSec: number;
+  /** The maximum in force at that moment, in seconds. */
+  limitSec: number;
+  action: RunawayAction;
+  /** ISO datetime the person answered the prompt, or null while it stands. */
+  resolvedAt: string | null;
+};
+
+/**
+ * Runaway-guard configuration, and a sibling of {@link IdleSettings} in every
+ * sense — including living on the person rather than on the workspace.
+ *
+ * That placement is load-bearing, not copied: the invariant is one running
+ * timer per HUMAN across every workspace they belong to, so the entry the
+ * guard acts on may be in any of them. A workspace-scoped maximum would mean
+ * whichever workspace the timer happened to be started in decides how long a
+ * person's day may be, and joining a workspace would silently change the rule.
+ *
+ * Evaluated on the server, not on a client — in the case this guard exists
+ * for, no client is running. See `runaway.ts`.
+ */
+export type MaxDurationSettings = {
+  /**
+   * Hours one entry may run before the guard acts. `0` switches it off; the
+   * UI's toggle writes 0 rather than carrying a second boolean.
+   */
+  maxHours: number;
+  behavior: RunawayBehavior;
 };
 
 /** Pomodoro configuration, nested inside workspace settings. */
@@ -302,7 +372,8 @@ export type WorkspaceSettings = {
  *
  * Idle detection lives here rather than on the workspace: how long a machine
  * sits before its owner counts as away, and what should happen then, is a fact
- * about that person's desk, not a policy their colleagues share.
+ * about that person's desk, not a policy their colleagues share. The runaway
+ * guard sits beside it for a related reason — see {@link MaxDurationSettings}.
  */
 export type UserPreferences = {
   userId: string;
@@ -310,6 +381,7 @@ export type UserPreferences = {
   durationFormat: DurationFormat;
   pomodoro: PomodoroSettings;
   idle: IdleSettings;
+  maxDuration: MaxDurationSettings;
 };
 
 /**

@@ -16,6 +16,28 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * HTTP statuses that mean "this request can never succeed", so a queued
+ * mutation carrying one must be dropped rather than retried forever.
+ *
+ * 401/403 are deliberately absent: a lapsed session is recoverable, and
+ * discarding someone's offline work because their token expired would be a
+ * far worse bug than a queue that waits. 5xx are absent for the same reason.
+ */
+const PERMANENT_REJECTIONS = new Set([400, 404, 409, 410, 422]);
+
+/**
+ * True when the server refused a mutation for good.
+ *
+ * The case this exists for: the runaway guard capped a running entry on the
+ * server while a device was offline holding a queued `entries.stop`. That stop
+ * resolves against "whatever is running", finds nothing, and answers 404. It
+ * can never succeed, and a queue that stops at it wedges every mutation behind
+ * it — including the ones that would have replayed fine.
+ */
+export const isPermanentRejection = (error: unknown): boolean =>
+  error instanceof ApiError && PERMANENT_REJECTIONS.has(error.httpStatus);
+
 export type ApiClientOptions = {
   /** Origin of the server, e.g. `https://api.tracktime.trebeljahr.com`. */
   baseUrl: string;

@@ -20,6 +20,7 @@ import {
 } from "@/components/tracker/use-pomodoro";
 import { useEntryMutations } from "@/components/tracker/use-entry-mutations";
 import { useIdleGuard } from "@/components/tracker/use-idle-guard";
+import { useRunawayGuard } from "@/components/tracker/use-runaway-guard";
 import { useOfflineQueue } from "@/hooks/use-offline-queue";
 import { useRunningEntry } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
@@ -53,6 +54,7 @@ export function TrackerBar(): React.JSX.Element {
   const { entry: running, elapsedSec } = useRunningEntry();
   const format = useFormatSettings();
   const mutations = useEntryMutations();
+  useRunawayGuard(mutations);
   const { pending, online } = useOfflineQueue();
   const projects = trpc.projects.list.useQuery({});
 
