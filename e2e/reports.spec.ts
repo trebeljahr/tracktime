@@ -1,5 +1,5 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
-import { signUpViaUI } from "./helpers";
+import { test, expect, type Locator } from "@playwright/test";
+import { logManualEntry, signUpViaUI } from "./helpers";
 import { cleanDatabase, closeDbConnection } from "./db-utils";
 
 const PASSWORD = "SecurePassword123!";
@@ -34,32 +34,6 @@ function dayKey(offsetDays: number): string {
  * week-start preference.
  */
 const RANGE_QUERY = `?from=${dayKey(-7)}&to=${dayKey(1)}`;
-
-/**
- * Log one manual entry from the tracker bar and wait for its row to land.
- *
- * `duration` is typed into the duration field, which anchors the end to the
- * pre-filled start, so the tracked seconds are exact rather than wall-clock.
- */
-async function logManualEntry(
-  page: Page,
-  description: string,
-  duration: string
-): Promise<void> {
-  await page.getByTestId("tracker-manual-open").click();
-  await page.getByTestId("manual-entry-description").fill(description);
-  await page.getByTestId("manual-entry-duration").fill(duration);
-  await page.getByTestId("manual-entry-duration").press("Enter");
-  await expect(page.getByTestId("manual-entry-duration")).toHaveValue(duration);
-
-  await page.getByTestId("manual-entry-add").click();
-
-  const row = page
-    .locator('[data-testid="entry-row"]')
-    .filter({ hasText: description });
-  await expect(row).toHaveCount(1);
-  await expect(row.getByTestId("entry-duration")).toHaveValue(duration);
-}
 
 /**
  * Read the opaque id out of a `<prefix><id>` test id, once it has settled —

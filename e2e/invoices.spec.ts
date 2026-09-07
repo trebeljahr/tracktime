@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { signUpViaUI } from "./helpers";
+import { logManualEntry, signUpViaUI } from "./helpers";
 import { cleanDatabase, closeDbConnection } from "./db-utils";
 
 const PASSWORD = "SecurePassword123!";
@@ -131,28 +131,7 @@ async function trackBillableHours(
     "true",
   );
 
-  await page.getByTestId("tracker-manual-open").click();
-  await page.getByTestId("manual-entry-description").fill(description);
-  await page.getByTestId("manual-entry-duration").fill(duration);
-  await page.getByTestId("manual-entry-duration").press("Enter");
-  await expect(page.getByTestId("manual-entry-duration")).toHaveValue(duration);
-
-  await page.getByTestId("manual-entry-add").click();
-
-  const row = page
-    .locator('[data-testid="entry-row"]')
-    .filter({ hasText: description });
-  await expect(row).toHaveCount(1);
-  // Wait for the server's real id before moving on. The row renders first with
-  // the optimistic "temp-<id>" while `entries.create` is still in flight, and
-  // navigating during that window aborts the request — which the offline queue
-  // reads as a failure and replays, landing a duplicate entry.
-  await expect
-    .poll(async () => (await row.getAttribute("data-entry-id")) ?? "", {
-      message: "expected the entry row to settle to its server id",
-    })
-    .not.toMatch(/^temp-/);
-  await expect(row.getByTestId("entry-duration")).toHaveValue(duration);
+  await logManualEntry(page, description, duration);
 }
 
 /** Open the create dialog and fill in client + range, stopping at the preview. */

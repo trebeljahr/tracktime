@@ -17,6 +17,11 @@ const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
+    // The overlay covers the whole viewport and outlives the content it dims:
+    // it is still mounted, and still swallowing clicks, for the length of the
+    // close animation. Anything that has to know a dialog is *fully* gone —
+    // rather than merely closing — waits on this, not on the content.
+    data-testid="dialog-overlay"
     className={cn(
       // Entry animation only. An exit animation keeps the dialog — and its
       // dismissable layer — mounted while it plays, and Radix reads that

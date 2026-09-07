@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { test, expect, type Page } from "@playwright/test";
-import { signUpViaUI } from "./helpers";
+import { test, expect } from "@playwright/test";
+import { logManualEntry, signUpViaUI } from "./helpers";
 import { cleanDatabase, closeDbConnection } from "./db-utils";
 
 const PASSWORD = "SecurePassword123!";
@@ -29,41 +29,6 @@ function dayKey(offsetDays: number): string {
  * today's weekday and of the workspace's week-start preference.
  */
 const RANGE_QUERY = `?from=${dayKey(-7)}&to=${dayKey(1)}`;
-
-/**
- * Log one manual entry from the tracker bar and wait for its row to land.
- *
- * The duration field anchors the end to the pre-filled start, so the report
- * has real tracked seconds in it rather than a wall-clock sliver.
- */
-async function logManualEntry(
-  page: Page,
-  description: string,
-  duration: string,
-): Promise<void> {
-  await page.getByTestId("tracker-manual-open").click();
-  await page.getByTestId("manual-entry-description").fill(description);
-  await page.getByTestId("manual-entry-duration").fill(duration);
-  await page.getByTestId("manual-entry-duration").press("Enter");
-  await expect(page.getByTestId("manual-entry-duration")).toHaveValue(duration);
-
-  await page.getByTestId("manual-entry-add").click();
-
-  const row = page
-    .locator('[data-testid="entry-row"]')
-    .filter({ hasText: description });
-  await expect(row).toHaveCount(1);
-  // Wait for the server's real id before moving on. The row renders first with
-  // the optimistic "temp-<id>" while `entries.create` is still in flight, and
-  // navigating during that window aborts the request — which the offline queue
-  // reads as a failure and replays, landing a duplicate entry.
-  await expect
-    .poll(async () => (await row.getAttribute("data-entry-id")) ?? "", {
-      message: "expected the entry row to settle to its server id",
-    })
-    .not.toMatch(/^temp-/);
-  await expect(row.getByTestId("entry-duration")).toHaveValue(duration);
-}
 
 test.beforeAll(async () => {
   await cleanDatabase();
