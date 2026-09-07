@@ -64,12 +64,19 @@ test.describe("web app at phone width", () => {
   });
 
   test("keeps the web input size — no 16px override", async ({ page }) => {
-    // native.css forces 16px on native fields so iOS does not zoom on focus.
-    // On web the design's own `text-sm` has to survive.
-    const size = await page
-      .getByTestId("tracker-description")
-      .evaluate((el) => getComputedStyle(el).fontSize);
-    expect(size).not.toBe("16px");
+    // native.css forces 16px on every native field so iOS does not zoom on
+    // focus. On web the design's own `text-sm` has to survive.
+    //
+    // Measured on the manual-entry date field, which is a bare `Input` at
+    // `text-sm`. NOT on the tracker composer's description: that one carries
+    // an explicit `text-base`, so it is 16px on web too and would pass this
+    // assertion whether or not the native rule leaked.
+    await page.getByTestId("tracker-manual-open").click();
+    const field = page.getByTestId("manual-entry-date");
+    await expect(field).toBeVisible();
+
+    const size = await field.evaluate((el) => getComputedStyle(el).fontSize);
+    expect(size).toBe("14px");
   });
 
   test("keeps the web header height — no safe-area padding", async ({
@@ -87,19 +94,21 @@ test.describe("web app at phone width", () => {
     expect(box.paddingTop).toBe("0px");
   });
 
-  test("keeps the web tracker composer on one wrapping row", async ({
-    page,
-  }) => {
-    // native.css gives the description the whole first line under `body.cap`.
-    // On web it shares the row, so its width is well under the composer's.
-    const composer = page.getByTestId("tracker-composer");
+  test("keeps the web tracker composer flex basis", async ({ page }) => {
+    // native.css gives the description `flex-basis: 100%` under `body.cap`,
+    // so it takes the whole first line and the controls wrap under it. On web
+    // the `basis-64` utility (16rem) has to be what applies.
+    //
+    // Asserted on the computed flex-basis rather than on rendered widths: at
+    // 393pt the description happens to fill the row under BOTH rules, so a
+    // width comparison would pass with the native rule leaking.
     const description = page.getByTestId("tracker-description");
-    await expect(composer).toBeVisible();
+    await expect(description).toBeVisible();
 
-    const composerWidth = (await composer.boundingBox())?.width ?? 0;
-    const descriptionWidth = (await description.boundingBox())?.width ?? 0;
-    expect(composerWidth).toBeGreaterThan(0);
-    expect(descriptionWidth).toBeLessThan(composerWidth);
+    const basis = await description.evaluate(
+      (el) => getComputedStyle(el).flexBasis,
+    );
+    expect(basis).toBe("256px");
   });
 
   test("keeps dialogs centred — no top anchoring", async ({ page }) => {
@@ -107,9 +116,16 @@ test.describe("web app at phone width", () => {
 
     const dialog = page.locator('[data-slot="dialog-content"]');
     await expect(dialog).toBeVisible();
-    // `top-[50%]` untouched: native.css moves it to the safe-area inset only
-    // under `body.cap`.
-    expect(await dialog.evaluate((el) => getComputedStyle(el).top)).toBe("50%");
+
+    // `top-[50%]` untouched: native.css moves it to
+    // `calc(env(safe-area-inset-top) + 1rem)` — 16px in a browser, which has
+    // no insets — only under `body.cap`. getComputedStyle resolves `top` to a
+    // used value in px, so the percentage is compared as one.
+    const { top, half } = await dialog.evaluate((el) => ({
+      top: parseFloat(getComputedStyle(el).top),
+      half: window.innerHeight / 2,
+    }));
+    expect(top).toBeCloseTo(half, 0);
   });
 
   test("the entries list still starts where the web layout puts it", async ({
