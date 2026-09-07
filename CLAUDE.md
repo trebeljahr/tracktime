@@ -217,6 +217,46 @@ script already set the key in the server child's environment.
 Bridge runs in `packages/client/src/mobile/bridge.ts` — lifecycle, splash,
 status bar, orientation. Durable persistence mirror in `durable.ts`.
 
+**Verifying on the Simulator without Xcode's GUI.** Build, install, launch and
+screenshot from a shell:
+
+```bash
+UDID=$(xcrun simctl list devices available | grep -m1 "iPhone 17 (" | sed -E "s/.*\(([0-9A-F-]{36})\).*/\1/")
+xcrun simctl boot "$UDID"
+NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
+cd ios/App && xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
+  -sdk iphonesimulator -destination "platform=iOS Simulator,id=$UDID" \
+  -derivedDataPath /tmp/dd build
+xcrun simctl install "$UDID" /tmp/dd/Build/Products/Debug-iphonesimulator/App.app
+xcrun simctl launch "$UDID" com.trebeljahr.tracktime
+xcrun simctl io "$UDID" screenshot --type=png out.png
+```
+
+Three traps in that loop, each of which produces a *working-looking* app that
+is quietly wrong:
+
+- **Do not pass `CODE_SIGNING_ALLOWED=NO`.** Without the ad-hoc signature
+  Xcode applies by default for the simulator SDK, every Keychain call fails
+  with `StorageError: An OS error occurred (-34018)`
+  (`errSecMissingEntitlement`). The session token is then never stored, the app
+  silently falls back to the cookie, and the bearer path looks fine while being
+  entirely untested.
+- **The Simulator's WKWebView does send cookies to `http://localhost:<port>`**,
+  and its cookie store survives `simctl uninstall`. So cookie auth appears to
+  work from `capacitor://localhost` and masks a broken bearer path — the same
+  trap as `pnpm dev:ios`, one layer down. The tell is on the server: a tRPC
+  request from the app must arrive with **no** `Cookie` header at all, because
+  `lib/trpc.ts` switches to `credentials: "omit"` the moment a token exists.
+  `xcrun simctl erase <udid>` is the only reliable clean slate.
+- **Never return a Capacitor plugin handle from an `async` function.** A plugin
+  handle is a Proxy that answers every property with a callable, `then`
+  included, so the promise machinery adopts it as a thenable and calls
+  `Plugin.then(resolve, reject)` — a bridge message for a native method nobody
+  implements. It neither resolves nor rejects, and with
+  `launchAutoHide: false` the app freezes on the splash with no console to
+  read. Wrap the handle in a plain object; `lib/native-session.ts` does, and
+  `native-session.test.ts` has the regression.
+
 ### Native client auth
 
 Better-auth uses cookies; native shells need extra CORS/trust origins.
@@ -233,6 +273,46 @@ it (e.g. `app://-`) instead.
 Tauri serves the bundled frontend from `tauri://localhost` (macOS/Linux)
 and `http://tauri.localhost` (Windows) — both must be in
 `TRUSTED_ORIGINS` for cookie auth to work.
+
+### The Capacitor shells do not use cookies
+
+A `capacitor://localhost` document is cross-site to the API whatever SameSite
+says, and WKWebView's tracking prevention drops the cookie sooner or later. So
+the mobile shells take the same bearer path as Raycast and the extension — but
+through the ordinary `/login` form rather than the device flow, because on a
+phone the "second, already signed-in browser" a device flow assumes is often
+the very thing being replaced.
+
+- `lib/native-session.ts` owns the token: hydrated from the Keychain
+  (`@aparajita/capacitor-secure-storage`) at boot, published as a store so
+  consumers gate *behaviour* rather than the React tree — under
+  `output: "export"` a component that rendered `null` while hydrating would
+  disagree with the prerendered HTML.
+- `lib/auth-client.ts` reads the token back on every call
+  (`fetchOptions.auth`, which omits the header entirely when it returns
+  `undefined`) and captures new ones from the `set-auth-token` response header.
+  **Only ever store a truthy value**: the bearer plugin emits that header only
+  when the response carries a session cookie, so an unconditional write erases
+  a good token on the first `/get-session`.
+- `lib/trpc.ts` adds `Authorization` and switches to `credentials: "omit"` when
+  a token exists. With none — every web request — it is byte-identical to what
+  it was, which `lib/trpc.test.ts` asserts rather than assumes.
+- The socket takes the token as a **getter**, and `useSync`'s effect is keyed on
+  it. The Keychain answers after mount, so a snapshot would open one tokenless
+  socket, be refused, and retry that refusal forever — taking the offline
+  queue's flush trigger down with it, since that fires on `syncStatus === "open"`.
+- A Keychain item **outlives the app** on iOS. A `@capacitor/preferences`
+  marker (which does not) is what tells a fresh install from a relaunch, so
+  delete-and-reinstall means signed out rather than resuming a previous — possibly
+  a previous *user's* — session.
+- Session lifetime is set explicitly in `auth/auth.ts` (30 days, refreshed at
+  most daily), not inherited from better-auth's 7-day default: a phone left in a
+  drawer over a holiday would otherwise come back to a session row the next
+  lookup deletes, and replay a day of offline-tracked time into 401s.
+- An expired or revoked session **stops** the offline flush and keeps the rows
+  (`isAuthError` in `lib/offline.ts`). Dropping them is the default for a server
+  refusal and is right for a validation error; it is never right for "we do not
+  know who you are".
 
 ### Clients without a cookie jar (Raycast, CLI, extensions)
 

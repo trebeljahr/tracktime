@@ -114,6 +114,7 @@ const loadSecureStore = async (): Promise<SecureStore | null> => {
       const { SecureStorage } = await import(
         "@aparajita/capacitor-secure-storage"
       );
+
       // A session credential has no business riding iCloud Keychain to the
       // user's other devices — each device signs in and gets its own row in
       // Settings → Devices, which is the whole point of the devices list.
@@ -122,7 +123,25 @@ const loadSecureStore = async (): Promise<SecureStore | null> => {
       } catch {
         /* older platform versions refuse; the default is already false */
       }
-      return SecureStorage as SecureStore;
+
+      /*
+       * Wrapped, never returned as-is.
+       *
+       * A Capacitor plugin handle is a Proxy that answers EVERY property with
+       * a callable — `then` included. Returning it from an `async` function
+       * therefore makes the promise machinery treat it as a thenable and call
+       * `SecureStorage.then(resolve, reject)`, which dispatches a bridge
+       * message for a native method named "then" that no plugin implements.
+       * Nothing rejects, nothing resolves, and hydration hangs forever behind
+       * a splash screen configured never to auto-hide. Cost us an afternoon;
+       * a plain object with three bound methods costs nothing.
+       */
+      return {
+        getItem: (key: string) => SecureStorage.getItem(key),
+        setItem: (key: string, value: string) =>
+          SecureStorage.setItem(key, value),
+        removeItem: (key: string) => SecureStorage.removeItem(key),
+      };
     } catch {
       // A build that dropped the plugin (the SPM sync does that silently for a
       // plugin with no Package.swift) must not take the app down with it —
@@ -157,6 +176,31 @@ const enforceFreshInstall = async (store: SecureStore): Promise<void> => {
 
 let hydration: Promise<void> | null = null;
 
+/**
+ * How long the launch path will wait for the Keychain.
+ *
+ * Every consumer of this module holds its render until hydration settles, so
+ * a call that never comes back is a permanently frozen app — the splash does
+ * not auto-hide, and there is no console on a device build. Nothing here is
+ * expected to take even a hundred milliseconds; the deadline exists so that
+ * a plugin which stops answering degrades to "signed out" instead of "dead".
+ */
+const HYDRATE_TIMEOUT_MS = 5000;
+
+const readStoredToken = async (): Promise<void> => {
+  try {
+    const store = await loadSecureStore();
+    if (!store) return;
+    await enforceFreshInstall(store);
+    const stored = await store.getItem(TOKEN_KEY);
+    token = stored && stored.length > 0 ? stored : null;
+  } catch {
+    // An unreadable Keychain (locked device, a corrupted item) is "signed
+    // out", never a crash on the launch path.
+    token = null;
+  }
+};
+
 const runHydration = async (): Promise<void> => {
   if (!isNative()) {
     ready = true;
@@ -164,18 +208,18 @@ const runHydration = async (): Promise<void> => {
     return;
   }
 
-  try {
-    const store = await loadSecureStore();
-    if (store) {
-      await enforceFreshInstall(store);
-      const stored = await store.getItem(TOKEN_KEY);
-      token = stored && stored.length > 0 ? stored : null;
-    }
-  } catch {
-    // An unreadable Keychain (locked device, a corrupted item) is "signed
-    // out", never a crash on the launch path.
-    token = null;
-  }
+  // The read keeps going after the deadline; if it eventually answers with a
+  // token, `publish()` hands it to consumers that key on it.
+  const read = readStoredToken().then(() => {
+    if (ready) publish();
+  });
+
+  await Promise.race([
+    read,
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, HYDRATE_TIMEOUT_MS);
+    }),
+  ]);
 
   ready = true;
   publish();

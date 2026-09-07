@@ -165,6 +165,57 @@ describe("hydrateNativeSession on native", () => {
   });
 });
 
+describe("a plugin handle that behaves like a thenable", () => {
+  it("does not hang hydration", async () => {
+    // A Capacitor plugin handle is a Proxy answering every property with a
+    // callable, `then` included. Anything that returns one from an async
+    // function has the promise machinery call `.then(resolve, reject)` on it,
+    // which dispatches a bridge message for a native method nobody
+    // implements: no resolve, no reject, and an app frozen behind a splash
+    // screen that never auto-hides. This is that shape, in a test.
+    vi.resetModules();
+    vi.doMock("@/mobile/bridge", () => ({ isNative: () => true }));
+    vi.doMock("@aparajita/capacitor-secure-storage", () => {
+      const backing = new Map<string, string>([[TOKEN_KEY, "stored-token"]]);
+      const impl: Record<string, unknown> = {
+        setSynchronize: async () => undefined,
+        getItem: async (key: string) => backing.get(key) ?? null,
+        setItem: async (key: string, value: string) => {
+          backing.set(key, value);
+        },
+        removeItem: async (key: string) => {
+          backing.delete(key);
+        },
+      };
+      const SecureStorage = new Proxy(impl, {
+        get: (target, prop) =>
+          Reflect.get(target, prop) ??
+          // Every unknown property — `then` above all — answers with a call
+          // into a bridge that will never come back.
+          (() => new Promise(() => undefined)),
+      });
+      return { SecureStorage };
+    });
+    vi.doMock("@capacitor/preferences", () => ({
+      Preferences: {
+        get: async () => ({ value: "1" }),
+        set: async () => undefined,
+      },
+    }));
+
+    const module = await import("@/lib/native-session");
+
+    await Promise.race([
+      module.hydrateNativeSession(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("hydration hung")), 1000),
+      ),
+    ]);
+
+    expect(module.getNativeToken()).toBe("stored-token");
+  });
+});
+
 describe("setNativeToken", () => {
   it("refuses to write a falsy value over a good token", async () => {
     // better-auth's bearer plugin only emits `set-auth-token` when the

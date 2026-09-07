@@ -39,6 +39,38 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
   rule above means the API generally cannot be up during a build in this
   worktree. `--require-api` makes it fatal.
 
+**Corrections found while implementing stage 1 (b) — bearer auth:**
+
+- The Keychain plugin question is answered: `@aparajita/capacitor-secure-storage`
+  8.0.0 ships a `Package.swift` against `capacitor-swift-pm` 8, links into the
+  SPM app, and works. No fallback to `@capacitor/preferences` was needed, and
+  the plan's "record it as debt" branch is closed.
+- `NativeSessionGate.tsx` was **not** created. Per the critics' hydration
+  finding, readiness is published as a store (`lib/native-session.ts` +
+  `hooks/use-native-session.ts`) and the consumers gate behaviour; nothing gates
+  the tree. Hydration is kicked off by `MobileBridgeLoader`, which the root
+  layout already renders first.
+- `resolveAuthBaseUrl` does **not** throw on native, per the critics: a
+  module-scope throw stops React mounting, so `hideSplash()` never runs and the
+  launch screen freezes with no console. `build-mobile.mjs` is the enforcement
+  point.
+- The `(protected)/layout.tsx` verdict is extracted to `lib/session-verdict.ts`
+  so all three `getSession()` shapes — session, clean `{data:null,error:null}`,
+  and a resolved HTTP error — are unit-tested. Only the clean one signs out.
+- `createSyncClient` takes `token` as a value **or a getter**; `useSync` keys its
+  effect on the token and on hydration having settled.
+- The offline flush now rethrows on `isAuthError`, so a dead session stops it
+  instead of deleting the queue one 401 at a time.
+- `session.expiresIn`/`updateAge` set explicitly in `auth/auth.ts` (30 days /
+  1 day), and the server prints its resolved trusted-origin list at boot.
+- **Two device-only traps cost real time and are written up in CLAUDE.md**:
+  a simulator build with `CODE_SIGNING_ALLOWED=NO` gets
+  `errSecMissingEntitlement (-34018)` from the Keychain and silently falls back
+  to cookies; and returning a Capacitor plugin handle from an `async` function
+  makes the promise machinery treat the Proxy as a thenable, which hangs the
+  launch forever behind a splash that never auto-hides. `hydrateNativeSession`
+  now also has a 5s deadline so no future plugin can freeze the app.
+
 ## Summary
 
 Ship the phone app as the existing Next.js client inside a Capacitor shell — one composition, not a second UI. Everything mobile is either scoped to `body.cap` (a class `packages/client/src/mobile/bridge.ts:30` already sets and nothing styles), behind the synchronous `isNative()` check in that same file, or a correctness fix the web build also wants. No new screens for reports, timesheet, invoices or catalog; they stay honestly cramped one level down. Cookie auth is abandoned for native (a `capacitor://localhost` document is cross-site to the API and loses to WKWebView ITP regardless of SameSite) in favour of the bearer path `packages/core/src/session-auth.ts` was written for — which needs zero server code, only `TRUSTED_ORIGINS`. Stage 1 ends with a signed-in app on the iOS Simulator starting and stopping a real timer against `pnpm run dev`, verified against a real `pnpm build:mobile` bundle rather than live reload, because under live reload the document origin is `http://localhost:7130`, which is same-site with a localhost API and would make cookie auth misleadingly appear to work. Later stages add native chrome, a three-tab bar, resume/offline durability, calendar touch de-hostility, and two zero-custom-native wins (haptics, a runaway-timer local notification). No Swift, no Kotlin, no widget extension, no second HTTP client — the judges called all of that the fatal path.
