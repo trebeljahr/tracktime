@@ -24,6 +24,21 @@ export async function refreshMenuBar(): Promise<void> {
   }
 }
 
+/**
+ * True when a stop/discard was refused because nothing was running any more.
+ *
+ * The cross-device case: the timer was stopped in the web app while this menu
+ * bar item still showed it, and the user pressed Stop. They asked for a state
+ * the world is already in — that is not a failure, and a red toast for it
+ * teaches people to distrust the button. Matched on the server's own message
+ * because a bare 404 also covers "that entry does not exist", which is a
+ * genuinely different thing.
+ */
+export const isAlreadyStopped = (error: unknown): boolean =>
+  error instanceof ApiError &&
+  error.httpStatus === 404 &&
+  error.message === "No running timer";
+
 /** True when the failure means "your token is gone or no longer valid". */
 export const isAuthFailure = (error: unknown): boolean =>
   error instanceof NotSignedInError ||

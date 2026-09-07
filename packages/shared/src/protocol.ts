@@ -68,8 +68,23 @@ export type SyncEvent =
 /** Room name every sync event for a given owner is published to. */
 export const userRoomId = (ownerId: string): string => `user:${ownerId}`;
 
-/** Narrowing helper for the sync envelope. */
+/**
+ * Narrowing helper for the sync envelope.
+ *
+ * Checks the payload, not only the tag. Frames arrive over a socket from a
+ * server that may be a different version than the client — older, newer, or
+ * mid-deploy — so `type: "tt:sync"` alone is a claim, not a guarantee. An
+ * envelope with no `event` used to narrow cleanly here and then hand
+ * `undefined` to every consumer, each of which switches on `event.kind`.
+ */
 export const isSyncMessage = (
   message: ServerToClientMessage
-): message is Extract<ServerToClientMessage, { type: "tt:sync" }> =>
-  message.type === "tt:sync";
+): message is Extract<ServerToClientMessage, { type: "tt:sync" }> => {
+  if (message.type !== "tt:sync") return false;
+  const { event } = message as { event?: unknown };
+  return (
+    typeof event === "object" &&
+    event !== null &&
+    typeof (event as { kind?: unknown }).kind === "string"
+  );
+};

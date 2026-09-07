@@ -1,6 +1,8 @@
 import { useCachedPromise } from "@raycast/utils";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { reconcileRunning, type TimerEcho } from "@starter/core";
 import { getTracktime, type Tracktime } from "./api.js";
+import { loadTimerEcho } from "./storage.js";
 import { isAuthFailure, showFailureToast } from "./ui.js";
 
 export type ApiHookResult<T> = {
@@ -124,4 +126,64 @@ export function useNow(active: boolean, intervalMs = 1000): number {
   }, [active, intervalMs]);
 
   return now;
+}
+
+/**
+ * How often a surface re-reads this install's timer echo. One second, because
+ * it is a local storage read with no network in it, and because a second is
+ * how long the user should ever see a timer they already stopped.
+ */
+const ECHO_POLL_MS = 1000;
+
+/**
+ * The running entry a surface should actually draw, given the snapshot it
+ * fetched and whatever this Mac has done to the timer since.
+ *
+ * This is what makes stop/start agree across Raycast's separate processes.
+ * `refreshMenuBar()` cannot: a menu bar command that is still loaded — which
+ * a running timer keeps it — is not remounted by a background launch, so the
+ * live instance would keep ticking an ended entry until its own 20s poll came
+ * round. Reading a local record costs nothing and cannot be declined.
+ *
+ * Calls `revalidate` once when the echo names a timer the snapshot has never
+ * seen, so the fields catch up with the fact.
+ */
+export function useReconciledRunning<T extends { id: string }>(
+  snapshot: { running: T | null; fetchedAt: number } | undefined,
+  revalidate: () => void,
+): T | null {
+  const [echo, setEcho] = useState<TimerEcho | null>(null);
+  const latest = useRef(revalidate);
+  latest.current = revalidate;
+
+  useEffect(() => {
+    let cancelled = false;
+    const read = (): void => {
+      void loadTimerEcho().then((next) => {
+        if (!cancelled) setEcho(next);
+      });
+    };
+    read();
+    const id = setInterval(read, ECHO_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  const { running, refetch } = snapshot
+    ? reconcileRunning(snapshot, echo)
+    : { running: null, refetch: false };
+
+  // Once per transition rather than once per render: `echo.at` only moves
+  // when something actually happened to the timer.
+  const pending = refetch ? (echo?.at ?? null) : null;
+  const asked = useRef<number | null>(null);
+  useEffect(() => {
+    if (pending === null || asked.current === pending) return;
+    asked.current = pending;
+    latest.current();
+  }, [pending]);
+
+  return running;
 }

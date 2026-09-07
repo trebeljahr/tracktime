@@ -368,6 +368,40 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   command is the surface that can push forms, which a menu bar item cannot.
   Both read `lib/timer-data.ts`, so the two surfaces cannot disagree about what
   is running.
+- **`refreshMenuBar()` is a nudge, never the mechanism.** It is a background
+  `launchCommand`, and Raycast may decline it — and a menu bar command that is
+  still *loaded*, which is exactly what a running timer keeps it, is not
+  remounted by one. On its own it left the item ticking an entry the user had
+  just stopped from the `timer` command one process over. Four things carry the
+  truth instead, in descending order of how quickly they notice and ascending
+  order of how much they cost:
+  - **The timer echo** (`timer-echo.ts` in `@starter/core`, `lib/storage.ts`
+    here) — every timer mutation records `{ runningId, at }` in Raycast's
+    `LocalStorage` the instant the server confirms it, written centrally in
+    `api.ts` so a new command cannot forget. Any surface re-reads it once a
+    second — a local read, no network — and `reconcileRunning` lets it outrank
+    a snapshot *fetched before it*. This is the one that closes the gap
+    between Raycast's separate command processes, and the only one that still
+    works with the network down. It needs no TTL: the next successful fetch
+    carries a later `fetchedAt`, so a stale record of a stop can never mask a
+    timer started on another device.
+  - **The sync socket** (`lib/sync.ts`) — held for as long as Raycast keeps a
+    command alive, which is a view command while it is open and the menu bar
+    item while it ticks. That is what makes a stop from the web app or another
+    machine land at once rather than on a poll. It deliberately does NOT
+    filter this install's own `originId`: every Raycast command shares one, so
+    filtering would drop the event the menu bar needs most.
+  - **`useWatchRunning`** — `entries.current` every 4s, but only while the
+    socket is NOT connected. An open socket has already reported every stop,
+    so polling underneath it asks a question that has been answered.
+  - **`usePoll`** — the whole snapshot every 20s, which is also what picks up
+    a renamed project or a new favorite.
+- `entries.stop` is **idempotent when given an id**: an entry that is already
+  stopped is returned rather than refused. Two devices racing to stop one timer
+  is the normal case, and the loser asked for a state the world is already in.
+  Without an id there is nothing to be idempotent about, so "nothing running"
+  stays a 404 — which the clients read via `isAlreadyStopped` and report as
+  success, because the user got what they wanted.
 - Server origin and web origin come from extension preferences. Empty follows
   the build, the same convention as the browser extension's build targets:
   `ray build` → the deployed hosts, `ray develop` → `localhost:5159` /

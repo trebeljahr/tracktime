@@ -24,7 +24,13 @@ import {
   formatMenuBarClock,
   formatMenuBarTotal,
 } from "./lib/format.js";
-import { useApi, useNow, usePoll, useWatchRunning } from "./lib/hooks.js";
+import {
+  useApi,
+  useNow,
+  usePoll,
+  useReconciledRunning,
+  useWatchRunning,
+} from "./lib/hooks.js";
 import { webLink } from "./lib/preferences.js";
 import {
   entryHint,
@@ -32,7 +38,13 @@ import {
   favoriteFor,
   loadTimerSnapshot,
 } from "./lib/timer-data.js";
-import { showFailureToast } from "./lib/ui.js";
+import { useSyncRevalidate } from "./lib/sync.js";
+import { noteTimerEcho } from "./lib/storage.js";
+import {
+  describeFailure,
+  isAlreadyStopped,
+  showFailureToast,
+} from "./lib/ui.js";
 
 /** A dropdown is a glance, not a browser — six rows is already a lot. */
 const RECENT_LIMIT = 6;
@@ -65,11 +77,20 @@ const openTimer = (): void => {
 export default function MenuBar(): React.JSX.Element | null {
   const { titleMode, idleTitle, hideWhenIdle, tickSeconds } =
     getPreferenceValues<Preferences.MenuBar>();
-  const { data, isLoading, signedOut, revalidate } = useApi("menu-bar", (api) =>
-    loadTimerSnapshot(api, { recentLimit: RECENT_LIMIT }),
+  const { data, isLoading, error, signedOut, revalidate } = useApi(
+    "menu-bar",
+    (api) => loadTimerSnapshot(api, { recentLimit: RECENT_LIMIT }),
   );
 
-  const running = data?.running ?? null;
+  /**
+   * What is running, after this Mac's own timer echo is applied.
+   *
+   * `data` can be a cached snapshot from before the last stop — Raycast paints
+   * the cache first, and a still-loaded menu bar command is not remounted by
+   * `refreshMenuBar()`. Reconciling against the echo is what stops the item
+   * ticking a timer the user ended a second ago in another command.
+   */
+  const running = useReconciledRunning(data, revalidate);
 
   /**
    * Whether this item is currently a clock rather than a label.
@@ -89,7 +110,14 @@ export default function MenuBar(): React.JSX.Element | null {
   // started in the web app would otherwise go unnoticed.
   const now = useNow(ticking);
   usePoll(revalidate, POLL_MS);
-  useWatchRunning(running?.id ?? null, ticking, revalidate, WATCH_MS);
+  // While the item ticks it is a live process, so it can hold the sync socket
+  // and hear a stop made in the web app or on another machine at once.
+  const synced = useSyncRevalidate(revalidate, !signedOut);
+  // The fallback for a socket that cannot connect at all — a proxy that drops
+  // upgrades, a host with no global WebSocket. While one is open it carries
+  // every stop already, so polling `entries.current` underneath it would ask
+  // a question that has been answered.
+  useWatchRunning(running?.id ?? null, ticking && !synced, revalidate, WATCH_MS);
 
   if (signedOut) {
     return (
@@ -140,6 +168,18 @@ export default function MenuBar(): React.JSX.Element | null {
       await run();
       revalidate();
     } catch (error) {
+      // Somebody stopped it elsewhere between this item's last read and the
+      // click. The user got what they wanted; record it and move on rather
+      // than reporting a failure for a state that is already correct.
+      if (isAlreadyStopped(error)) {
+        await noteTimerEcho(null);
+        revalidate();
+        await showToast({
+          style: Toast.Style.Success,
+          title: "Timer already stopped",
+        });
+        return;
+      }
       await showFailureToast(error, failureTitle);
     }
   };
@@ -173,11 +213,16 @@ export default function MenuBar(): React.JSX.Element | null {
       title={title}
       isLoading={ticking || isLoading}
       tooltip={
-        running
-          ? `${label} — ${clock}`
-          : `tracktime — no timer running · today ${formatDurationShort(
-              data?.todaySec ?? 0,
-            )}`
+        // A failed refresh leaves the previous snapshot on screen, which is
+        // the right call for a glanceable item — but it must not pass for a
+        // fresh reading, so say so where the number is.
+        error
+          ? `tracktime — could not refresh · ${describeFailure(error)}`
+          : running
+            ? `${label} — ${clock}`
+            : `tracktime — no timer running · today ${formatDurationShort(
+                data?.todaySec ?? 0,
+              )}`
       }
     >
       {running ? (

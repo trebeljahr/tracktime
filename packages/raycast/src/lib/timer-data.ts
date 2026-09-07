@@ -9,12 +9,14 @@
 import {
   entryDurationSec,
   quickStartKey,
+  reconcileRunning,
   toQuickStart,
   type DetailedEntry,
   type DetailedFavorite,
 } from "@starter/core";
 import type { ProjectWithStats, Tracktime } from "./api.js";
 import { isoDaysAgo } from "./format.js";
+import { loadTimerEcho } from "./storage.js";
 
 /** How far back the "continue" shortlist looks. */
 export const RECENT_DAYS = 7;
@@ -25,6 +27,10 @@ export type TimerSnapshot = {
   favorites: DetailedFavorite[];
   projects: ProjectWithStats[];
   todaySec: number;
+  /** When this was read, so a later local transition can override it. */
+  fetchedAt: number;
+  /** The echo knows a timer this snapshot does not — load again shortly. */
+  refetch: boolean;
 };
 
 const startOfToday = (): number => {
@@ -88,12 +94,25 @@ export const loadTimerSnapshot = async (
     return total + entryDurationSec(entry, now);
   }, 0);
 
+  // A read that started before a stop can still land after it, and would then
+  // put the stopped timer back on screen. The echo settles that by time: a
+  // transition recorded after `now` outranks anything in this response.
+  const { running, refetch } = reconcileRunning(
+    {
+      running: entries.find((entry) => entry.end === null) ?? null,
+      fetchedAt: now,
+    },
+    await loadTimerEcho(),
+  );
+
   return {
-    running: entries.find((entry) => entry.end === null) ?? null,
+    running,
     recent: shortlist(entries, recentLimit),
     favorites,
     projects,
     todaySec,
+    fetchedAt: now,
+    refetch,
   };
 };
 

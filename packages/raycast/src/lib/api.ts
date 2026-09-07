@@ -22,6 +22,7 @@ import {
 } from "@starter/core";
 import { CLIENT_ID, getOriginId, getStoredSession } from "./auth.js";
 import { apiUrl } from "./preferences.js";
+import { loadTimerEcho, noteTimerEcho } from "./storage.js";
 
 /** Thrown when no token is stored — the caller should offer to sign in. */
 export class NotSignedInError extends Error {
@@ -180,35 +181,82 @@ export type Tracktime = {
   settings(): Promise<ResolvedSettings>;
 };
 
+/**
+ * Record a timer transition locally the instant the server confirms it.
+ *
+ * Every Raycast command is its own process, so a stop performed in the Timer
+ * command is invisible to the menu bar item until something crosses between
+ * them. `refreshMenuBar()` is that something, and it is best effort: Raycast
+ * may decline the launch, and a menu bar command that is still loaded — which
+ * is exactly the state a running timer puts it in — is not remounted by one.
+ * The echo does not depend on any of that. It is written here rather than in
+ * each caller so a new command cannot ship without it.
+ */
+const echoing = async <T>(
+  result: Promise<T>,
+  next: (value: T) => string | null,
+  /**
+   * Only clear the echo when this id is the one we last saw running. Editing
+   * or deleting some entry from last Tuesday says nothing about the timer
+   * running right now, and "no echo yet" is not knowledge either — both skip.
+   */
+  clearsOnlyIf?: string,
+): Promise<T> => {
+  const value = await result;
+  const runningId = next(value);
+  if (runningId === null && clearsOnlyIf !== undefined) {
+    const echo = await loadTimerEcho();
+    if (echo?.runningId !== clearsOnlyIf) return value;
+  }
+  await noteTimerEcho(runningId);
+  return value;
+};
+
 const wrap = (client: ApiClient, originId: string): Tracktime => ({
   current: () => client.query<TimeEntry | null>("entries.current"),
 
   start: (input) =>
-    client.mutate<TimeEntry>("entries.start", {
-      ...input,
-      source: SOURCE,
-      originId,
-    }),
-
-  stop: (id) => client.mutate<TimeEntry>("entries.stop", { id, originId }),
-
-  discard: (id) =>
-    client.mutate<{ success: true; id: string }>("entries.discard", {
-      id,
-      originId,
-    }),
-
-  continue: (id) =>
-    client.mutate<TimeEntry>("entries.continue", { id, originId }),
-
-  startQuick: (quick) =>
-    client.mutate<TimeEntry>(
-      "entries.start",
-      buildQuickStartInput(quick, {
+    echoing(
+      client.mutate<TimeEntry>("entries.start", {
+        ...input,
         source: SOURCE,
-        timeZone: deviceTimeZone(),
         originId,
       }),
+      (entry) => entry.id,
+    ),
+
+  stop: (id) =>
+    echoing(
+      client.mutate<TimeEntry>("entries.stop", { id, originId }),
+      () => null,
+    ),
+
+  discard: (id) =>
+    echoing(
+      client.mutate<{ success: true; id: string }>("entries.discard", {
+        id,
+        originId,
+      }),
+      () => null,
+    ),
+
+  continue: (id) =>
+    echoing(
+      client.mutate<TimeEntry>("entries.continue", { id, originId }),
+      (entry) => entry.id,
+    ),
+
+  startQuick: (quick) =>
+    echoing(
+      client.mutate<TimeEntry>(
+        "entries.start",
+        buildQuickStartInput(quick, {
+          source: SOURCE,
+          timeZone: deviceTimeZone(),
+          originId,
+        }),
+      ),
+      (entry) => entry.id,
     ),
 
   favorites: () => client.query<DetailedFavorite[]>("favorites.list"),
@@ -228,14 +276,25 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
       input,
     ),
 
+  // An edit can end the running entry, and deleting one certainly does. Both
+  // echo only when the entry they touched is the one this install last saw
+  // running — an edit to last Tuesday must not clear today's menu bar.
   update: (input) =>
-    client.mutate<TimeEntry>("entries.update", { ...input, originId }),
+    echoing(
+      client.mutate<TimeEntry>("entries.update", { ...input, originId }),
+      (entry) => (entry.end === null ? entry.id : null),
+      input.id,
+    ),
 
   remove: (id) =>
-    client.mutate<{ success: true; id: string }>("entries.remove", {
+    echoing(
+      client.mutate<{ success: true; id: string }>("entries.remove", {
+        id,
+        originId,
+      }),
+      () => null,
       id,
-      originId,
-    }),
+    ),
 
   projects: (options) =>
     client.query<ProjectWithStats[]>("projects.list", {

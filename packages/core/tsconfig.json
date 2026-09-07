@@ -6,5 +6,7 @@
     "composite": true,
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["src"]
+  "comment": "Tests are excluded so `dist` ships only the library, and so this package's own source keeps typechecking without Node's globals — core runs in a browser, a service worker and a Raycast process alike, and a `node:` import that only compiled here would break two of the three. The tests, Node-only by definition, are checked by tsconfig.test.json.",
+  "include": ["src"],
+  "exclude": ["src/tests"]
 }

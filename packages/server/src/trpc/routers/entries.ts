@@ -756,7 +756,16 @@ export const entriesRouter = router({
         : await TimeEntry.findOne({ authorId, end: null }).lean();
 
       if (!running) throw notFound("No running timer");
-      if (running.end !== null) throw badRequest("Entry is not running");
+
+      // Already stopped, and the caller named it. Two devices racing to stop
+      // one timer is the normal case, not an error: whichever loses asked for
+      // a state the entry is already in, so answer with that state instead of
+      // a red toast for having done the right thing. No event is published —
+      // nothing changed, and the winner already broadcast the stop.
+      if (running.end !== null) {
+        if (input.id) return toClientTimeEntry(running);
+        throw badRequest("Entry is not running");
+      }
 
       const end = input.end ? new Date(input.end) : new Date();
       if (Number.isNaN(end.getTime())) throw badRequest("Invalid end");

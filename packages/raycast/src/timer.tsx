@@ -25,7 +25,7 @@ import { SignIn } from "./components/sign-in.js";
 import { StartTimer } from "./components/start-timer.js";
 import { getTracktime, type ProjectWithStats } from "./lib/api.js";
 import { formatClock, formatDurationShort, projectIcon } from "./lib/format.js";
-import { useApi, useNow } from "./lib/hooks.js";
+import { useApi, useNow, useReconciledRunning } from "./lib/hooks.js";
 import { webLink } from "./lib/preferences.js";
 import {
   RECENT_DAYS,
@@ -34,7 +34,13 @@ import {
   favoriteFor,
   loadTimerSnapshot,
 } from "./lib/timer-data.js";
-import { refreshMenuBar, showFailureToast } from "./lib/ui.js";
+import { useSyncRevalidate } from "./lib/sync.js";
+import { noteTimerEcho } from "./lib/storage.js";
+import {
+  isAlreadyStopped,
+  refreshMenuBar,
+  showFailureToast,
+} from "./lib/ui.js";
 
 /** Long enough to cover a normal week of work without a scroll marathon. */
 const RECENT_LIMIT = 8;
@@ -51,10 +57,15 @@ export default function Timer(): React.JSX.Element {
     loadTimerSnapshot(api, { recentLimit: RECENT_LIMIT }),
   );
 
-  const running = data?.running ?? null;
+  // Reconciled against this Mac's timer echo, so a stop made from the menu
+  // bar a moment ago is gone from this list before any refetch lands.
+  const running = useReconciledRunning(data, revalidate);
   // Only a running timer moves; a stopped one would re-render the same string
   // forever. Today's total is live for the same reason — it contains it.
   const now = useNow(running !== null);
+  // Open in front of the user, so it is the surface where a change made
+  // elsewhere is most obviously wrong to miss.
+  useSyncRevalidate(revalidate, !signedOut);
 
   const run = async (
     action: () => Promise<string>,
@@ -66,6 +77,17 @@ export default function Timer(): React.JSX.Element {
       revalidate();
       await showToast({ style: Toast.Style.Success, title: message });
     } catch (error) {
+      // Already stopped somewhere else — the outcome the user asked for.
+      if (isAlreadyStopped(error)) {
+        await noteTimerEcho(null);
+        await refreshMenuBar();
+        revalidate();
+        await showToast({
+          style: Toast.Style.Success,
+          title: "Timer already stopped",
+        });
+        return;
+      }
       await showFailureToast(error, failureTitle);
     }
   };
