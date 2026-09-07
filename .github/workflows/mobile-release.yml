@@ -11,35 +11,54 @@ on:
   workflow_dispatch:
 
 jobs:
+  # android/ is not in the repo yet — the Android stage lands later. hashFiles()
+  # cannot gate the job itself (it runs before checkout, so it always returns
+  # empty), so the presence check is a step and everything after it is gated on
+  # the result. Until then the job is a no-op instead of a red X on every tag.
   android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Is there an Android project?
+        id: android
+        run: |
+          if [ -d android ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false — skipping the Android build"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: pnpm/action-setup@v4
+        if: steps.android.outputs.present == 'true'
         with:
           version: 11
 
       - uses: actions/setup-node@v4
+        if: steps.android.outputs.present == 'true'
         with:
           node-version: 24
           cache: pnpm
 
       - uses: actions/setup-java@v4
+        if: steps.android.outputs.present == 'true'
         with:
           distribution: temurin
           java-version: 21
 
       - name: Install deps
+        if: steps.android.outputs.present == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build static export
-        run: pnpm build:mobile
+        if: steps.android.outputs.present == 'true'
+        run: pnpm build:mobile android
         env:
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
 
       - name: Decode signing keystore
-        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        if: steps.android.outputs.present == 'true' && env.ANDROID_KEYSTORE_BASE64 != ''
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -47,6 +66,7 @@ jobs:
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
 
       - name: Build AAB
+        if: steps.android.outputs.present == 'true'
         working-directory: android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -55,13 +75,14 @@ jobs:
         run: ./gradlew bundleRelease
 
       - name: Upload AAB
+        if: steps.android.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: android-aab
           path: android/app/build/outputs/bundle/release/*.aab
 
       - name: Upload to Play Store (internal track)
-        if: env.PLAY_SERVICE_ACCOUNT_JSON != ''
+        if: steps.android.outputs.present == 'true' && env.PLAY_SERVICE_ACCOUNT_JSON != ''
         uses: r0adkll/upload-google-play@v1
         env:
           PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
@@ -89,13 +110,14 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build static export + sync
-        run: pnpm build:mobile
+        run: pnpm build:mobile ios
         env:
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
 
-      - name: CocoaPods install
-        working-directory: ios/App
-        run: pod install
+      # No `pod install`: Capacitor 8 generates an SPM project (there is no
+      # Podfile and no App.xcworkspace), and CocoaPods is not installed on the
+      # machines this is developed on either. Dependencies come from
+      # ios/App/CapApp-SPM, resolved by xcodebuild.
 
       - name: Import signing certificate
         if: env.APPLE_CERTIFICATE_BASE64 != ''
@@ -116,7 +138,7 @@ jobs:
       - name: Archive
         working-directory: ios/App
         run: |
-          xcodebuild -workspace App.xcworkspace \
+          xcodebuild -project App.xcodeproj \
             -scheme App \
             -configuration Release \
             -archivePath $PWD/build/App.xcarchive \
