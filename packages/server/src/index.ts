@@ -8,7 +8,7 @@ import { connectRedis, disconnectRedis } from "./db/redis.js";
 import { initAuth, disconnectAuth } from "./auth/auth.js";
 import { setupWebSocket } from "./ws/handler.js";
 import { startWebhookSweeper } from "./services/webhooks/sweeper.js";
-import { env } from "./config/env.js";
+import { env, getTrustedOrigins } from "./config/env.js";
 
 const app = createApp();
 const server = createServer(app);
@@ -32,6 +32,15 @@ async function start(): Promise<void> {
     server.listen(env.PORT, () => {
       console.log(`[server] Listening on http://127.0.0.1:${env.PORT}`);
       console.log(`[server] Environment: ${env.NODE_ENV}`);
+      // Printed, not inferred. This list is read once at boot by both CORS
+      // (app.ts) and better-auth (auth.ts), so an env edit without a restart
+      // changes nothing — and an origin missing from it is answered with
+      // `403 INVALID_ORIGIN` before the password is even checked, which reads
+      // like a credentials problem. The native shells depend on
+      // `capacitor://localhost` and `https://localhost` being in here.
+      console.log(
+        `[server] Trusted origins: ${getTrustedOrigins().join(", ") || "(none)"}`,
+      );
     });
   } catch (err) {
     console.error("[server] Failed to start:", err);
