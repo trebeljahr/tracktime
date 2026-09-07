@@ -272,8 +272,9 @@ as "leave them alone" on update.
 
 ### Raycast extension
 
-`packages/raycast` is a Raycast extension: a macOS menu bar timer plus
-commands to start, stop, toggle, browse and edit entries.
+`packages/raycast` is a Raycast extension: a macOS menu bar timer, a live
+`Timer` view that ticks by the second, plus commands to start, stop, toggle,
+browse and edit entries.
 
 ```bash
 pnpm dev:raycast                      # builds @starter/core, then `ray develop`
@@ -291,6 +292,10 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   committed, so `pnpm typecheck` works without Raycast installed.
 - Menu bar commands only re-run on their interval (1 min) and when opened, so
   the clock is `h:mm`; mutations call `refreshMenuBar()` to avoid a stale value.
+  The `Timer` view command is the live counterpart — on screen, so it can hold a
+  one-second interval and push forms, which a menu bar item cannot. Both read
+  `lib/timer-data.ts`, so the two surfaces cannot disagree about what is
+  running.
 - Server origin and web origin come from extension preferences. Empty follows
   the build, the same convention as the browser extension's build targets:
   `ray build` → the deployed hosts, `ray develop` → `localhost:5159` /

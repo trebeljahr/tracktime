@@ -13,96 +13,39 @@ import {
   quickStartHint,
   quickStartLabel,
   repairQuickStart,
+  toQuickStart,
   type DetailedEntry,
-  type DetailedFavorite,
 } from "@starter/core";
-import { getTracktime } from "./lib/api.js";
+import { getTracktime, type ProjectWithStats } from "./lib/api.js";
 import {
+  formatClock,
   formatDurationShort,
   formatMenuBarDuration,
-  isoDaysAgo,
 } from "./lib/format.js";
 import { useApi } from "./lib/hooks.js";
 import { webLink } from "./lib/preferences.js";
+import {
+  entryHint,
+  entryLabel,
+  favoriteFor,
+  loadTimerSnapshot,
+} from "./lib/timer-data.js";
 import { showFailureToast } from "./lib/ui.js";
 
-/** How far back the "continue" shortlist looks. */
-const RECENT_DAYS = 7;
+/** A dropdown is a glance, not a browser — six rows is already a lot. */
 const RECENT_LIMIT = 6;
 
-type MenuData = {
-  running: DetailedEntry | null;
-  recent: DetailedEntry[];
-  favorites: DetailedFavorite[];
-  todaySec: number;
+/** The live command, where the clock ticks and forms can be pushed. */
+const openTimer = (): void => {
+  void launchCommand({ name: "timer", type: LaunchType.UserInitiated });
 };
-
-const startOfToday = (): number => {
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
-};
-
-/**
- * Distinct recent work, newest first — what the user would plausibly resume.
- * Two entries that share a description, project and task are the same job
- * done twice, so only the newest of them earns a slot.
- */
-const shortlist = (entries: DetailedEntry[]): DetailedEntry[] => {
-  const seen = new Set<string>();
-  const out: DetailedEntry[] = [];
-
-  for (const entry of entries) {
-    if (entry.end === null) continue;
-    const key = `${entry.description}|${entry.projectId ?? ""}|${entry.taskId ?? ""}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(entry);
-    if (out.length === RECENT_LIMIT) break;
-  }
-
-  return out;
-};
-
-const load = async (): Promise<MenuData> => {
-  const api = await getTracktime();
-  const now = Date.now();
-
-  // One round trip for the entries: the running entry is in this window too,
-  // and it arrives with its project and client names already joined. The pins
-  // are a second, small read — they are the section people actually aim for,
-  // so they must not depend on the entry window happening to contain them.
-  const [{ entries }, favorites] = await Promise.all([
-    api.list({
-      from: isoDaysAgo(RECENT_DAYS),
-      to: new Date(now + 60_000).toISOString(),
-      limit: 100,
-    }),
-    api.favorites(),
-  ]);
-
-  const dayStart = startOfToday();
-  const todaySec = entries.reduce((total, entry) => {
-    const startMs = Date.parse(entry.start);
-    if (!Number.isFinite(startMs) || startMs < dayStart) return total;
-    return total + entryDurationSec(entry, now);
-  }, 0);
-
-  return {
-    running: entries.find((entry) => entry.end === null) ?? null,
-    recent: shortlist(entries),
-    favorites,
-    todaySec,
-  };
-};
-
-const entryLabel = (entry: DetailedEntry): string =>
-  entry.description.trim() || entry.projectName || "No description";
 
 export default function MenuBar(): React.JSX.Element | null {
   const { titleMode, hideWhenIdle } =
     getPreferenceValues<Preferences.MenuBar>();
-  const { data, isLoading, signedOut, revalidate } = useApi("menu-bar", load);
+  const { data, isLoading, signedOut, revalidate } = useApi("menu-bar", (api) =>
+    loadTimerSnapshot(api, { recentLimit: RECENT_LIMIT }),
+  );
 
   if (signedOut) {
     return (
@@ -127,6 +70,9 @@ export default function MenuBar(): React.JSX.Element | null {
   const elapsed = running ? entryDurationSec(running, Date.now()) : 0;
   const clock = formatMenuBarDuration(elapsed);
   const label = running ? entryLabel(running) : "";
+  const favorites = data?.favorites ?? [];
+  const projects = data?.projects ?? [];
+  const pinned = running ? favoriteFor(running, favorites) : undefined;
 
   const title = ((): string | undefined => {
     if (!running || titleMode === "icon") return undefined;
@@ -147,6 +93,29 @@ export default function MenuBar(): React.JSX.Element | null {
     }
   };
 
+  /**
+   * File the running timer from the menu bar. The task is cleared with the
+   * project because a task only exists inside one — keeping it would leave
+   * the entry pointing at a task from a project it is no longer in.
+   */
+  const fileUnder = (
+    entry: DetailedEntry,
+    project: ProjectWithStats | null,
+  ): void => {
+    void act(async () => {
+      const api = await getTracktime();
+      await api.update({
+        id: entry.id,
+        projectId: project?.id ?? null,
+        taskId: null,
+      });
+      await showToast({
+        style: Toast.Style.Success,
+        title: project ? `Moved to ${project.name}` : "Project cleared",
+      });
+    }, "Could not change the project");
+  };
+
   return (
     <MenuBarExtra
       icon={running ? Icon.Stopwatch : Icon.Clock}
@@ -156,14 +125,21 @@ export default function MenuBar(): React.JSX.Element | null {
     >
       {running ? (
         <MenuBarExtra.Section title={label}>
+          {/* The dropdown re-reads on open, so this line is current whenever
+              it is on screen — the menu bar title only moves on the interval. */}
           <MenuBarExtra.Item
             title={`Running for ${formatDurationShort(elapsed)}`}
-            subtitle={running.projectName ?? undefined}
+            subtitle={`since ${formatClock(running.start)}`}
             icon={Icon.Dot}
-            onAction={() => {
-              void open(webLink("/track"));
-            }}
+            onAction={openTimer}
           />
+          {entryHint(running) ? (
+            <MenuBarExtra.Item
+              title={entryHint(running) ?? ""}
+              icon={Icon.Folder}
+              onAction={openTimer}
+            />
+          ) : null}
           <MenuBarExtra.Item
             title="Stop Timer"
             icon={Icon.Stop}
@@ -178,6 +154,53 @@ export default function MenuBar(): React.JSX.Element | null {
                   message: formatDurationShort(stopped.durationSec),
                 });
               }, "Could not stop the timer");
+            }}
+          />
+          {/* A menu bar item cannot host a form, so editing hands off to the
+              Timer command, which opens on the running entry. */}
+          <MenuBarExtra.Item
+            title="Edit Timer…"
+            icon={Icon.Pencil}
+            shortcut={{ modifiers: ["cmd"], key: "e" }}
+            onAction={openTimer}
+          />
+          <MenuBarExtra.Submenu title="Move to Project" icon={Icon.Folder}>
+            {projects.map((project) => (
+              <MenuBarExtra.Item
+                key={project.id}
+                title={project.name}
+                subtitle={project.clientName ?? undefined}
+                icon={{ source: Icon.CircleFilled, tintColor: project.color }}
+                onAction={() => fileUnder(running, project)}
+              />
+            ))}
+            <MenuBarExtra.Item
+              title="No Project"
+              icon={Icon.Circle}
+              onAction={() => fileUnder(running, null)}
+            />
+          </MenuBarExtra.Submenu>
+          <MenuBarExtra.Item
+            title={pinned ? "Remove Favorite" : "Pin as Favorite"}
+            icon={pinned ? Icon.StarDisabled : Icon.Star}
+            shortcut={{ modifiers: ["cmd"], key: "f" }}
+            onAction={() => {
+              void act(async () => {
+                const api = await getTracktime();
+                if (pinned) {
+                  await api.removeFavorite(pinned.id);
+                  await showToast({
+                    style: Toast.Style.Success,
+                    title: "Favorite removed",
+                  });
+                  return;
+                }
+                await api.addFavorite(toQuickStart(running));
+                await showToast({
+                  style: Toast.Style.Success,
+                  title: "Pinned as a favorite",
+                });
+              }, "Could not update favorites");
             }}
           />
           <MenuBarExtra.Item
@@ -226,9 +249,9 @@ export default function MenuBar(): React.JSX.Element | null {
       {/* Pins first, and above Continue: they are the whole point of pinning.
           Started through `startQuick`, which is `entries.start` with the
           favorite's own fields — the same path every other client uses. */}
-      {data && data.favorites.length > 0 ? (
+      {favorites.length > 0 ? (
         <MenuBarExtra.Section title="Favorites">
-          {data.favorites.map((favorite) => (
+          {favorites.map((favorite) => (
             <MenuBarExtra.Item
               key={favorite.id}
               title={quickStartLabel(favorite)}
@@ -277,6 +300,12 @@ export default function MenuBar(): React.JSX.Element | null {
       <MenuBarExtra.Section
         title={`Today · ${formatDurationShort(data?.todaySec ?? 0)}`}
       >
+        <MenuBarExtra.Item
+          title="Timer…"
+          icon={Icon.Stopwatch}
+          shortcut={{ modifiers: ["cmd"], key: "t" }}
+          onAction={openTimer}
+        />
         <MenuBarExtra.Item
           title="Time Entries…"
           icon={Icon.List}

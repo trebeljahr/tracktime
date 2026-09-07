@@ -1,0 +1,124 @@
+/**
+ * The one snapshot every "what is running right now" surface renders.
+ *
+ * The menu bar and the Timer command show the same four things — the running
+ * entry, the pins, what is worth resuming, and today's total — so they load
+ * them the same way. Keeping it here means the two can never drift into
+ * disagreeing about which entries count as recent or where the day starts.
+ */
+import {
+  entryDurationSec,
+  quickStartKey,
+  toQuickStart,
+  type DetailedEntry,
+  type DetailedFavorite,
+} from "@starter/core";
+import type { ProjectWithStats, Tracktime } from "./api.js";
+import { isoDaysAgo } from "./format.js";
+
+/** How far back the "continue" shortlist looks. */
+export const RECENT_DAYS = 7;
+
+export type TimerSnapshot = {
+  running: DetailedEntry | null;
+  recent: DetailedEntry[];
+  favorites: DetailedFavorite[];
+  projects: ProjectWithStats[];
+  todaySec: number;
+};
+
+const startOfToday = (): number => {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+};
+
+/**
+ * Distinct recent work, newest first — what the user would plausibly resume.
+ * Two entries that share a description, project and task are the same job
+ * done twice, so only the newest of them earns a slot.
+ */
+const shortlist = (
+  entries: DetailedEntry[],
+  limit: number,
+): DetailedEntry[] => {
+  const seen = new Set<string>();
+  const out: DetailedEntry[] = [];
+
+  for (const entry of entries) {
+    if (entry.end === null) continue;
+    const key = `${entry.description}|${entry.projectId ?? ""}|${entry.taskId ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+    if (out.length === limit) break;
+  }
+
+  return out;
+};
+
+/**
+ * One round trip for the entries: the running entry is in this window too,
+ * and it arrives with its project and client names already joined. The pins
+ * and the projects are separate, small reads — the pins because they are the
+ * section people actually aim for and must not depend on the entry window
+ * happening to contain them, the projects because filing a running timer
+ * needs the whole catalog, not just the projects it was recently used with.
+ */
+export const loadTimerSnapshot = async (
+  api: Tracktime,
+  { recentLimit }: { recentLimit: number },
+): Promise<TimerSnapshot> => {
+  const now = Date.now();
+
+  const [{ entries }, favorites, projects] = await Promise.all([
+    api.list({
+      from: isoDaysAgo(RECENT_DAYS),
+      to: new Date(now + 60_000).toISOString(),
+      limit: 100,
+    }),
+    api.favorites(),
+    api.projects(),
+  ]);
+
+  const dayStart = startOfToday();
+  const todaySec = entries.reduce((total, entry) => {
+    const startMs = Date.parse(entry.start);
+    if (!Number.isFinite(startMs) || startMs < dayStart) return total;
+    return total + entryDurationSec(entry, now);
+  }, 0);
+
+  return {
+    running: entries.find((entry) => entry.end === null) ?? null,
+    recent: shortlist(entries, recentLimit),
+    favorites,
+    projects,
+    todaySec,
+  };
+};
+
+/** Never a blank row and never a raw id — the same fallback order as core. */
+export const entryLabel = (entry: DetailedEntry): string =>
+  entry.description.trim() || entry.projectName || "No description";
+
+/** "Client · Project › Task", or nothing when the entry is unfiled. */
+export const entryHint = (entry: DetailedEntry): string | undefined => {
+  const filed = [entry.projectName, entry.taskName].filter(Boolean).join(" › ");
+  if (!filed) return undefined;
+  return entry.clientName ? `${entry.clientName} · ${filed}` : filed;
+};
+
+/**
+ * The pin matching an entry, if it is already pinned.
+ *
+ * Compared by `quickStartKey` rather than by id: a pin is a description /
+ * project / task / billable combination, so continuing a pinned entry produces
+ * a new entry that is still the same pin.
+ */
+export const favoriteFor = (
+  entry: DetailedEntry,
+  favorites: readonly DetailedFavorite[],
+): DetailedFavorite | undefined => {
+  const key = quickStartKey(toQuickStart(entry));
+  return favorites.find((favorite) => quickStartKey(favorite) === key);
+};

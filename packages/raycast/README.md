@@ -7,14 +7,16 @@ timer in the macOS menu bar.
 
 | Command | Mode | What it does |
 | --- | --- | --- |
-| **Timer** | menu bar | Running timer in the menu bar. Stop, discard, continue recent work, today's total. |
+| **Timer** | view | The live one: elapsed time ticking by the second, with stop, edit, refile, pin, discard, favorites and recent work all one keystroke away. |
+| **Timer Menu Bar** | menu bar | The same picture at a glance. Stop, edit, move to a project, pin, discard, continue recent work, today's total. |
 | **Start Timer** | view | Form for description, project, task and billable. Accepts a description straight from the root search. |
 | **Stop Timer** | no-view | Stops the running timer. Made for a global hotkey. |
 | **Toggle Timer** | no-view | Stops what is running, or resumes the most recent entry. One hotkey for the whole loop. |
 | **Time Entries** | view | Last 14 days grouped by day — continue, edit, delete. |
 | **Sign in to tracktime** | view | Pairs this Mac with your account. |
 
-Worth binding to hotkeys: **Toggle Timer** (⌥T works well) and **Start Timer**.
+Worth binding to hotkeys: **Toggle Timer** (⌥T works well), **Timer** and
+**Start Timer**.
 
 ## Setup
 
@@ -52,12 +54,19 @@ domain should be reimplemented here — if a helper is missing, add it to
 `raycast-env.d.ts` is generated from `package.json` by `ray build`, and is
 committed so `pnpm typecheck` works on machines without Raycast installed.
 
-### Menu bar refresh
+### Menu bar refresh, and why there are two Timer commands
 
 Raycast only re-runs a menu bar command on its interval (1 minute here) and when
 its dropdown opens, so the clock shows `h:mm` rather than a second-by-second
 count that would be wrong most of the time. Commands that change the timer call
 `refreshMenuBar()` so the menu bar does not sit on a stale value after a hotkey.
+
+**Timer** is the answer to the other half of that: a view command is on screen,
+so it can hold a one-second interval and show a real `0:12:34` that moves, and
+it can push a form — which a menu bar item cannot. That is why **Edit Timer…**
+in the dropdown hands off to it instead of trying to edit in place. Both read
+the same snapshot (`lib/timer-data.ts`), so they can never disagree about what
+is running.
 
 ## Troubleshooting
 
@@ -67,8 +76,8 @@ Extension Preferences** and fix **API URL**. The defaults point at the deployed
 hosts, so a local-only setup has to be pointed at the dev ports.
 
 **Nothing in the menu bar** — a Raycast menu bar command only appears after it
-has been run once. Open Raycast, run **Timer**, and the item shows up; it then
-refreshes on its own every minute.
+has been run once. Open Raycast, run **Timer Menu Bar**, and the item shows up;
+it then refreshes on its own every minute.
 
 **Seeing what went wrong** — the terminal running `pnpm dev:raycast` is the
 extension's console: `console.log` and stack traces print there. View commands

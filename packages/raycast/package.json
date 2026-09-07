@@ -12,7 +12,7 @@
   "commands": [
     {
       "name": "menu-bar",
-      "title": "Timer",
+      "title": "Timer Menu Bar",
       "subtitle": "tracktime",
       "description": "Show the running timer in the macOS menu bar.",
       "mode": "menu-bar",
@@ -42,6 +42,13 @@
           "default": false
         }
       ]
+    },
+    {
+      "name": "timer",
+      "title": "Timer",
+      "subtitle": "tracktime",
+      "description": "Watch the running timer tick, and stop, edit, refile or swap it.",
+      "mode": "view"
     },
     {
       "name": "start-timer",
