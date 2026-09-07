@@ -31,6 +31,17 @@ export interface IImportBatch extends Document {
   projectIds: string[];
   taskIds: string[];
   tagIds: string[];
+  /**
+   * Pins this import restored, so undo can unpin exactly them. Listed like
+   * the catalog and unlike the entries: there are at most a handful, and
+   * "the pins this file created" has no other query.
+   */
+  favoriteIds: string[];
+  /**
+   * Whether this import also rewrote the workspace's money/calendar policy.
+   * A record, not a reversal — see the note on `data.undo`.
+   */
+  settingsRestored: boolean;
   totalSec: number;
   firstStart: Date | null;
   lastStart: Date | null;
@@ -49,6 +60,10 @@ export type ImportBatchDocLike = {
   projectIds: string[];
   taskIds: string[];
   tagIds: string[];
+  /** Absent on batches written before an import could restore pins. */
+  favoriteIds?: string[];
+  /** Absent on batches written before an import could restore settings. */
+  settingsRestored?: boolean;
   totalSec: number;
   firstStart: Date | null;
   lastStart: Date | null;
@@ -74,6 +89,8 @@ const importBatchSchema = new Schema<IImportBatch>(
     projectIds: { type: [String], default: [] },
     taskIds: { type: [String], default: [] },
     tagIds: { type: [String], default: [] },
+    favoriteIds: { type: [String], default: [] },
+    settingsRestored: { type: Boolean, required: true, default: false },
     totalSec: { type: Number, required: true, default: 0, min: 0 },
     firstStart: { type: Date, default: null },
     lastStart: { type: Date, default: null },
@@ -103,6 +120,10 @@ export function toClientImportBatch(
     projectsCreated: doc.projectIds.length,
     tasksCreated: doc.taskIds.length,
     tagsCreated: doc.tagIds.length,
+    // Both absent on every batch written before these sections existed, and
+    // read as "this import did neither" — which is exactly what happened.
+    favoritesCreated: doc.favoriteIds?.length ?? 0,
+    settingsRestored: doc.settingsRestored ?? false,
     totalSec: doc.totalSec,
     firstStart: doc.firstStart ? doc.firstStart.toISOString() : null,
     lastStart: doc.lastStart ? doc.lastStart.toISOString() : null,

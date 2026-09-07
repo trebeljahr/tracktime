@@ -83,11 +83,13 @@ function Stat(props: {
 
 function Note(props: {
   tone: "info" | "warning";
+  testId?: string;
   children: React.ReactNode;
 }): React.JSX.Element {
   const Icon = props.tone === "warning" ? AlertTriangle : Info;
   return (
     <div
+      data-testid={props.testId}
       className={
         props.tone === "warning"
           ? "flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
@@ -155,6 +157,25 @@ export function ImportPreviewView({
           Every date in this file could be read either way round —{" "}
           <strong>03/04</strong> is the 3rd of April or the 4th of March. Pick
           the one your file means before importing.
+        </Note>
+      ) : null}
+
+      {preview.sections.moneyRedacted ? (
+        <Note tone="warning" testId="import-money-redacted">
+          <strong>This file&rsquo;s money was blanked when it was exported.</strong>{" "}
+          Entries, catalog and times import in full, but every rate in it is
+          empty, so the imported history is priced by this workspace&rsquo;s
+          own rates rather than the ones it was tracked at.
+        </Note>
+      ) : null}
+
+      {preview.sections.invoices > 0 ? (
+        <Note tone="info" testId="import-invoices-dropped">
+          {preview.sections.invoices} invoice
+          {preview.sections.invoices === 1 ? "" : "s"} in this file{" "}
+          {preview.sections.invoices === 1 ? "is" : "are"} not imported — an
+          issued invoice records something that happened, and re-creating it
+          here would either bill nothing or bill the wrong hours twice.
         </Note>
       ) : null}
 

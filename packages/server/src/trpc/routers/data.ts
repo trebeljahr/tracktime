@@ -21,6 +21,7 @@ import {
   IMPORT_PREVIEW_ISSUES,
   IMPORT_PREVIEW_ROWS,
   MAX_IMPORT_ROWS,
+  WORKSPACE_EXPORT_VERSION,
   importInputSchema,
   importUndoSchema,
   resolveHourlyRate,
@@ -32,17 +33,30 @@ import {
   type ImportPreview,
   type ImportResult,
   type ImportRow,
+  type ImportSections,
   type ImportUndoResult,
+  type IdleBehavior,
+  type QuickStart,
+  type Visibility,
   type WorkspaceExport,
   type WorkspaceExportEntry,
+  type WorkspaceExportFavorite,
+  type WorkspaceExportInfo,
+  type WorkspaceExportInvoice,
+  type WorkspaceRole,
 } from "@starter/shared";
 import { Client, DEFAULT_CLIENT_COLOR } from "../../models/Client.js";
+import { Favorite } from "../../models/Favorite.js";
 import { ImportBatch, toClientImportBatch } from "../../models/ImportBatch.js";
+import { Invoice } from "../../models/Invoice.js";
 import { Project, DEFAULT_PROJECT_COLOR } from "../../models/Project.js";
 import { Tag, DEFAULT_TAG_COLOR } from "../../models/Tag.js";
 import { Task } from "../../models/Task.js";
 import { TimeEntry } from "../../models/TimeEntry.js";
-import { getOrCreateWorkspaceSettings } from "../../models/Settings.js";
+import {
+  WorkspaceSettingsModel,
+  getOrCreateWorkspaceSettings,
+} from "../../models/Settings.js";
 import { authorScopeFilter } from "../../models/WorkspaceMember.js";
 import {
   importFingerprint,
@@ -50,8 +64,16 @@ import {
   workspaceJsonCatalog,
   type ParsedFile,
 } from "../../services/import/parse.js";
+import {
+  planFavoriteRestore,
+  settingsRestoreFields,
+} from "../../services/import/restore.js";
 import { csvFilename, toCsv, type CsvColumn } from "../../services/csv.js";
-import { publishSync } from "../../ws/sync.js";
+import {
+  exportKeepsMoney,
+  redactExportMoney,
+} from "../../services/export-redaction.js";
+import { publishSync, publishToUser } from "../../ws/sync.js";
 import {
   assertObjectId,
   pickCatalogColor,
@@ -63,13 +85,61 @@ import { router, workspaceProcedure } from "../trpc.js";
 const INSERT_CHUNK = 500;
 
 /**
- * Ceiling on a single export. Well past a decade of full-time tracking, and
- * low enough that one request cannot pull a whole database into memory.
+ * Hard bound on how much one export may sweep up. Well past a decade of
+ * full-time tracking, and low enough that one request cannot pull a whole
+ * database into memory. Exceeding it is a refusal, never a truncation: an
+ * export that quietly stopped at the first 200,000 entries would be a backup
+ * missing years, and nothing in the file or on screen would say which ones.
+ *
+ * Exported so the client can count against the same number it will be
+ * refused by, and warn before the click rather than after it.
  */
-const MAX_EXPORT_ENTRIES = 200_000;
+export const MAX_EXPORT_ENTRIES = 200_000;
+
+/**
+ * Ceiling on the invoices one export carries. Far past what any workspace
+ * issues in a decade, and a bound rather than an unbounded read.
+ *
+ * Exported for the same reason {@link MAX_EXPORT_ENTRIES} is: the boundary is
+ * pinned by a test rather than by the shape of a query.
+ */
+export const MAX_EXPORT_INVOICES = 10_000;
 
 const badRequest = (message: string): TRPCError =>
   new TRPCError({ code: "BAD_REQUEST", message });
+
+/**
+ * Refuse an export that would not be whole.
+ *
+ * Fed the length of a read taken one PAST the cap, so "we hit the ceiling"
+ * and "the range happens to end exactly there" are distinguishable — a plain
+ * `.limit(MAX)` returns the same count either way and there is nothing left
+ * to detect. Pure and exported so the boundary itself is unit-testable: this
+ * is the one place that decides whether a download is a backup or a subset,
+ * and it must not need a database to be pinned down.
+ */
+export function assertExportWithinCap(fetched: number): void {
+  if (fetched <= MAX_EXPORT_ENTRIES) return;
+  throw badRequest(
+    `This export would hold more than ${MAX_EXPORT_ENTRIES.toLocaleString("en-US")} entries. Set a narrower date range and export it in parts.`,
+  );
+}
+
+/**
+ * The same refusal for invoices, fed a read taken one past their own cap.
+ *
+ * A separate function because the two caps are separate numbers, but the RULE
+ * is the one stated above and must not be weaker here: a plain
+ * `.limit(MAX_EXPORT_INVOICES)` hands back the oldest N by issue date and
+ * drops the rest with nothing in the file, and nothing on screen, to say a
+ * year of billing is missing from what reads as a complete backup.
+ */
+export function assertExportInvoicesWithinCap(fetched: number): void {
+  if (fetched <= MAX_EXPORT_INVOICES) return;
+  throw badRequest(
+    `This export would hold more than ${MAX_EXPORT_INVOICES.toLocaleString("en-US")} invoices. Set a narrower date range and export it in parts.`,
+  );
+}
 
 const lower = (value: string): string => value.trim().toLowerCase();
 
@@ -135,11 +205,21 @@ async function loadCatalog(workspaceId: string): Promise<CatalogIndex> {
  * Only the file's own date range is read back, and only the four fields the
  * fingerprint uses — a backfill covering one month must not read a decade of
  * entries to find out it is new.
+ *
+ * Author-scoped exactly like the export path, and for a sharper reason than
+ * tidiness: the answer is handed back to the uploader as `duplicateRows`, so
+ * an unscoped scan turns `analyze` into an existence oracle over colleagues'
+ * work. A one-row file is a question — "did anyone log 09:00–12:00 on Acme
+ * that day?" — and iterating the times reconstructs somebody's week without
+ * a single entry ever being read out. The cost of the scope is stated and
+ * accepted: two members CAN each import the same row, because to a member
+ * restricted to their own rows the other copy does not exist.
  */
 async function markWorkspaceDuplicates(
   workspaceId: string,
   rows: ImportRow[],
   catalog: CatalogIndex,
+  authorScope: { authorId: string } | null,
 ): Promise<number> {
   const candidates = rows.filter((row) => row.duplicateOf === null);
   if (candidates.length === 0) return 0;
@@ -155,6 +235,7 @@ async function markWorkspaceDuplicates(
   const existing = await TimeEntry.find(
     {
       workspaceId,
+      ...(authorScope ?? {}),
       start: { $gte: new Date(minStart), $lte: new Date(maxStart) },
     },
     { start: 1, durationSec: 1, description: 1, projectId: 1 },
@@ -262,6 +343,19 @@ type CatalogHints = {
   projectRate: Map<string, number | null>;
   projectBillable: Map<string, boolean>;
   tagColor: Map<string, string>;
+  /**
+   * The rest of what a project states about itself. Restored with it, because
+   * a project recreated without its budget or its estimate is not the project
+   * the file described — and nothing would ever report the difference.
+   */
+  projectExtras: Map<string, ProjectExtras>;
+};
+
+type ProjectExtras = {
+  estimatedHours: number | null;
+  budgetAmount: number | null;
+  budgetCurrency: string | null;
+  idleBehavior: IdleBehavior | null;
 };
 
 const emptyHints = (): CatalogHints => ({
@@ -270,28 +364,179 @@ const emptyHints = (): CatalogHints => ({
   projectRate: new Map(),
   projectBillable: new Map(),
   tagColor: new Map(),
+  projectExtras: new Map(),
 });
 
-function hintsFromJson(text: string): CatalogHints {
+function hintsFromDoc(doc: WorkspaceExport | null): CatalogHints {
   const hints = emptyHints();
-  const doc = workspaceJsonCatalog(text);
   if (!doc) return hints;
 
+  // An empty color is not set at all, so the palette picker assigns one. The
+  // parser blanks a color it could not read (`workspaceJsonCatalog`), and
+  // writing "" through would fail the model's `required` on the way in.
   for (const client of doc.clients) {
-    if (client?.name) hints.clientColor.set(lower(client.name), client.color);
+    if (client?.name && client.color) {
+      hints.clientColor.set(lower(client.name), client.color);
+    }
   }
   for (const project of doc.projects) {
     if (!project?.name) continue;
     const key = lower(project.name);
-    hints.projectColor.set(key, project.color);
+    if (project.color) hints.projectColor.set(key, project.color);
     hints.projectRate.set(key, project.hourlyRate ?? null);
     hints.projectBillable.set(key, project.billableDefault ?? true);
+    hints.projectExtras.set(key, {
+      estimatedHours: project.estimatedHours ?? null,
+      budgetAmount: project.budgetAmount ?? null,
+      budgetCurrency: project.budgetCurrency ?? null,
+      idleBehavior: project.idleBehavior ?? null,
+    });
   }
   for (const tag of doc.tags) {
-    if (tag?.name) hints.tagColor.set(lower(tag.name), tag.color);
+    if (tag?.name && tag.color) hints.tagColor.set(lower(tag.name), tag.color);
   }
   return hints;
 }
+
+/**
+ * The JSON document behind a file, or null for anything else.
+ *
+ * Both procedures read it through here so there is ONE parse of the non-entry
+ * half per call: a second independent parse is a second thing that can
+ * disagree with the preview the user approved.
+ */
+const workspaceDoc = (parsed: ParsedFile, text: string): WorkspaceExport | null =>
+  parsed.format === "workspace-json" ? workspaceJsonCatalog(text) : null;
+
+/**
+ * What the file carries beyond entries.
+ *
+ * A delimited file carries none of it and says so with zeroes — which is not
+ * the same claim as a v1 export's, where the sections did not exist yet; the
+ * version is what tells those two apart.
+ */
+/**
+ * Write the workspace's money and calendar policy back, if the file states it
+ * and the caller asked for it.
+ *
+ * The role check is the load-bearing part, and it is the SAME one
+ * `settings.update` applies: currency and the default rate reprice everybody's
+ * future entries, so they are not an ordinary member's to change. Without this
+ * an upload would be a way around a check every other path enforces — a
+ * privilege escalation through a file picker.
+ */
+async function restoreWorkspaceSettings(args: {
+  workspaceId: string;
+  role: WorkspaceRole;
+  doc: WorkspaceExport | null;
+  requested: boolean;
+  originId?: string;
+}): Promise<boolean> {
+  const { workspaceId, role, doc, requested, originId } = args;
+  if (!requested || !doc) return false;
+
+  if (role === "member") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "Only an owner or admin can restore workspace settings from a file. Import the entries without them, or ask an admin.",
+    });
+  }
+
+  const fields = settingsRestoreFields(doc);
+  if (Object.keys(fields).length === 0) return false;
+
+  await WorkspaceSettingsModel.updateOne(
+    { workspaceId },
+    { $set: fields },
+    { upsert: true },
+  );
+  void publishSync(workspaceId, { kind: "settings.changed" }, originId);
+  return true;
+}
+
+/**
+ * Write the caller's pins back, resolved by name against the catalog as it
+ * stands AFTER this import created whatever it was going to create.
+ *
+ * `userId` is always the caller's and never anything read out of the file: a
+ * file must not be able to write pins onto somebody else's account. The
+ * planning — dedupe, ordering, the 50-pin ceiling — is pure and lives in
+ * `services/import/restore.ts`.
+ */
+async function restoreFavorites(args: {
+  workspaceId: string;
+  userId: string;
+  catalog: CatalogIndex;
+  doc: WorkspaceExport | null;
+  requested: boolean;
+  originId?: string;
+}): Promise<string[]> {
+  const { workspaceId, userId, catalog, doc, requested, originId } = args;
+  const favorites = doc?.favorites ?? [];
+  if (!requested || favorites.length === 0) return [];
+
+  const existing = await Favorite.find(
+    { workspaceId, userId },
+    { description: 1, projectId: 1, taskId: 1, billable: 1 },
+  ).lean();
+
+  const plan = planFavoriteRestore({
+    favorites,
+    existing: existing.map(
+      (favorite): QuickStart => ({
+        description: favorite.description,
+        projectId: favorite.projectId ?? null,
+        taskId: favorite.taskId ?? null,
+        billable: favorite.billable,
+      }),
+    ),
+    resolve: (favorite) => {
+      const project = favorite.projectName
+        ? (catalog.projects.get(lower(favorite.projectName)) ?? null)
+        : null;
+      return {
+        projectId: project?.id ?? null,
+        taskId:
+          project && favorite.taskName
+            ? (catalog.tasks.get(
+                `${project.id}::${lower(favorite.taskName)}`,
+              ) ?? null)
+            : null,
+      };
+    },
+  });
+
+  if (plan.create.length === 0) return [];
+
+  const written = await Favorite.insertMany(
+    plan.create.map((favorite) => ({ ...favorite, workspaceId, userId })),
+    { ordered: false },
+  );
+
+  // Pins are personal, so the change is announced to this person's own
+  // devices and nobody else's — the same fan-out every mutation in
+  // favorites.ts uses. Skipping it leaves their other clients on a stale row.
+  publishToUser(userId, { kind: "favorites.changed" }, originId);
+
+  return written.map((favorite) => String(favorite._id));
+}
+
+const sectionsOf = (doc: WorkspaceExport | null): ImportSections => ({
+  version: doc?.version ?? 1,
+  // Read back off the file rather than inferred from null rates: "every rate
+  // in here is blank" and "this workspace never billed anything" are the same
+  // document otherwise, and only the first one is a partial restore the user
+  // has to be told about BEFORE it is written.
+  moneyRedacted: doc?.moneyRedacted === true,
+  // Asked of the same function the commit writes from, not of the presence of
+  // a `settings` key: a v1 file has no such section and still names a
+  // currency, which is restorable. A preview must promise what would actually
+  // be written, or approving it means nothing.
+  settings: doc ? Object.keys(settingsRestoreFields(doc)).length > 0 : false,
+  favorites: doc?.favorites?.length ?? 0,
+  invoices: doc?.invoices?.length ?? 0,
+});
 
 type CreatedCatalog = {
   clientIds: string[];
@@ -365,6 +610,7 @@ async function createMissingCatalog(args: {
     const clientId = clientKey ? (catalog.clients.get(clientKey) ?? null) : null;
     const hourlyRate = hints.projectRate.get(key) ?? null;
     const billableDefault = hints.projectBillable.get(key) ?? true;
+    const extras = hints.projectExtras.get(key);
     const doc = await Project.create({
       workspaceId,
       createdBy,
@@ -376,6 +622,10 @@ async function createMissingCatalog(args: {
       clientId,
       hourlyRate,
       billableDefault,
+      estimatedHours: extras?.estimatedHours ?? null,
+      budgetAmount: extras?.budgetAmount ?? null,
+      budgetCurrency: extras?.budgetCurrency ?? null,
+      idleBehavior: extras?.idleBehavior ?? null,
     });
     projectSeed += 1;
     const id = String(doc._id);
@@ -456,28 +706,111 @@ const hms = (seconds: number): string => {
   return `${pad(hours)}:${pad(minutes)}:${pad(rest)}`;
 };
 
+/** `from`/`to` as one Mongo range, or `null` for an unbounded export. */
+function exportDateRange(
+  from: string | undefined,
+  to: string | undefined,
+): Record<string, Date> | null {
+  if (!from && !to) return null;
+  const range: Record<string, Date> = {};
+  if (from) range.$gte = new Date(`${from}T00:00:00.000Z`);
+  if (to) range.$lte = new Date(`${to}T23:59:59.999Z`);
+  return range;
+}
+
+/**
+ * The entries one export carries, as a filter.
+ *
+ * Written once because two callers ask the same question: the builder, which
+ * reads the rows, and `info`, which only counts them so the panel can warn
+ * before the click. A count taken with a different filter than the read would
+ * promise a download the export then refuses — or, worse, stay quiet about
+ * one it is about to refuse.
+ */
+function exportEntryFilter(args: {
+  workspaceId: string;
+  authorScope: { authorId: string } | null;
+  dateRange: Record<string, Date> | null;
+}): Record<string, unknown> {
+  const { workspaceId, authorScope, dateRange } = args;
+  return {
+    workspaceId,
+    ...(authorScope ?? {}),
+    ...(dateRange ? { start: dateRange } : {}),
+    // A running timer has no end and no duration yet; exporting it would
+    // write a zero-length entry that the importer then refuses.
+    end: { $ne: null },
+  };
+}
+
 /**
  * Read the whole workspace into the portable shape.
  *
  * Catalog references travel BY NAME (see `WorkspaceExportEntry`), which is
  * what makes an export importable into a different workspace — or back into
  * an empty one after the database it came from is gone.
+ *
+ * Takes the caller's `visibility` rather than a pre-computed author scope, so
+ * both halves of the question are answered in one place: WHICH entries leave
+ * (`authorScopeFilter`, as in reports.ts) and WHETHER the rates on them do
+ * (`redactExportMoney`). Handing this function only the author scope is what
+ * left the money half unanswerable, and unanswered.
  */
 async function buildWorkspaceExport(args: {
   workspaceId: string;
   from?: string;
   to?: string;
-  authorScope: { authorId: string } | null;
+  visibility: Visibility;
 }): Promise<WorkspaceExport> {
-  const { workspaceId, from, to, authorScope } = args;
-  const [catalogClients, catalogProjects, catalogTasks, catalogTags, settings] =
-    await Promise.all([
-      Client.find({ workspaceId }).lean(),
-      Project.find({ workspaceId }).lean(),
-      Task.find({ workspaceId }).lean(),
-      Tag.find({ workspaceId }).lean(),
-      getOrCreateWorkspaceSettings(workspaceId),
-    ]);
+  const { workspaceId, from, to, visibility } = args;
+  const authorScope = authorScopeFilter(visibility);
+
+  // One range, applied to an entry's `start` and to an invoice's `issueDate`:
+  // a ranged export is "what happened in these months", and an invoice issued
+  // outside them belongs to a different slice of the history.
+  const dateRange = exportDateRange(from, to);
+
+  const [
+    catalogClients,
+    catalogProjects,
+    catalogTasks,
+    catalogTags,
+    settings,
+    catalogFavorites,
+    catalogInvoices,
+  ] = await Promise.all([
+    Client.find({ workspaceId }).lean(),
+    Project.find({ workspaceId }).lean(),
+    Task.find({ workspaceId }).lean(),
+    Tag.find({ workspaceId }).lean(),
+    getOrCreateWorkspaceSettings(workspaceId),
+    // Pins are scoped by BOTH axes, exactly as `listFavorites` reads them: a
+    // favorite is one person's shortcut into one workspace. Exporting every
+    // member's would put a colleague's shortcuts in this person's backup and
+    // give the restore nothing to write them onto.
+    Favorite.find({ workspaceId, userId: visibility.userId })
+      .sort({ order: 1, createdAt: 1 })
+      .lean(),
+    // Invoices carry an author (`createdBy`) but no per-entry authorship, so
+    // the same scope the entries use is applied to that field: a member
+    // restricted to their own rows does not pull every colleague's invoice
+    // out in bulk. Derived from `authorScopeFilter` so the two cannot drift.
+    //
+    // The residual gap is stated rather than hidden: INSIDE one invoice there
+    // is no author scope at all — a line merges whoever's hours were billed
+    // into one figure. That is exactly why every amount on an invoice follows
+    // the workspace-money rule and not the per-entry "own money" one.
+    Invoice.find({
+      workspaceId,
+      ...(authorScope ? { createdBy: authorScope.authorId } : {}),
+      ...(dateRange ? { issueDate: dateRange } : {}),
+    })
+      .sort({ issueDate: 1 })
+      // One past the cap, like the entries below: a plain limit would drop
+      // the newest invoices out of a file that still reads as a full backup.
+      .limit(MAX_EXPORT_INVOICES + 1)
+      .lean(),
+  ]);
 
   const clientNameById = new Map(
     catalogClients.map((client) => [String(client._id), client.name]),
@@ -492,21 +825,19 @@ async function buildWorkspaceExport(args: {
     catalogTags.map((tag) => [String(tag._id), tag.name]),
   );
 
-  const range: Record<string, Date> = {};
-  if (from) range.$gte = new Date(`${from}T00:00:00.000Z`);
-  if (to) range.$lte = new Date(`${to}T23:59:59.999Z`);
-
-  const entries = await TimeEntry.find({
-    workspaceId,
-    ...(authorScope ?? {}),
-    ...(from || to ? { start: range } : {}),
-    // A running timer has no end and no duration yet; exporting it would
-    // write a zero-length entry that the importer then refuses.
-    end: { $ne: null },
-  })
+  const entries = await TimeEntry.find(
+    exportEntryFilter({ workspaceId, authorScope, dateRange }),
+  )
     .sort({ start: 1 })
-    .limit(MAX_EXPORT_ENTRIES)
+    // One past the cap, so hitting it is detectable rather than a silent
+    // truncation — see the refusal below.
+    .limit(MAX_EXPORT_ENTRIES + 1)
     .lean();
+
+  // Truncating here would hand back a file that reads as a complete backup
+  // and is not, with nothing on screen to say which entries are missing.
+  assertExportWithinCap(entries.length);
+  assertExportInvoicesWithinCap(catalogInvoices.length);
 
   const exportEntries: WorkspaceExportEntry[] = entries.map((entry) => {
     const project = entry.projectId ? projectById.get(entry.projectId) : null;
@@ -530,11 +861,75 @@ async function buildWorkspaceExport(args: {
     };
   });
 
-  return {
-    version: 1,
+  const exportFavorites: WorkspaceExportFavorite[] = catalogFavorites.map(
+    (favorite) => {
+      const project = favorite.projectId
+        ? projectById.get(favorite.projectId)
+        : null;
+      return {
+        description: favorite.description,
+        clientName: project?.clientId
+          ? (clientNameById.get(project.clientId) ?? null)
+          : null,
+        projectName: project?.name ?? null,
+        taskName: favorite.taskId
+          ? (taskNameById.get(favorite.taskId) ?? null)
+          : null,
+        billable: favorite.billable,
+        order: favorite.order,
+      };
+    },
+  );
+
+  const exportInvoices: WorkspaceExportInvoice[] = catalogInvoices.map(
+    (invoice) => ({
+      number: invoice.number,
+      // The name as it was at issue time, not as the client is called today —
+      // the document was sent with this on it.
+      clientName: invoice.clientName,
+      status: invoice.status,
+      issueDate: invoice.issueDate.toISOString(),
+      dueDate: invoice.dueDate.toISOString(),
+      from: invoice.from.toISOString(),
+      to: invoice.to.toISOString(),
+      groupBy: invoice.groupBy,
+      lineItems: (invoice.lineItems ?? []).map((line) => ({
+        label: line.label,
+        projectName: line.projectId
+          ? (projectById.get(line.projectId)?.name ?? null)
+          : null,
+        taskName: line.taskId ? (taskNameById.get(line.taskId) ?? null) : null,
+        seconds: line.seconds,
+        hours: line.hours,
+        hourlyRate: line.hourlyRate,
+        currency: line.currency,
+        amount: line.amount,
+      })),
+      subtotal: invoice.subtotal,
+      taxRate: invoice.taxRate ?? null,
+      taxAmount: invoice.taxAmount,
+      total: invoice.total,
+      currency: invoice.currency,
+      notes: invoice.notes ?? null,
+      createdAt: invoice.createdAt.toISOString(),
+      // `entryIds` is deliberately absent: an entry has no identity in this
+      // format, so exporting them would write ids that address nothing —
+      // and inviting a re-link would double-bill. See WorkspaceExportInvoice.
+    }),
+  );
+
+  const document: WorkspaceExport = {
+    version: WORKSPACE_EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
     workspaceId,
     currency: settings.currency,
+    // The workspace half only. `currency` stays top-level and is not repeated
+    // here, and the per-user half is keyed by userId — see
+    // WorkspaceExportSettings for why a workspace file must not carry it.
+    settings: {
+      defaultHourlyRate: settings.defaultHourlyRate,
+      weekStartsOn: settings.weekStartsOn,
+    },
     clients: catalogClients.map((client) => ({
       name: client.name,
       color: client.color,
@@ -549,6 +944,9 @@ async function buildWorkspaceExport(args: {
       billableDefault: project.billableDefault,
       hourlyRate: project.hourlyRate ?? null,
       estimatedHours: project.estimatedHours ?? null,
+      budgetAmount: project.budgetAmount ?? null,
+      budgetCurrency: project.budgetCurrency ?? null,
+      idleBehavior: project.idleBehavior ?? null,
       archived: project.archived,
     })),
     tasks: catalogTasks.flatMap((task) => {
@@ -569,7 +967,16 @@ async function buildWorkspaceExport(args: {
       archived: tag.archived,
     })),
     entries: exportEntries,
+    favorites: exportFavorites,
+    invoices: exportInvoices,
   };
+
+  // Last thing before the document leaves: an export is a bulk door onto the
+  // rows reports guard one page at a time, and a member who cannot see other
+  // members' money must not receive their rates through a download either.
+  // Redacting HERE rather than in each procedure is what keeps the JSON and
+  // CSV doors from disagreeing — the CSV is built from what this returns.
+  return redactExportMoney(document, visibility);
 }
 
 export const dataRouter = router({
@@ -589,6 +996,7 @@ export const dataRouter = router({
         ctx.workspaceId,
         parsed.rows,
         catalog,
+        authorScopeFilter(ctx.visibility),
       );
 
       const fileDuplicates = parsed.rows.filter(
@@ -619,6 +1027,10 @@ export const dataRouter = router({
         newTags: missing.tags,
         issues: parsed.issues.slice(0, IMPORT_PREVIEW_ISSUES),
         sample: ready.slice(0, IMPORT_PREVIEW_ROWS),
+        // Stated BEFORE the write, which is the whole point of analyze and
+        // commit taking the same input: invoices in the file are not coming
+        // back, and an omission nobody was told about looks like data loss.
+        sections: sectionsOf(workspaceDoc(parsed, input.text)),
       };
     }),
 
@@ -629,7 +1041,12 @@ export const dataRouter = router({
       const { parsed, timeZone } = readFile(input);
       const workspaceId = ctx.workspaceId;
       const catalog = await loadCatalog(workspaceId);
-      await markWorkspaceDuplicates(workspaceId, parsed.rows, catalog);
+      await markWorkspaceDuplicates(
+        workspaceId,
+        parsed.rows,
+        catalog,
+        authorScopeFilter(ctx.visibility),
+      );
 
       const skipDuplicates = input.skipDuplicates ?? true;
       const rows = skipDuplicates
@@ -642,11 +1059,22 @@ export const dataRouter = router({
         );
       }
 
+      const doc = workspaceDoc(parsed, input.text);
+      const hints = hintsFromDoc(doc);
+
+      // Settings go FIRST, before a single entry is written. Every entry
+      // stopped here snapshots the workspace currency and falls back to its
+      // default rate, so restoring a backup and then flipping the currency
+      // would label the restored history in the money it was never tracked
+      // in — with nothing to detect it afterwards.
+      const settingsRestored = await restoreWorkspaceSettings({
+        workspaceId,
+        role: ctx.membership.role,
+        doc,
+        requested: input.restoreSettings ?? false,
+        originId: input.originId,
+      });
       const settings = await getOrCreateWorkspaceSettings(workspaceId);
-      const hints =
-        parsed.format === "workspace-json"
-          ? hintsFromJson(input.text)
-          : emptyHints();
 
       const created =
         (input.createMissing ?? true)
@@ -676,6 +1104,11 @@ export const dataRouter = router({
         projectIds: created.projectIds,
         taskIds: created.taskIds,
         tagIds: created.tagIds,
+        // Recorded, not reversible: undo puts the entries and the catalog
+        // back the way they were, but not the workspace's policy — a currency
+        // everything written since has been snapshotted in cannot be quietly
+        // rolled back. The history table says the import touched it.
+        settingsRestored,
         entriesSkipped: parsed.rows.length - rows.length,
         totalSec: totals.totalSec,
         firstStart: totals.firstStart ? new Date(totals.firstStart) : null,
@@ -735,9 +1168,20 @@ export const dataRouter = router({
         entriesCreated += written.length;
       }
 
+      // Pins last: they reference the catalog by name, so they can only be
+      // resolved once this import has created whatever it was going to create.
+      const favoriteIds = await restoreFavorites({
+        workspaceId,
+        userId: ctx.user.id,
+        catalog,
+        doc,
+        requested: input.restoreFavorites ?? false,
+        originId: input.originId,
+      });
+
       await ImportBatch.updateOne(
         { _id: batch._id },
-        { $set: { entriesCreated } },
+        { $set: { entriesCreated, favoriteIds } },
       );
 
       void publishSync(
@@ -754,17 +1198,32 @@ export const dataRouter = router({
         projectsCreated: created.projectIds.length,
         tasksCreated: created.taskIds.length,
         tagsCreated: created.tagIds.length,
+        favoritesCreated: favoriteIds.length,
+        settingsRestored,
         totalSec: totals.totalSec,
         firstStart: totals.firstStart,
         lastStart: totals.lastStart,
       };
     }),
 
-  /** Past imports, newest first. */
+  /**
+   * Past imports, newest first.
+   *
+   * Author-scoped on `createdBy`, from the same `authorScopeFilter` the
+   * entries use. A batch is a summary of the entries it wrote — filename,
+   * count, total hours, and whether it rewrote workspace settings — so
+   * listing every member's would hand a member restricted to their own rows
+   * the aggregate of somebody else's history, and an hour count becomes an
+   * amount the moment any rate is known.
+   */
   history: workspaceProcedure
     .input(workspaceExportSchema.pick({ workspaceId: true }))
     .query(async ({ ctx }): Promise<ImportBatchSummary[]> => {
-      const docs = await ImportBatch.find({ workspaceId: ctx.workspaceId })
+      const authorScope = authorScopeFilter(ctx.visibility);
+      const docs = await ImportBatch.find({
+        workspaceId: ctx.workspaceId,
+        ...(authorScope ? { createdBy: authorScope.authorId } : {}),
+      })
         .sort({ createdAt: -1 })
         .limit(50)
         .lean();
@@ -778,14 +1237,26 @@ export const dataRouter = router({
    * created them. Catalog documents only go if nothing else has come to use
    * them since, because a project invented by an import is an ordinary project
    * the moment somebody tracks against it by hand.
+   *
+   * Workspace settings a restore rewrote are NOT put back: everything written
+   * since has snapshotted that currency, so reverting it would relabel money
+   * that was really tracked in it. The batch records that it happened, and
+   * changing it back is an ordinary settings edit.
    */
   undo: workspaceProcedure
     .input(importUndoSchema)
     .mutation(async ({ ctx, input }): Promise<ImportUndoResult> => {
       const workspaceId = ctx.workspaceId;
+      // Scoped exactly as `history` lists them, and NOT_FOUND rather than
+      // FORBIDDEN for a batch outside that scope: a distinguishable refusal
+      // would answer "does this import id exist" for somebody who may not
+      // see the import, and undo is a delete — a batch a member cannot list
+      // is not one they may roll back by guessing its id.
+      const authorScope = authorScopeFilter(ctx.visibility);
       const batch = await ImportBatch.findOne({
         _id: assertObjectId(input.batchId),
         workspaceId,
+        ...(authorScope ? { createdBy: authorScope.authorId } : {}),
       });
       if (!batch) throw new TRPCError({ code: "NOT_FOUND" });
 
@@ -807,6 +1278,22 @@ export const dataRouter = router({
         importId: input.batchId,
       });
 
+      // Pins go unconditionally, like the entries and unlike the catalog:
+      // nothing else can have come to depend on one person's shortcut, and a
+      // restore that left fifty of them behind after an undo would be litter
+      // this batch can see and nobody else can explain.
+      const unpinned = await Favorite.deleteMany({
+        workspaceId,
+        _id: { $in: batch.favoriteIds ?? [] },
+      });
+      if ((unpinned.deletedCount ?? 0) > 0 && batch.createdBy !== "") {
+        publishToUser(
+          batch.createdBy,
+          { kind: "favorites.changed" },
+          input.originId,
+        );
+      }
+
       const result: ImportUndoResult = {
         batchId: input.batchId,
         entriesDeleted: removed.deletedCount ?? 0,
@@ -814,6 +1301,7 @@ export const dataRouter = router({
         projectsDeleted: 0,
         tasksDeleted: 0,
         tagsDeleted: 0,
+        favoritesDeleted: unpinned.deletedCount ?? 0,
       };
 
       if (input.includeCatalog) {
@@ -858,15 +1346,52 @@ export const dataRouter = router({
       return result;
     }),
 
-  /** The whole workspace as one JSON document — backup, and portability. */
+  /**
+   * What the download would be, without building it.
+   *
+   * Counted with `exportEntryFilter`, the same filter the builder reads with,
+   * so the panel warns about exactly the export that would be refused. The
+   * money answer comes from the same two predicates `redactExportMoney`
+   * applies, rather than from a second reading of the flags — a UI that
+   * decided for itself who sees rates would eventually disagree with the file
+   * it is describing.
+   */
+  exportInfo: workspaceProcedure
+    .input(workspaceExportSchema)
+    .query(async ({ ctx, input }): Promise<WorkspaceExportInfo> => {
+      const entries = await TimeEntry.countDocuments(
+        exportEntryFilter({
+          workspaceId: ctx.workspaceId,
+          authorScope: authorScopeFilter(ctx.visibility),
+          dateRange: exportDateRange(input.from, input.to),
+        }),
+      );
+      return {
+        entries,
+        maxEntries: MAX_EXPORT_ENTRIES,
+        moneyRedacted: !exportKeepsMoney(ctx.visibility),
+      };
+    }),
+
+  /**
+   * The whole workspace as one JSON document — backup, and portability.
+   *
+   * A mutation despite writing nothing, for the reason `analyze` is one: a
+   * query is a GET, which puts the request in a URL and the RESPONSE in every
+   * cache between here and the browser. This response is the most sensitive
+   * one this server produces — every entry, every rate, every invoice — and a
+   * shared machine or a caching proxy would hand it to the next person with
+   * no session at all. The panel calls it once per click; there is nothing
+   * here a cache was ever going to help with.
+   */
   exportJson: workspaceProcedure
     .input(workspaceExportSchema)
-    .query(async ({ ctx, input }): Promise<WorkspaceExport> =>
+    .mutation(async ({ ctx, input }): Promise<WorkspaceExport> =>
       buildWorkspaceExport({
         workspaceId: ctx.workspaceId,
         from: input.from,
         to: input.to,
-        authorScope: authorScopeFilter(ctx.visibility),
+        visibility: ctx.visibility,
       }),
     ),
 
@@ -874,10 +1399,13 @@ export const dataRouter = router({
    * Every entry as one CSV, in the column shape this app's own importer reads
    * back — so a spreadsheet round-trip is a supported way to bulk-edit
    * history, not an accident that happens to work.
+   *
+   * A mutation for the same cacheing reason as `exportJson` above — the two
+   * doors carry the same rows and must not disagree about where they land.
    */
   exportCsv: workspaceProcedure
     .input(workspaceExportSchema)
-    .query(
+    .mutation(
       async ({
         ctx,
         input,
@@ -886,7 +1414,7 @@ export const dataRouter = router({
           workspaceId: ctx.workspaceId,
           from: input.from,
           to: input.to,
-          authorScope: authorScopeFilter(ctx.visibility),
+          visibility: ctx.visibility,
         });
 
         const rows = data.entries.map((entry) => ({
@@ -899,6 +1427,10 @@ export const dataRouter = router({
           task: entry.taskName ?? "",
           tags: entry.tagNames.join(", "),
           billable: entry.billable ? "Yes" : "No",
+          // Blank for a rate-less entry and for a redacted one alike — the
+          // Rate COLUMN stays either way, because the header set is the shape
+          // this app's own importer reads back, and dropping a column would
+          // change the file's shape depending on who exported it.
           rate: entry.hourlyRate ?? "",
           currency: entry.currency,
         }));

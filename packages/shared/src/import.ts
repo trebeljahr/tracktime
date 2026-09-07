@@ -22,6 +22,7 @@
  * implementation of it (`services/import/`).
  */
 import { z } from "zod";
+import type { IdleBehavior, InvoiceStatus, WeekStart } from "./types.js";
 
 /** Hard ceilings, enforced server-side. A file past either is refused whole. */
 export const MAX_IMPORT_BYTES = 8_000_000;
@@ -197,6 +198,43 @@ export type ImportPreview = {
   issues: ImportIssue[];
   /** Capped at {@link IMPORT_PREVIEW_ROWS}. */
   sample: ImportRow[];
+  /** What the file carries besides entries, and what a commit would do with it. */
+  sections: ImportSections;
+};
+
+/**
+ * The non-entry half of a workspace export, described before anything is
+ * written.
+ *
+ * It exists so the preview can say what will NOT come back — invoices above
+ * all. An omission the user was never told about is indistinguishable from
+ * data loss, and this is the screen where telling them still costs nothing.
+ * A delimited file carries none of it and reports zeroes.
+ */
+export type ImportSections = {
+  /** The document's own version. 1 for anything written before these sections. */
+  version: 1 | 2;
+  /**
+   * True when the file states workspace policy a commit could restore. A v1
+   * file has no settings section and still says this much: its currency.
+   */
+  settings: boolean;
+  /** Pins in the file. Restored onto the CALLING user, and only on request. */
+  favorites: number;
+  /** Invoices in the file. EXPORT-ONLY — counted so the UI can say they stay out. */
+  invoices: number;
+  /**
+   * True when the file itself says its money was blanked on the way out (see
+   * {@link WorkspaceExport.moneyRedacted}).
+   *
+   * Read back from the file rather than guessed at from null rates, because
+   * the two are otherwise the same document: a workspace that never billed
+   * anything also exports nothing but nulls. Stated on the preview because
+   * this is the screen where an omission still costs nothing to mention — a
+   * restore approved as complete, from a file that is not, is discovered when
+   * the invoices are next needed.
+   */
+  moneyRedacted: boolean;
 };
 
 /** Counts written by one commit — the receipt, and what undo reverses. */
@@ -208,6 +246,9 @@ export type ImportResult = {
   projectsCreated: number;
   tasksCreated: number;
   tagsCreated: number;
+  favoritesCreated: number;
+  /** True when this import also rewrote the workspace's money/calendar policy. */
+  settingsRestored: boolean;
   totalSec: number;
   firstStart: string | null;
   lastStart: string | null;
@@ -220,18 +261,176 @@ export type ImportBatchSummary = ImportResult & {
   undoneAt: string | null;
 };
 
+/**
+ * The version a fresh export is written with.
+ *
+ * v2 added {@link WorkspaceExportSettings}, {@link WorkspaceExportFavorite}
+ * and {@link WorkspaceExportInvoice}. The bump is ADDITIVE: a v1 file still
+ * imports exactly as it always did, and a v2 file read by anything older
+ * drops the new sections silently, because the parser rebuilds the document
+ * from the keys it knows rather than validating the whole of it.
+ *
+ * What the number buys is the one thing absence cannot say on its own. In a
+ * v2 file a missing `favorites` means "this workspace had no pins"; in a v1
+ * file it means "this file predates pins". Without the version those two are
+ * the same file and a restore has to guess — reporting "0 pins restored" as
+ * if it were a fact, or inventing pins that were never there.
+ *
+ * A version HIGHER than this is never rejected. The format exists to outlive
+ * the database it was taken from, so a newer file must still yield its
+ * entries: read what is understood, say which sections were not.
+ */
+export const WORKSPACE_EXPORT_VERSION = 2;
+
 /** Full-workspace export — the format this importer reads back losslessly. */
 export type WorkspaceExport = {
-  /** Bumped only for a breaking change to the shape below. */
-  version: 1;
+  /** See {@link WORKSPACE_EXPORT_VERSION}: additive, and v1 still reads. */
+  version: 1 | 2;
   exportedAt: string;
   workspaceId: string;
   currency: string;
+  /**
+   * Set only when the exporting member could not see other members' money, so
+   * every rate in the file was blanked — entry rates included, because an
+   * entry's rate is the rate card copied onto the row. Absent means the rates
+   * are real — without it a restore cannot tell a redacted backup apart from
+   * a workspace that genuinely never billed anything.
+   *
+   * Read back on import and surfaced as {@link ImportSections.moneyRedacted}.
+   * A stamp nothing reads is a comment, not a guarantee.
+   */
+  moneyRedacted?: boolean;
+  /** Workspace money and calendar policy. Absent in v1 files. */
+  settings?: WorkspaceExportSettings;
   clients: WorkspaceExportClient[];
   projects: WorkspaceExportProject[];
   tasks: WorkspaceExportTask[];
   tags: WorkspaceExportTag[];
   entries: WorkspaceExportEntry[];
+  /**
+   * The EXPORTING member's own pinned quick starts, never the workspace's.
+   * Absent in v1 files. See {@link WorkspaceExportFavorite}.
+   */
+  favorites?: WorkspaceExportFavorite[];
+  /**
+   * Issued invoices — EXPORT-ONLY, see {@link WorkspaceExportInvoice}. Absent
+   * in v1 files.
+   */
+  invoices?: WorkspaceExportInvoice[];
+};
+
+/**
+ * The workspace half of settings — the only half a workspace file is entitled
+ * to describe.
+ *
+ * `currency` is deliberately NOT repeated here: it is already the document's
+ * top-level `currency`, and two copies of one fact can disagree with nothing
+ * anywhere to detect it.
+ *
+ * The per-user half (time and duration format, idle detection, the runaway
+ * guard) is deliberately absent, and must stay absent. `UserPreferences` is
+ * keyed by userId and not by workspaceId, so writing it back from a workspace
+ * file would reconfigure the importing person in EVERY workspace they belong
+ * to — including ones this file never described.
+ */
+export type WorkspaceExportSettings = {
+  /**
+   * The fallback rate entries carrying none of their own are priced at.
+   *
+   * MONEY: `null` when the exporting member could not see other members' money
+   * (the document then says so with `moneyRedacted`), and read on import as
+   * "this file does not say", which leaves the destination's own rate alone.
+   * Never `0` — a zero here is a real rate that prices everything at nothing.
+   */
+  defaultHourlyRate: number | null;
+  weekStartsOn: WeekStart;
+};
+
+/**
+ * One pinned quick start, referencing the catalog BY NAME like everything else
+ * in this format.
+ *
+ * `taskName` is only meaningful beside its `projectName`: task names are
+ * unique within a project, not within a workspace, so a task name alone
+ * addresses nothing.
+ */
+export type WorkspaceExportFavorite = {
+  description: string;
+  clientName: string | null;
+  projectName: string | null;
+  taskName: string | null;
+  billable: boolean;
+  /**
+   * Relative ordering only. `order` is dense per (workspace, user) and the
+   * file knows nothing about the pins already in the destination, so an import
+   * appends after them rather than writing this number through.
+   */
+  order: number;
+};
+
+/**
+ * An issued invoice, carried so the export is a complete record — and NOT
+ * restored by the importer. Four reasons, worst first:
+ *
+ *  1. The double-billing guard cannot survive the trip. `Invoice.entryIds` is
+ *     the source of truth for "these hours are already billed", and no entry
+ *     in this format has an identity to point back at (the only candidate key
+ *     is the DUPLICATE fingerprint, which two distinct entries may share). A
+ *     restored invoice would either bill nothing — leaving hours it already
+ *     charged for looking billable — or stamp the wrong entries.
+ *  2. `number` is unique per workspace in the database. Importing into a
+ *     workspace that already has invoices either collides or renumbers, and
+ *     renumbering rewrites the reference an accountant matches payments to.
+ *  3. `status` of "sent" or "paid" asserts something that happened in the real
+ *     world. Restoring one manufactures that assertion.
+ *  4. An import batch that created invoices could never be undone: undo
+ *     already refuses a batch whose entries are on an invoice.
+ *
+ * `entryIds` is therefore omitted entirely rather than exported as ids that
+ * address nothing. The document is still arithmetically complete, because an
+ * invoice is a snapshot: every figure on it was copied at creation and none of
+ * it is re-derived from the entries.
+ */
+export type WorkspaceExportInvoice = {
+  number: string;
+  /** Snapshot of the client's name at issue time, as stored. */
+  clientName: string;
+  status: InvoiceStatus;
+  issueDate: string;
+  dueDate: string;
+  from: string;
+  to: string;
+  groupBy: "project" | "task";
+  lineItems: WorkspaceExportInvoiceLine[];
+  /** MONEY — `null` only when the export was redacted. */
+  subtotal: number | null;
+  /**
+   * Percent (19 for 19% VAT), never an amount. `null` means no tax line at
+   * all, which is not the same as a tax of 0.
+   */
+  taxRate: number | null;
+  taxAmount: number | null;
+  total: number | null;
+  currency: string;
+  notes: string | null;
+  createdAt: string;
+};
+
+export type WorkspaceExportInvoiceLine = {
+  label: string;
+  projectName: string | null;
+  taskName: string | null;
+  /**
+   * The billed quantity. Not money, but the amount below cannot be checked
+   * without it, so the two always travel together.
+   */
+  seconds: number;
+  hours: number;
+  /** MONEY — the rate the line was billed at, never a project's rate today. */
+  hourlyRate: number | null;
+  currency: string;
+  /** MONEY — `hours × hourlyRate`, rounded once, at creation. */
+  amount: number | null;
 };
 
 export type WorkspaceExportClient = {
@@ -247,6 +446,17 @@ export type WorkspaceExportProject = {
   billableDefault: boolean;
   hourlyRate: number | null;
   estimatedHours: number | null;
+  /**
+   * MONEY — the project's budget, and the currency that budget is in. Both
+   * `null` when the export was redacted: a budget currency without its amount
+   * describes nothing, so the pair is blanked together rather than leaving a
+   * half-fact behind. (Unlike an entry's `currency`, which is the workspace's
+   * unit and stays.)
+   */
+  budgetAmount: number | null;
+  budgetCurrency: string | null;
+  /** Per-project override of what happens to idle time. Null follows the workspace. */
+  idleBehavior: IdleBehavior | null;
   archived: boolean;
 };
 
@@ -281,6 +491,13 @@ export type WorkspaceExportEntry = {
   start: string;
   end: string | null;
   durationSec: number;
+  /**
+   * MONEY — and NOT the author's own, whatever the row's authorship says. It
+   * is `resolveHourlyRate`'s snapshot of the project's rate (or the
+   * workspace default) taken when the entry was stopped, so handing it to a
+   * member who may not see the rate card republishes the card one row at a
+   * time. `null` when the export was redacted.
+   */
   hourlyRate: number | null;
   currency: string;
   timeZone: string | null;
@@ -316,6 +533,24 @@ export const importInputSchema = z.object({
   createMissing: z.boolean().optional(),
   /** Used when the file has no billable column. */
   defaultBillable: z.boolean().optional(),
+  /**
+   * Also write the workspace settings a v2 export carries.
+   *
+   * Opt-in and off by default, in both directions. Restoring a backup into an
+   * empty workspace wants it — without it the restored history is priced and
+   * dated by whatever defaults the new workspace happened to have. A backfill
+   * into a live workspace does not: it would change everybody's currency
+   * because somebody dropped a file in. The server additionally refuses this
+   * for a plain member, who is not allowed to change those fields by hand
+   * either — a file upload must not be a way around a role check.
+   */
+  restoreSettings: z.boolean().optional(),
+  /**
+   * Also restore the pins a v2 export carries, onto the CALLING user. Opt-in:
+   * pins are personal, and an import that silently adds fifty of them to
+   * somebody's tracker is a surprise, not a restore.
+   */
+  restoreFavorites: z.boolean().optional(),
 });
 
 export type ImportInput = z.infer<typeof importInputSchema>;
@@ -338,6 +573,30 @@ export const workspaceExportSchema = z.object({
   to: z.iso.date().optional(),
 });
 
+/**
+ * What one caller's export would be, answered before the file is built.
+ *
+ * Both facts here are things a download cannot say in time. The count is
+ * measured against the same bound the export refuses at, so "too much for one
+ * file" is a warning beside a date range the user can narrow rather than an
+ * error after the wait. And `moneyRedacted` is the export's own stamp
+ * predicted ahead of it: a member who may not see other members' money gets a
+ * file with every rate blanked, and being told that afterwards — or not at
+ * all — is how an incomplete backup passes for a complete one.
+ */
+export type WorkspaceExportInfo = {
+  /** Entries the caller would get, in the range asked about. */
+  entries: number;
+  /** Above this, the export refuses rather than truncating. */
+  maxEntries: number;
+  /**
+   * True when every rate in the download would be blanked — the project rate
+   * card, the workspace default, the invoice figures AND the per-entry rate
+   * snapshots, which are the same card written one row at a time.
+   */
+  moneyRedacted: boolean;
+};
+
 export type ImportUndoResult = {
   batchId: string;
   entriesDeleted: number;
@@ -345,4 +604,10 @@ export type ImportUndoResult = {
   projectsDeleted: number;
   tasksDeleted: number;
   tagsDeleted: number;
+  /**
+   * Pins the import created, unpinned again. Unconditional, unlike the
+   * catalog: a pin is one person's shortcut and nothing else can have come to
+   * depend on it, so leaving it behind would just be litter undo could see.
+   */
+  favoritesDeleted: number;
 };

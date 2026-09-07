@@ -41,6 +41,14 @@ const preview = (overrides: Partial<ImportPreview> = {}): ImportPreview => ({
   newTags: ["deep work"],
   issues: [],
   sample: [],
+  // A delimited file carries no sections; a workspace export overrides this.
+  sections: {
+    version: 1,
+    settings: false,
+    favorites: 0,
+    invoices: 0,
+    moneyRedacted: false,
+  },
   ...overrides,
 });
 
@@ -123,5 +131,53 @@ describe("singular counts", () => {
     renderPreview(preview({ readyRows: 1, totalRows: 1, duplicateRows: 0 }));
 
     expect(screen.getByText("entry to import")).toBeTruthy();
+  });
+});
+
+describe("what the file carries besides entries", () => {
+  it("warns that a redacted file's money is missing before it is written", () => {
+    // The stamp exists to be READ. A restore approved as complete, from a file
+    // whose rates were blanked on the way out, is discovered months later when
+    // the history reports the wrong money.
+    renderPreview(
+      preview({
+        sections: {
+          version: 2,
+          settings: true,
+          favorites: 0,
+          invoices: 0,
+          moneyRedacted: true,
+        },
+      }),
+    );
+
+    expect(screen.getByTestId("import-money-redacted").textContent).toMatch(
+      /money was blanked when it was exported/i,
+    );
+  });
+
+  it("says the invoices in the file are not coming back", () => {
+    renderPreview(
+      preview({
+        sections: {
+          version: 2,
+          settings: false,
+          favorites: 0,
+          invoices: 3,
+          moneyRedacted: false,
+        },
+      }),
+    );
+
+    expect(screen.getByTestId("import-invoices-dropped").textContent).toMatch(
+      /3 invoices in this file/i,
+    );
+  });
+
+  it("says nothing about either when the file states neither", () => {
+    renderPreview(preview());
+
+    expect(screen.queryByTestId("import-money-redacted")).toBeNull();
+    expect(screen.queryByTestId("import-invoices-dropped")).toBeNull();
   });
 });

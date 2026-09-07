@@ -6,6 +6,7 @@
  * the file instead of trusting a preview handed back to it.
  */
 import {
+  IDLE_BEHAVIORS,
   IMPORT_DAY_START_HOUR,
   MAX_IMPORT_ENTRY_SEC,
   dayKeyInZone,
@@ -18,7 +19,14 @@ import {
   type ImportIssueCode,
   type ImportRow,
   type ImportShape,
+  type IdleBehavior,
   type WorkspaceExport,
+  type WorkspaceExportClient,
+  type WorkspaceExportFavorite,
+  type WorkspaceExportProject,
+  type WorkspaceExportSettings,
+  type WorkspaceExportTag,
+  type WorkspaceExportTask,
 } from "@starter/shared";
 import { cell, readDelimitedFile } from "./delimited.js";
 import { dateCandidateValues, detectColumns } from "./columns.js";
@@ -469,15 +477,185 @@ export function workspaceJsonCatalog(text: string): WorkspaceExport | null {
   const doc = data as Partial<WorkspaceExport>;
   if (!Array.isArray(doc.entries)) return null;
 
+  const settings = readExportSettings(doc.settings);
+
   return {
-    version: 1,
+    // Whether the money in this file was blanked on the way out. Carried
+    // through so the preview can say so before a restore is approved — see
+    // `ImportSections.moneyRedacted`. Only `true` survives: an absent or
+    // malformed stamp means "this file makes no such claim", which is what an
+    // unredacted export looks like.
+    ...(doc.moneyRedacted === true ? { moneyRedacted: true } : {}),
+    // Read, never assumed. A literal `1` here would make every v2 file claim
+    // to be v1, and anything branching on the version — "were there no pins,
+    // or is this file older than pins?" — would then branch wrong with no
+    // error anywhere. Unknown future versions read as themselves is not an
+    // option in a union, so they read as v2: the sections below are what this
+    // reader understands, and a newer file still yields its entries.
+    version: doc.version === 2 ? 2 : 1,
     exportedAt: String(doc.exportedAt ?? new Date().toISOString()),
     workspaceId: String(doc.workspaceId ?? ""),
     currency: String(doc.currency ?? "EUR"),
-    clients: Array.isArray(doc.clients) ? doc.clients : [],
-    projects: Array.isArray(doc.projects) ? doc.projects : [],
-    tasks: Array.isArray(doc.tasks) ? doc.tasks : [],
-    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    ...(settings ? { settings } : {}),
+    clients: readExportClients(doc.clients),
+    projects: readExportProjects(doc.projects),
+    tasks: readExportTasks(doc.tasks),
+    tags: readExportTags(doc.tags),
     entries: doc.entries,
+    // Absent stays absent, and an empty array stays empty: the two mean
+    // different things once a file can state that a workspace had no pins.
+    ...(Array.isArray(doc.favorites)
+      ? { favorites: readExportFavorites(doc.favorites) }
+      : {}),
+    ...(Array.isArray(doc.invoices) ? { invoices: doc.invoices } : {}),
   };
+}
+
+/**
+ * The settings section, or nothing.
+ *
+ * Values are checked rather than coerced: a `defaultHourlyRate` that is not a
+ * number reads as "the file does not say" and leaves the destination's own
+ * rate alone, which is the only safe way to be wrong about a rate.
+ */
+function readExportSettings(
+  value: unknown,
+): WorkspaceExportSettings | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const settings = value as Partial<WorkspaceExportSettings>;
+  const rate = settings.defaultHourlyRate;
+  const week = settings.weekStartsOn;
+  return {
+    defaultHourlyRate:
+      typeof rate === "number" && Number.isFinite(rate) && rate >= 0
+        ? rate
+        : null,
+    // An unreadable week start falls back to Monday — the app's own default,
+    // and the only value that is a guess rather than a misreading.
+    weekStartsOn: week === 0 || week === 1 ? week : 1,
+  };
+}
+
+// The catalog half of a file, read as VALUES rather than trusted as types.
+//
+// `JSON.parse` returns `unknown`, and the cast to `Partial<WorkspaceExport>`
+// describes what a file SHOULD hold — it checks nothing. These rows are
+// written straight into mongoose by `createMissingCatalog`, so an unchecked
+// `budgetAmount: "lots"` reaches a Number path and kills the import with a
+// CastError halfway through, after the batch and part of the catalog already
+// exist. Two rules, both of which fail silently if dropped:
+//
+//  - A row without a usable NAME is dropped, not repaired. Everything in this
+//    format is addressed by name; a nameless project matches nothing and
+//    would be created as an empty-titled row nobody can find again.
+//  - `budgetCurrency` only survives beside a `budgetAmount`, which is the one
+//    invariant `budgetWrite` exists to hold: a currency with no amount renders
+//    a budget in JPY for a target that does not exist.
+const text = (value: unknown, max: number): string =>
+  typeof value === "string" ? value.trim().slice(0, max) : "";
+
+const nonNegative = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+
+const flag = (value: unknown, fallback: boolean): boolean =>
+  typeof value === "boolean" ? value : fallback;
+
+/** Rows in an array of unknown shape, each already narrowed to an object. */
+const objects = (value: unknown): Record<string, unknown>[] =>
+  Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> =>
+          typeof item === "object" && item !== null && !Array.isArray(item),
+      )
+    : [];
+
+function readExportClients(value: unknown): WorkspaceExportClient[] {
+  return objects(value).flatMap((row) => {
+    const name = text(row.name, 120);
+    if (name === "") return [];
+    return [
+      { name, color: text(row.color, 32), archived: flag(row.archived, false) },
+    ];
+  });
+}
+
+function readExportProjects(value: unknown): WorkspaceExportProject[] {
+  return objects(value).flatMap((row) => {
+    const name = text(row.name, 120);
+    if (name === "") return [];
+    const budgetAmount = nonNegative(row.budgetAmount);
+    const clientName = text(row.clientName, 120);
+    const idle = row.idleBehavior;
+    return [
+      {
+        name,
+        color: text(row.color, 32),
+        clientName: clientName === "" ? null : clientName,
+        billableDefault: flag(row.billableDefault, true),
+        hourlyRate: nonNegative(row.hourlyRate),
+        estimatedHours: nonNegative(row.estimatedHours),
+        budgetAmount,
+        budgetCurrency:
+          budgetAmount === null ? null : text(row.budgetCurrency, 8) || null,
+        idleBehavior: IDLE_BEHAVIORS.includes(idle as IdleBehavior)
+          ? (idle as IdleBehavior)
+          : null,
+        archived: flag(row.archived, false),
+      },
+    ];
+  });
+}
+
+function readExportTasks(value: unknown): WorkspaceExportTask[] {
+  return objects(value).flatMap((row) => {
+    const name = text(row.name, 120);
+    const projectName = text(row.projectName, 120);
+    // A task addresses nothing without its project: task names are unique
+    // within a project, not within a workspace.
+    if (name === "" || projectName === "") return [];
+    return [
+      {
+        name,
+        projectName,
+        done: flag(row.done, false),
+        archived: flag(row.archived, false),
+      },
+    ];
+  });
+}
+
+function readExportTags(value: unknown): WorkspaceExportTag[] {
+  return objects(value).flatMap((row) => {
+    const name = text(row.name, 60);
+    if (name === "") return [];
+    return [
+      { name, color: text(row.color, 32), archived: flag(row.archived, false) },
+    ];
+  });
+}
+
+/**
+ * Pins, same treatment. `planFavoriteRestore` sorts on `order` and trims
+ * `description`, so a file whose pin carries a number where a string belongs
+ * would throw inside the commit rather than be refused by it.
+ */
+function readExportFavorites(value: unknown): WorkspaceExportFavorite[] {
+  return objects(value).map((row, index) => {
+    const projectName = text(row.projectName, 120);
+    const clientName = text(row.clientName, 120);
+    const taskName = text(row.taskName, 120);
+    const order = row.order;
+    return {
+      description: text(row.description, 500),
+      clientName: clientName === "" ? null : clientName,
+      projectName: projectName === "" ? null : projectName,
+      taskName: taskName === "" ? null : taskName,
+      billable: flag(row.billable, false),
+      // File order is the fallback, which is what the restore honours anyway:
+      // the numbers are relative to a workspace this one knows nothing about.
+      order: typeof order === "number" && Number.isFinite(order) ? order : index,
+    };
+  });
 }

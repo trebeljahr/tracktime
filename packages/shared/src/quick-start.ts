@@ -24,6 +24,15 @@ export type QuickStart = {
   billable: boolean;
 };
 
+/**
+ * How many pins one owner may keep. Past this the row stops being a shortcut.
+ *
+ * Shared rather than router-local because the import plans a restore against
+ * the same ceiling the router enforces — two numbers would mean an import
+ * quietly writing past a limit that every other path respects.
+ */
+export const MAX_FAVORITES = 50;
+
 /** A pinned quick start. Ordered by the user; `order` is dense from 0. */
 export type Favorite = QuickStart & {
   id: string;

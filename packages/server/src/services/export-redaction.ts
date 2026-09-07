@@ -1,0 +1,132 @@
+// Money on the way out of the workspace.
+//
+// An export is a BULK door onto the same rows a report serves a page at a
+// time, and it is the only door that currently answers the money question at
+// all. `buildMatchConditions` in reports.ts decides WHICH entries a member
+// sees (`canViewOthersTime`) and deliberately leaves the amounts on them
+// alone — see the comment there: zeroing those is Stage 5. `settings.get`,
+// `projects.list` and `invoices.list` are open the same way.
+//
+// So this closes ONE door, and a reader must not take it for the whole
+// building: while those siblings are open, a member refused rates here can
+// still read them from an ordinary query. What this module buys today is that
+// the BULK path — one click, every row, a file that leaves the machine — is
+// not the easy one, and that the guarantee is written once so the two export
+// formats cannot come to disagree about it.
+//
+// Pure on purpose — no database, no request. The export builder assembles the
+// document, this decides what of it the caller may keep, and the CSV door is
+// built from the already-redacted document rather than redacting a second
+// time. Two implementations of one rule is how the two doors come to disagree.
+import type {
+  Visibility,
+  WorkspaceExport,
+  WorkspaceExportEntry,
+  WorkspaceExportInvoice,
+  WorkspaceExportProject,
+  WorkspaceExportSettings,
+} from "@starter/shared";
+
+/**
+ * Whether the caller keeps ANY of the money in the export.
+ *
+ * ONE predicate, deliberately, and with no author-scope escape hatch. The
+ * tempting second rule — "scoped to their own rows, so their own rates are
+ * their own money" — is false about this format: an entry's `hourlyRate` is
+ * not a figure the author chose, it is the PROJECT rate card copied onto the
+ * row by `resolveHourlyRate`, falling back to `settings.defaultHourlyRate`.
+ * A document that blanks `projects[].hourlyRate` and then hands the same
+ * number back on `entries[].hourlyRate` beside its `projectName` has
+ * published exactly what it just redacted, and one billable second booked
+ * against each project in `projects.list` enumerates the rest of the card.
+ *
+ * The other half — project budgets, the workspace default rate, every figure
+ * on an invoice — was never member-scoped and never can be: a project's rate
+ * states what everybody billing it earns, and an invoice line merges whoever's
+ * hours were billed into one amount.
+ */
+export function exportKeepsMoney(visibility: Visibility): boolean {
+  return visibility.canViewOthersMoney;
+}
+
+/**
+ * Strip every money-bearing field the caller may not see.
+ *
+ * Redacts to `null`, NEVER to `0`. A rate is a stored value, not a computed
+ * amount: `0` is a real number to both parsers (`parseAmount("0")`, and the
+ * `typeof === "number"` check on JSON entries), and on commit a row's own `0`
+ * WINS over the destination rate card because `??` falls through on null and
+ * not on zero — so a `0`-redacted export re-imports as history permanently
+ * priced at nothing, with no error anywhere along the way. `null` is what an
+ * absent rate already parses to, so a redacted file re-prices from the
+ * destination workspace's own rate card, exactly like any rate-less file.
+ *
+ * `currency` is deliberately NOT redacted, here or in the CSV. A currency
+ * code is the workspace's unit rather than anybody's earnings, reports hand
+ * it to every member already, and blanking it would break the round trip's
+ * Currency column for no confidentiality gain. `budgetCurrency` is the one
+ * exception, and only because it is half of a pair: with its amount gone it
+ * describes nothing, so the two go together.
+ *
+ * Every money field this format grows must be listed HERE, not merely typed
+ * `number | null`. `settings.defaultHourlyRate` and the invoice figures are
+ * the widest of them — one states what unpriced work is worth across the
+ * whole workspace, the other what customers were actually charged.
+ */
+export function redactExportMoney(
+  document: WorkspaceExport,
+  visibility: Visibility,
+): WorkspaceExport {
+  if (exportKeepsMoney(visibility)) return document;
+
+  const entries: WorkspaceExportEntry[] = document.entries.map((entry) => ({
+    ...entry,
+    hourlyRate: null,
+  }));
+
+  const projects: WorkspaceExportProject[] = document.projects.map(
+    (project) => ({
+      ...project,
+      hourlyRate: null,
+      budgetAmount: null,
+      budgetCurrency: null,
+    }),
+  );
+
+  const settings: WorkspaceExportSettings | undefined = document.settings
+    ? { ...document.settings, defaultHourlyRate: null }
+    : document.settings;
+
+  // Invoices keep their quantities — hours are a time question, and an
+  // invoice with no seconds on it could not be read as a record at all — and
+  // lose every amount, including `taxRate`, which is a percent of exactly the
+  // figures that just went.
+  const invoices: WorkspaceExportInvoice[] | undefined = document.invoices
+    ? document.invoices.map((invoice) => ({
+        ...invoice,
+        subtotal: null,
+        taxRate: null,
+        taxAmount: null,
+        total: null,
+        lineItems: invoice.lineItems.map((line) => ({
+          ...line,
+          hourlyRate: null,
+          amount: null,
+        })),
+      }))
+    : document.invoices;
+
+  // Stamped so a restore cannot read "every rate is null" as "this workspace
+  // never billed anything". A redacted export is a real backup of times and
+  // catalog and an incomplete one of money, and the file says which it is
+  // rather than leaving that to be discovered. The importer reads it back and
+  // the preview states it before anything is written — see `ImportSections`.
+  return {
+    ...document,
+    moneyRedacted: true,
+    settings,
+    projects,
+    entries,
+    invoices,
+  };
+}

@@ -20,6 +20,7 @@
 import { TRPCError } from "@trpc/server";
 import mongoose from "mongoose";
 import {
+  MAX_FAVORITES,
   createFavoriteSchema,
   idInputSchema,
   quickStartKey,
@@ -42,9 +43,6 @@ const favoriteScope = (ctx: {
 }): FavoriteScope => ({ workspaceId: ctx.workspaceId, userId: ctx.user.id });
 import { loadCatalogLookup } from "./catalog-lookup.js";
 import { resolveQuickStartLabels } from "./quick-start.js";
-
-/** How many pins one owner may keep. Past this the row stops being a shortcut. */
-const MAX_FAVORITES = 50;
 
 const notFound = (): TRPCError =>
   new TRPCError({ code: "NOT_FOUND", message: "Favorite not found" });

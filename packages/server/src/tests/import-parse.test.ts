@@ -5,7 +5,10 @@
 // one of them.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseImportFile } from "../services/import/parse.js";
+import {
+  parseImportFile,
+  workspaceJsonCatalog,
+} from "../services/import/parse.js";
 import { readDelimitedFile, sniffDelimiter } from "../services/import/delimited.js";
 
 const parse = (text: string, timeZone = "UTC") =>
@@ -277,4 +280,107 @@ test("a running timer in a JSON export is reported, not imported as zero-length"
   const result = parse(file);
   assert.equal(result.rows.length, 0);
   assert.equal(result.issues[0]?.code, "nonpositive-duration");
+});
+
+test("a JSON catalog is read as values, not trusted as types", () => {
+  // These rows are written straight into mongoose. A string where a Number
+  // path is expected does not fail the parse, it fails the WRITE — halfway
+  // through, after the batch and part of the catalog already exist.
+  const doc = workspaceJsonCatalog(
+    JSON.stringify({
+      version: 2,
+      entries: [],
+      clients: [{ name: "Internal", color: "#111111" }],
+      projects: [
+        {
+          name: "X",
+          budgetAmount: "lots",
+          budgetCurrency: "USD",
+          hourlyRate: "ninety",
+          estimatedHours: -4,
+          idleBehavior: "explode",
+        },
+        // Nameless: everything in this format is addressed by name, so there
+        // is nothing this row could ever be matched to.
+        { name: "   ", hourlyRate: 10 },
+      ],
+      tasks: [{ name: "Orphan", projectName: "" }],
+      tags: [{ name: "deep work", color: 42 }],
+    }),
+  );
+
+  assert.ok(doc);
+  const project = doc.projects[0];
+  assert.equal(doc.projects.length, 1);
+  assert.ok(project);
+  assert.strictEqual(project.budgetAmount, null);
+  // The invariant `budgetWrite` exists to hold: a currency with no amount
+  // renders a budget for a target that does not exist.
+  assert.strictEqual(project.budgetCurrency, null);
+  assert.strictEqual(project.hourlyRate, null);
+  assert.strictEqual(project.estimatedHours, null);
+  assert.strictEqual(project.idleBehavior, null);
+  // A task without its project addresses nothing.
+  assert.equal(doc.tasks.length, 0);
+  // An unreadable color is blank rather than the number 42, which the model's
+  // required String would take and render as a swatch nobody chose.
+  assert.strictEqual(doc.tags[0]?.color, "");
+});
+
+test("a valid catalog survives the read unchanged", () => {
+  // The guard above must not be a quiet coercion of good files.
+  const doc = workspaceJsonCatalog(
+    JSON.stringify({
+      version: 2,
+      entries: [],
+      projects: [
+        {
+          name: "tracktime",
+          color: "#222222",
+          clientName: "Internal",
+          billableDefault: false,
+          hourlyRate: 120,
+          estimatedHours: 40,
+          budgetAmount: 5000,
+          budgetCurrency: "EUR",
+          idleBehavior: "stop",
+          archived: true,
+        },
+      ],
+    }),
+  );
+
+  assert.deepEqual(doc?.projects[0], {
+    name: "tracktime",
+    color: "#222222",
+    clientName: "Internal",
+    billableDefault: false,
+    hourlyRate: 120,
+    estimatedHours: 40,
+    budgetAmount: 5000,
+    budgetCurrency: "EUR",
+    idleBehavior: "stop",
+    archived: true,
+  });
+});
+
+test("a redacted export says so on the way back in", () => {
+  // The stamp only means something if the importer reads it: a file whose
+  // rates are all null is otherwise indistinguishable from a workspace that
+  // never billed anything, and the preview cannot warn about either.
+  const redacted = workspaceJsonCatalog(
+    JSON.stringify({ version: 2, moneyRedacted: true, entries: [] }),
+  );
+  assert.equal(redacted?.moneyRedacted, true);
+
+  // Absent, and anything that is not literally `true`, is "this file makes no
+  // such claim" — which is what an ordinary export looks like.
+  const plain = workspaceJsonCatalog(
+    JSON.stringify({ version: 2, entries: [] }),
+  );
+  assert.equal(plain?.moneyRedacted, undefined);
+  const bogus = workspaceJsonCatalog(
+    JSON.stringify({ version: 2, moneyRedacted: "yes", entries: [] }),
+  );
+  assert.equal(bogus?.moneyRedacted, undefined);
 });
