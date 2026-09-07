@@ -411,13 +411,33 @@ export const useEntryMutations = (): EntryMutations => {
       handleError(
         error,
         context,
-        () =>
-          // No `id` on purpose: on replay the server stops whatever the
-          // already-replayed start opened.
-          enqueueOffline("entries.stop", {
-            end: (raw as OfflineStopInput).end,
-            originId: ORIGIN_ID,
-          }),
+        (tempId) => {
+          /*
+           * Name the entry whenever we can.
+           *
+           * The `id` is omitted only for a timer that was itself started
+           * offline: the id it carries right now is a temp one the server has
+           * never seen, and the replayed start is what mints the real one —
+           * `hooks/replay-offline-mutation.ts` threads that id in here at
+           * replay time, keyed on the `tempId` carried alongside.
+           *
+           * For every other timer the real id is already known, and using it
+           * matters now that the queue survives an OS kill: an id-less stop
+           * means "end whatever is running", which days later is a different
+           * entry, possibly on a different device.
+           */
+          const runningId = context?.previousCurrent?.id ?? null;
+          const targeted = runningId !== null && !isTempId(runningId);
+          return enqueueOffline(
+            "entries.stop",
+            {
+              ...(targeted ? { id: runningId } : {}),
+              end: (raw as OfflineStopInput).end,
+              originId: ORIGIN_ID,
+            },
+            tempId
+          );
+        },
         "Could not stop the timer"
       ),
     onSettled: async (_data, _error, _raw, context) => {

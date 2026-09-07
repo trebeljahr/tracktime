@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { toast } from "@/components/ui/sonner";
 import { trpc } from "@/lib/trpc";
 import {
   flushOfflineQueue,
@@ -17,7 +18,9 @@ import {
 import { useSyncStatus } from "@/hooks/use-sync";
 import {
   replayOfflineMutation,
+  StaleQueuedStopError,
   type OfflineReplayMutators,
+  type ReplayIdMap,
 } from "@/hooks/replay-offline-mutation";
 import { idleWatcher } from "@/lib/idle-watcher";
 import {
@@ -104,8 +107,11 @@ export const useOfflineQueue = (): OfflineQueueState => {
   const dispatch = React.useCallback(
     // `idleWatcher` is the tab's module singleton, so it is stable across
     // renders and deliberately not a dependency.
-    async (mutation: OfflineMutation): Promise<void> =>
-      replayOfflineMutation(mutators, idleWatcher, mutation),
+    async (
+      mutation: OfflineMutation,
+      context: { createdAt: string; resolved: ReplayIdMap }
+    ): Promise<void> =>
+      replayOfflineMutation(mutators, idleWatcher, mutation, context),
     [mutators]
   );
 
@@ -133,16 +139,32 @@ export const useOfflineQueue = (): OfflineQueueState => {
 
     let applied = 0;
     let rejected = 0;
+    let stale = 0;
     let blocked = false;
 
+    // One map for the whole flush: a start and the stop that ends it are
+    // queued as a pair, and the stop becomes targetable the instant the start
+    // ahead of it lands.
+    const resolved: ReplayIdMap = new Map();
+
     try {
-      const result = await flushOfflineQueue(async (mutation) => {
+      const result = await flushOfflineQueue(async (mutation, meta) => {
         try {
-          await dispatchRef.current(mutation);
+          await dispatchRef.current(mutation, {
+            createdAt: meta.createdAt,
+            resolved,
+          });
           applied += 1;
         } catch (error) {
           // Still unreachable — stop here so the rest keeps its order.
           if (isNetworkError(error)) throw error;
+          // A stop from days ago that names no entry. Dropping it is right —
+          // it would otherwise end whatever is running now — but it is the
+          // user's tracked time, so it is said out loud rather than binned.
+          if (error instanceof StaleQueuedStopError) {
+            stale += 1;
+            return;
+          }
           // The session is gone (expired, or signed out from another device).
           // Also a stop, not a drop: the request arrived, but "we do not know
           // who you are" is no verdict on the user's tracked time. Throwing
@@ -161,7 +183,35 @@ export const useOfflineQueue = (): OfflineQueueState => {
 
       setAuthBlocked(blocked);
 
-      if (applied > 0 || rejected > 0 || result.flushed > 0) {
+      /*
+       * Say something when a row is lost.
+       *
+       * Both counters mean "the user tracked this and it is not going to
+       * exist". Silently deleting somebody's time and then invalidating the
+       * caches so the day looks emptier than they remember is the worst
+       * possible way to handle it.
+       */
+      if (rejected > 0) {
+        toast.error(
+          rejected === 1
+            ? "One offline change could not be saved"
+            : `${rejected} offline changes could not be saved`,
+          { description: "The server refused them, so they were discarded." }
+        );
+      }
+      if (stale > 0) {
+        toast.error(
+          stale === 1
+            ? "An old entry could not be closed"
+            : `${stale} old entries could not be closed`,
+          {
+            description:
+              "A stop queued more than a day ago no longer names an entry we can safely end. Check the timer and stop it by hand.",
+          }
+        );
+      }
+
+      if (applied > 0 || rejected > 0 || stale > 0 || result.flushed > 0) {
         await utilsRef.current.entries.invalidate();
         await utilsRef.current.reports.invalidate();
       }

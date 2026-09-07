@@ -20,6 +20,81 @@ export type OfflineReplayMutators = {
 };
 
 /**
+ * How old an id-less `entries.stop` may be before it is refused.
+ *
+ * The queue used to live in `localStorage` on a device that is rarely off, so
+ * a row that could not be replayed evaporated. On a phone it survives an OS
+ * kill indefinitely, which turns "stop whatever is running" from a shortcut
+ * into a hazard: a stop queued on Monday, replayed on Friday, closes a timer
+ * started on Thursday at Monday's timestamp — on another device, belonging to
+ * a completely different piece of work.
+ *
+ * A day is long enough to cover a weekend of no signal for a stop that really
+ * does belong to the start ahead of it in the queue, and short enough that a
+ * row this old is better surfaced than guessed at.
+ */
+export const STALE_STOP_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A queued stop that names no entry and is too old to guess for. Thrown
+ * rather than returned so it travels the same path as a server refusal: the
+ * row is dropped, and the caller tells the user rather than silently ending
+ * whatever happens to be running now.
+ */
+export class StaleQueuedStopError extends Error {
+  readonly queuedAt: string;
+
+  constructor(queuedAt: string) {
+    super("Queued stop is too old to apply to an unidentified entry");
+    this.name = "StaleQueuedStopError";
+    this.queuedAt = queuedAt;
+  }
+}
+
+/**
+ * Temp id → the real id its `entries.start` was given on replay.
+ *
+ * Held for the length of one flush. A start and the stop that ends it are
+ * queued as a pair, and the pair only becomes targetable once the start has
+ * actually landed — which is a few milliseconds earlier, in the same loop.
+ */
+export type ReplayIdMap = Map<string, string>;
+
+/** The id of the entry a replayed start produced, read defensively. */
+const replayedId = (result: unknown): string | null => {
+  if (typeof result !== "object" || result === null) return null;
+  const { id } = result as { id?: unknown };
+  return typeof id === "string" && id.length > 0 ? id : null;
+};
+
+/**
+ * Give a queued stop the entry it means, when that is knowable.
+ *
+ * A stop is enqueued with its `id` whenever the timer it ends already had a
+ * real one. It is enqueued without one only for a timer that was itself
+ * started offline, whose id at that moment is a temp id the server has never
+ * seen — and the replayed start is what mints the real one, just above.
+ */
+const targetedStopInput = (
+  mutation: Extract<OfflineMutation, { op: "entries.stop" }>,
+  resolved: ReplayIdMap,
+  queuedAt: string
+): OfflinePayloadMap["entries.stop"] => {
+  if (mutation.input.id) return mutation.input;
+
+  const realId = mutation.tempId ? resolved.get(mutation.tempId) : undefined;
+  if (realId) return { ...mutation.input, id: realId };
+
+  if (Date.now() - Date.parse(queuedAt) > STALE_STOP_MS) {
+    throw new StaleQueuedStopError(queuedAt);
+  }
+
+  // Recent and unidentifiable: the server's own "stop whatever is running"
+  // is still the best available answer, and it is what shipped before.
+  return mutation.input;
+};
+
+/**
  * Replay one queued mutation against the server.
  *
  * Rejections are the caller's problem — `flush` classifies them into "still
@@ -29,7 +104,11 @@ export type OfflineReplayMutators = {
 export const replayOfflineMutation = async (
   mutators: OfflineReplayMutators,
   watcher: Pick<IdleWatcher, "noteServerId">,
-  mutation: OfflineMutation
+  mutation: OfflineMutation,
+  context: { createdAt: string; resolved: ReplayIdMap } = {
+    createdAt: new Date().toISOString(),
+    resolved: new Map(),
+  }
 ): Promise<void> => {
   switch (mutation.op) {
     case "entries.start": {
@@ -40,10 +119,14 @@ export const replayOfflineMutation = async (
       // never fires again for it.
       const entry = await mutators["entries.start"](mutation.input);
       noteReplayedServerId(watcher, mutation, entry);
+      const realId = replayedId(entry);
+      if (mutation.tempId && realId) context.resolved.set(mutation.tempId, realId);
       return;
     }
     case "entries.stop":
-      await mutators["entries.stop"](mutation.input);
+      await mutators["entries.stop"](
+        targetedStopInput(mutation, context.resolved, context.createdAt)
+      );
       return;
     case "entries.create":
       await mutators["entries.create"](mutation.input);
