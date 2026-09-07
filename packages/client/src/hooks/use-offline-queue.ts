@@ -206,5 +206,10 @@ export const useOfflineQueue = (): OfflineQueueState => {
     void flushRef.current();
   }, [syncStatus]);
 
-  return { pending, online, isFlushing, authBlocked, flush };
+  // `authBlocked` is only ever reassigned by a flush that reaches its own
+  // `setAuthBlocked`, so a queue drained by any other path (a successful
+  // mutation clearing the last row, a sign-out that resets it) would leave the
+  // flag stuck true and the tracker bar accusing a signed-in user. Nothing is
+  // blocked when nothing is queued, so derive it rather than tracking it.
+  return { pending, online, isFlushing, authBlocked: authBlocked && pending > 0, flush };
 };
