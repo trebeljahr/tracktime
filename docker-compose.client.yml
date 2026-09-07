@@ -1,5 +1,8 @@
 # Production compose for the CLIENT Coolify app (the bare <domain>).
 #
+# Traefik routes <domain>/api to the server app and everything else here, so
+# the two share one domain and one certificate without sharing a deploy.
+#
 # One service, named `client` — the name is load-bearing for the same reason
 # as in docker-compose.server.yml: `hatchkit sync` writes the
 # `docker_compose_domains` key `client` for the split topology, and a key that
@@ -23,5 +26,5 @@ services:
       # browser bundle when the image is BUILT, so runtime env on this
       # prebuilt container cannot affect them. They are passed as Docker
       # build args in .github/workflows/build-and-deploy.yml, which is also
-      # where the split's api.<domain> value is set.
+      # where the API origin is set.
     restart: unless-stopped

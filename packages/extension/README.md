@@ -12,7 +12,7 @@ one bundle that works against both a laptop and the deployed server.
 
 ```bash
 pnpm run build:extension        # development -> dist/,      http://localhost:5159
-pnpm run build:extension:prod   # production  -> dist-prod/, https://api.tracktime.trebeljahr.com
+pnpm run build:extension:prod   # production  -> dist-prod/, https://tracktime.trebeljahr.com
 ```
 
 Both targets are described in `manifest.config.ts`, in TypeScript that ships in

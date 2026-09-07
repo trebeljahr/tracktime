@@ -7,7 +7,7 @@ import {
 export type SyncStatus = "connecting" | "open" | "closed";
 
 export type SyncClientOptions = {
-  /** Full ws:// or wss:// URL, e.g. `wss://api.example.com/ws`. */
+  /** Full ws:// or wss:// URL, e.g. `wss://example.com/api/ws`. */
   url: string;
   onEvent: (event: SyncEvent, originId?: string) => void;
   onStatus?: (status: SyncStatus) => void;

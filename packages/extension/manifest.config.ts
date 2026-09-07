@@ -43,13 +43,15 @@ export const BUILD_TARGETS: Record<BuildMode, BuildTarget> = {
     outDir: "dist",
   },
   production: {
-    // The API lives on its own host. That is the shape hatchkit's Coolify
-    // split deploys (`api.<domain>` for the server, the bare domain for the
-    // client) and the one the sibling playtiao.com deployment already runs, so
-    // matching it keeps this client working with the deploy the CLI produces.
-    apiUrl: "https://api.tracktime.trebeljahr.com",
+    // The API is served on `/api` of the web app's own domain, not on a host
+    // of its own: `api.<domain>` is two labels under the zone, which the
+    // wildcard certificate does not cover, so it had no TLS at all.
+    //
+    // This is an ORIGIN — the extension appends `/api/...` itself, the same
+    // as the web client does — so it is the bare domain with no path.
+    apiUrl: "https://tracktime.trebeljahr.com",
     name: "tracktime",
-    hostPermissions: ["https://api.tracktime.trebeljahr.com/*"],
+    hostPermissions: ["https://tracktime.trebeljahr.com/*"],
     outDir: "dist-prod",
   },
 };

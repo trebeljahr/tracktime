@@ -350,19 +350,36 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   real value and "untouched" would be indistinguishable from "typed the
   production URL". A worktree runs on random ports — set both by hand there.
 
-### Deployment (two Coolify apps)
+### Deployment (two Coolify apps, one domain)
 
-Production is a **split**: `tracktime-client` on `https://tracktime.trebeljahr.com`
-and `tracktime-server` on `https://api.tracktime.trebeljahr.com`, from
-`docker-compose.client.yml` and `docker-compose.server.yml`. The service name
-inside each file (`client` / `server`) is load-bearing — Coolify keys
-`docker_compose_domains` by it, and a mismatch yields 503 with a 200 from the
-API. `docker-compose.yml` is the legacy single-app layout, kept for reference.
+Production is two apps behind **one** domain: `tracktime-client` on
+`https://tracktime.trebeljahr.com` and `tracktime-server` on
+`https://tracktime.trebeljahr.com/api`, from `docker-compose.client.yml` and
+`docker-compose.server.yml`. The service name inside each file (`client` /
+`server`) is load-bearing — Coolify keys `docker_compose_domains` by it, and a
+mismatch yields 503 with a 200 from the API. `docker-compose.yml` is the
+legacy single-app layout, kept for reference.
 
-Four places must agree on the API host: `.env.production`
-(`BETTER_AUTH_URL`), the client image's `NEXT_PUBLIC_API_URL` build arg in
+The API is on a **path**, not on `api.<domain>`, because Cloudflare's
+Universal SSL for this zone covers `trebeljahr.com` and `*.trebeljahr.com` —
+one label. `api.tracktime.trebeljahr.com` is two, so it got no certificate and
+failed the TLS handshake before any HTTP. Two apps rather than one so a client
+deploy cannot restart the server and drop every connected device's socket.
+
+Everything the server owns lives under `/api`, the socket included:
+`resolveSyncUrl` derives `wss://<domain>/api/ws`, so one proxy rule covers the
+lot. `NEXT_PUBLIC_API_URL` is an **origin** with no path — the clients append
+`/api/trpc`, `/api/auth` and `/api/ws` themselves.
+
+Four places must agree on it: `.env.production` (`BETTER_AUTH_URL`), the
+client image's `NEXT_PUBLIC_API_URL` build arg in
 `.github/workflows/build-and-deploy.yml`, `packages/extension/manifest.config.ts`,
-and Raycast's preference defaults. See `docs/deploy.md`.
+and `packages/raycast/src/lib/preferences.ts`. See `docs/deploy.md`.
+
+The client image serves the static export: `output: "export"` leaves no
+`.next/standalone`, so the image is `out/` plus `packages/client/serve.mjs`.
+The E2E suite runs that same file, so the deployed and tested servers cannot
+drift apart.
 
 ### Browser extension build modes
 

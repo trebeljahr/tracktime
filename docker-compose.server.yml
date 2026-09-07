@@ -1,4 +1,8 @@
-# Production compose for the SERVER Coolify app (api.<domain>).
+# Production compose for the SERVER Coolify app, routed at <domain>/api.
+#
+# A path of the site's own domain rather than api.<domain>: the zone's
+# wildcard certificate covers one label, so api.tracktime.trebeljahr.com had
+# no TLS at all. See docs/deploy.md.
 #
 # One service, named `server` — the name is load-bearing. Coolify routes a
 # dockercompose app through `docker_compose_domains`, which is keyed by
@@ -22,10 +26,13 @@ services:
       MONGODB_URI: ${MONGODB_URI}
       REDIS_URL: ${REDIS_URL:-}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
-      # The API's own origin — https://api.<domain> under the split.
+      # The API's own origin. Same value as FRONTEND_URL: better-auth mounts
+      # itself at /api/auth of the site's domain, which is where this server
+      # is routed.
       BETTER_AUTH_URL: ${BETTER_AUTH_URL}
-      # The web app's origin. Also the CORS allow-list entry that lets the
-      # client, on a different host now, call this API with credentials.
+      # The web app's origin, and the CORS allow-list entry. The browser
+      # client is same-origin now and needs no preflight; the extension,
+      # which is not, still does.
       FRONTEND_URL: ${FRONTEND_URL}
       # Extra origins allowed to sign in — the browser extension's
       # chrome-extension://<id> lives here. Without it better-auth answers

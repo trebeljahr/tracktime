@@ -121,7 +121,7 @@
       "description": "Origin of the tracktime server, e.g. https://api.tracktime.example. Empty means the deployed server, or the local dev server under `ray develop`.",
       "type": "textfield",
       "required": false,
-      "placeholder": "https://api.tracktime.trebeljahr.com"
+      "placeholder": "https://tracktime.trebeljahr.com"
     },
     {
       "name": "webUrl",

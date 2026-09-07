@@ -20,7 +20,10 @@ const DEFAULT_ORIGINS = {
     webUrl: "http://localhost:3392",
   },
   production: {
-    apiUrl: "https://api.tracktime.trebeljahr.com",
+    // Same origin as the web app: the API is served on `/api` of it, and
+    // `apiUrl` is an origin the callers append `/api/...` to. `api.<domain>`
+    // is two labels under the zone, which the wildcard cert does not cover.
+    apiUrl: "https://tracktime.trebeljahr.com",
     webUrl: "https://tracktime.trebeljahr.com",
   },
 } as const;

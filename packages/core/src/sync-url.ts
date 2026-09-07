@@ -6,9 +6,18 @@
  */
 
 /**
- * `wss://api.example.com/ws` from `https://api.example.com`. With no
+ * `wss://example.com/api/ws` from `https://example.com`. With no
  * `NEXT_PUBLIC_API_URL` the socket is same-origin, which is what the local
  * dev proxy and single-origin deployments want.
+ *
+ * The socket sits UNDER `/api` deliberately. Production serves the API on a
+ * path of the web app's own domain (`https://<domain>/api`), so everything the
+ * server owns has to live under one prefix — a socket at `/ws` would need its
+ * own routing rule at the proxy, and a rule nobody remembers to add is a
+ * client that reconnects forever while every HTTP request succeeds.
+ *
+ * The server accepts `/ws` as well (`ws/handler.ts`), so a client built before
+ * this still connects wherever `/ws` is still routed.
  */
 export const resolveSyncUrl = (apiUrl: string, origin: string): string => {
   const base = apiUrl.trim() === "" ? origin : apiUrl.trim();
@@ -19,7 +28,7 @@ export const resolveSyncUrl = (apiUrl: string, origin: string): string => {
     return "";
   }
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/ws`;
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/api/ws`;
   url.search = "";
   url.hash = "";
   return url.toString();
