@@ -159,6 +159,50 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
   faked Capacitor plugins (`mobile/bridge-handlers.test.ts`, which fails 7/7
   against the pre-stage-3 bridge) rather than by a device.
 
+**Stage 4 corrections**, likewise carried forward:
+
+- `getOfflineQueue()`'s memoisation needs no ordering point after all. The plan
+  names `NativeSessionGate`'s boot as the moment the native branch has to be
+  decided by; the branch is `isNative()`, a synchronous read of
+  `window.Capacitor`, which the native bridge injects before any application
+  code runs. So it is decidable on the very first call and there is no window
+  to get wrong. The Preferences adapter is therefore built synchronously and
+  loads the plugin lazily inside its own methods.
+- The plan's `resolveStorage()` swap is not enough on its own: the one-time
+  hand-over of whatever a previous build left in `localStorage` is what makes
+  the change of address safe. It lives in the adapter, behind a
+  `tracktime.preferences-migrated` marker in Preferences, and removes the
+  `localStorage` copy so a rollback cannot replay rows this build has flushed.
+- **Mutations had to move to `networkMode: "always"`.** Nothing in the plan
+  mentions this and it is not optional. React Query *pauses* a mutation while
+  `onlineManager` reports offline: `mutationFn` never runs and `onError` never
+  fires — and `onError` is exactly where `use-entry-mutations.ts` queues. The
+  moment `@capacitor/network` gives `onlineManager` the truth about a dead
+  radio, start/stop in airplane mode would have silently done nothing at all.
+  The offline queue *is* this app's pause mechanism, and it needs the failure
+  to happen. Queries keep the default, where pausing is right.
+- The resume order is the critics': reconnect → tick → flush, and refetch
+  `entries.current` *only* when nothing was queued. It is a pure function
+  (`runResume`) so the ordering is tested without a bridge, a socket or a tree.
+- `createSyncClient` gained a `reconnect()` rather than the caller doing
+  `close()` then `connect()`. Doing it by hand has a trap: the old socket's
+  close event arrives *after* the new socket exists, and every handler was
+  unconditional — so it nulled the reference to the live socket, reported
+  "closed", and scheduled a reconnect that opened a third. Handlers now check
+  they still speak for the current socket.
+- The queued `entries.stop` is targeted wherever possible instead of only being
+  age-limited. A stop for a timer that already had a real id is now queued
+  *with* it; a stop for a timer started offline carries the temp id and the
+  replay threads in the real id its start was given moments earlier in the same
+  flush. Only what is left over — no id, no resolvable temp id, queued more
+  than 24h ago — is refused, and said out loud rather than binned.
+- `mobile/durable.ts` deleted, as planned. It was the only code that could have
+  mirrored the queue across, which is why the migration above had to exist
+  first.
+- **No `NativeSessionGate` is involved anywhere**, since stage 1 did not build
+  one. The boot seed runs from `MobileBridgeLoader`, which the root layout
+  renders first.
+
 ## Summary
 
 Ship the phone app as the existing Next.js client inside a Capacitor shell — one composition, not a second UI. Everything mobile is either scoped to `body.cap` (a class `packages/client/src/mobile/bridge.ts:30` already sets and nothing styles), behind the synchronous `isNative()` check in that same file, or a correctness fix the web build also wants. No new screens for reports, timesheet, invoices or catalog; they stay honestly cramped one level down. Cookie auth is abandoned for native (a `capacitor://localhost` document is cross-site to the API and loses to WKWebView ITP regardless of SameSite) in favour of the bearer path `packages/core/src/session-auth.ts` was written for — which needs zero server code, only `TRUSTED_ORIGINS`. Stage 1 ends with a signed-in app on the iOS Simulator starting and stopping a real timer against `pnpm run dev`, verified against a real `pnpm build:mobile` bundle rather than live reload, because under live reload the document origin is `http://localhost:7130`, which is same-site with a localhost API and would make cookie auth misleadingly appear to work. Later stages add native chrome, a three-tab bar, resume/offline durability, calendar touch de-hostility, and two zero-custom-native wins (haptics, a runaway-timer local notification). No Swift, no Kotlin, no widget extension, no second HTTP client — the judges called all of that the fatal path.

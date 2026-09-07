@@ -223,7 +223,65 @@ directly — not via `.env.development`, whose value dotenvx skips because the d
 script already set the key in the server child's environment.
 
 Bridge runs in `packages/client/src/mobile/bridge.ts` — lifecycle, splash,
-status bar, orientation. Durable persistence mirror in `durable.ts`.
+status bar, orientation.
+
+**What survives an OS kill, and where.** Three separate stores, on purpose:
+
+- The **session token** is in the Keychain (`lib/native-session.ts`). It is a
+  credential; Preferences is plain `UserDefaults` and readable from an
+  unencrypted backup.
+- The **offline queue** and the **running-timer mirror** are in Capacitor
+  Preferences (`mobile/preferences-storage.ts`, `lib/running-mirror.ts`). They
+  are data, and what matters is that iOS cannot evict them: WKWebView
+  classifies `localStorage` as *non-critical web data* and reclaims it after
+  low disk or roughly a week of not opening the app. `webStorage()` swallows
+  every throw, so that loss would be silent — and what is in the queue is time
+  the user tracked that no server has ever seen. The adapter hands over
+  anything a pre-Preferences build left in `localStorage`, once, behind a
+  marker; without that, changing the address *is* the data loss.
+- Everything else (a remembered filter, the theme) stays in `localStorage`,
+  where eviction costs nothing.
+
+**Network truth comes from the radio, not the browser.** `navigator.onLine`
+reports `true` on a dead radio in WKWebView and never fires for airplane mode,
+so `mobile/network.ts` reads `@capacitor/network` on native and feeds one
+verdict to `isOnline()`, to `useOfflineQueue`'s subscription and to React
+Query's `onlineManager`. Two consequences worth knowing before touching any of
+it:
+
+- `isNetworkError()` short-circuits on `isOnline()`, so a wrong verdict decides
+  whether a refused mutation is queued for replay or rolled back.
+- **Mutations run in `networkMode: "always"`** (`lib/query-client.ts`). React
+  Query otherwise *pauses* a mutation while it believes the device is offline:
+  `mutationFn` never runs, `onError` never fires, and `onError` is where
+  `use-entry-mutations.ts` queues offline work. With the radio's real answer
+  wired in, the default would make start/stop in airplane mode do nothing at
+  all. The offline queue is this app's pause mechanism and it needs the failure
+  to happen. Queries keep the default, where pausing is exactly right.
+
+**The running timer is mirrored, and the mirror is only overwritten by an
+answer.** `lib/running-mirror.ts` writes every resolution of
+`trpc.entries.current` to Preferences and `MobileBridgeLoader` seeds the timer
+store from it at boot. `useRunningEntry` then waits for `query.isSuccess`
+before touching the store: on a cold offline launch the query never answers, so
+an ungated effect reads `data === undefined` as "nothing is running" and wipes
+the seed on the first render — which is exactly the launch the mirror exists
+for. A pending or failed read is not a statement about the timer.
+
+**Resume order is load-bearing** (`hooks/use-native-lifecycle.ts`): reconnect,
+tick, flush the queue — and refetch `entries.current` *only* when nothing was
+queued. Refetching first asks a server that has never heard of the start the
+user made with no signal, gets `null`, and blanks the running clock until the
+flush lands. The socket is reconnected because the server pings every 10s and
+drops on the first missed pong, so it is dead server-side within ~20s of every
+backgrounding, while a frozen socket delivers no close event and the client
+still says "open".
+
+**The offline queue is mounted in `AppShell`**, not in `TrackerBar`. Everything
+that drains it lives inside `useOfflineQueue`, so while it was mounted on
+`/track` only, reconnecting on any other screen drained nothing — a plain web
+bug, and a guaranteed one on a phone, which resumes on whatever screen it was
+left on.
 
 **Verifying on the Simulator without Xcode's GUI.** Build, install, launch and
 screenshot from a shell:
