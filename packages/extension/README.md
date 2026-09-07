@@ -155,13 +155,18 @@ The four PNGs in `public/icons/` are generated, not hand-drawn — regenerate
 them from the repo root after any change to the brand mark:
 
 ```bash
-pnpm icons:extension
+pnpm icons:brand
 ```
 
 The source is `packages/client/public/brand/mark-tile.svg`. Chrome takes PNG
 only in `icons` and `action.default_icon`, and a service worker cannot
 rasterize an SVG itself, so the bitmaps have to be committed — the script is
 what keeps them derived from the SVG rather than drifting.
+
+The same command regenerates every other bitmap the repo ships from that one
+file: the Electron and Tauri icon source, Raycast's command and menu bar
+icons, and the Capacitor icon and splash. They are one mark on purpose, so run
+it for all of them, not just these four.
 
 The tile variant is deliberate. The bare timer arc draws its track ring in a
 page-background neutral that vanishes against the browser toolbar, whereas the

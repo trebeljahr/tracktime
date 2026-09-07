@@ -17,6 +17,7 @@ import {
   type DetailedEntry,
 } from "@starter/core";
 import { getTracktime, type ProjectWithStats } from "./lib/api.js";
+import { BRAND_MARK } from "./lib/brand.js";
 import {
   formatClock,
   formatDurationShort,
@@ -49,7 +50,7 @@ export default function MenuBar(): React.JSX.Element | null {
 
   if (signedOut) {
     return (
-      <MenuBarExtra icon={Icon.Stopwatch} tooltip="tracktime — not signed in">
+      <MenuBarExtra icon={BRAND_MARK} tooltip="tracktime — not signed in">
         <MenuBarExtra.Item
           title="Sign in to tracktime"
           icon={Icon.Key}
@@ -131,7 +132,7 @@ export default function MenuBar(): React.JSX.Element | null {
 
   return (
     <MenuBarExtra
-      icon={running ? Icon.Stopwatch : Icon.Clock}
+      icon={BRAND_MARK}
       title={title}
       isLoading={isLoading}
       tooltip={

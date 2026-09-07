@@ -135,7 +135,9 @@ pnpm electron:build                   # electron-builder → dmg/zip/exe/AppImag
 pnpm icons:desktop                    # regenerate icns/ico/png set (electron-icon-builder; cross-platform)
 ```
 
-Replace `build/icon.png` with a 512×512 logo before shipping.
+`build/icon.png` is generated — run `pnpm icons:brand` to re-derive it (and
+every other shipped bitmap) from `packages/client/public/brand/mark-tile.svg`,
+then `pnpm icons:desktop` to fan it out to icns/ico. Do not hand-edit it.
 Bundle config lives in root `package.json` `"build"` (electron-builder).
 Electron IPC bridge: `electron/preload.ts` exposes `window.electronAPI`.
 

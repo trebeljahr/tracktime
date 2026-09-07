@@ -5,9 +5,9 @@ import { join } from "node:path";
 
 const docsUrl = process.env.DOCS_SITE_URL ?? "https://docs.example.com";
 const usesPlaceholderUrl = docsUrl === "https://docs.example.com";
-const docsTitle = "Node Realtime Starter Docs";
+const docsTitle = "tracktime docs";
 const docsDescription =
-  "Developer documentation for a production-ready Node realtime starter with Express, Next.js, WebSockets, auth, payments, and deployment workflows.";
+  "Documentation for tracktime — the time tracker, its web app, browser extension, Raycast extension, desktop and mobile builds, and the API they share.";
 
 function generatedRobotsPlugin(): Plugin<void> {
   return {
@@ -24,7 +24,7 @@ function generatedRobotsPlugin(): Plugin<void> {
 
 const config: Config = {
   title: docsTitle,
-  tagline: "A stampable starter for multiplayer web games and SaaS apps",
+  tagline: "Time tracking, and reporting that answers",
   url: docsUrl,
   baseUrl: "/",
   noIndex: usesPlaceholderUrl,

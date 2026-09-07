@@ -7,7 +7,6 @@ import {
   BarChart3,
   CalendarDays,
   ChevronRight,
-  Clock,
   FolderKanban,
   Grid3x3,
   ListChecks,
@@ -27,6 +26,7 @@ import { formatDuration } from "@starter/shared";
 import type { SyncStatus } from "@starter/core";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -311,7 +311,7 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
             className="flex h-14 items-center gap-2 px-4 font-semibold"
             data-testid="brand"
           >
-            <Clock className="size-5" />
+            <BrandMark />
             <span>tracktime</span>
           </Link>
           <Separator />
@@ -334,7 +334,7 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
             >
               <div className="flex h-14 items-center justify-between px-4">
                 <span className="flex items-center gap-2 font-semibold">
-                  <Clock className="size-5" />
+                  <BrandMark />
                   tracktime
                 </span>
                 <Button

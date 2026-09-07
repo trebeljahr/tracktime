@@ -1,9 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Node Realtime Starter">
-  <rect width="512" height="512" rx="112" fill="#08111f" />
-  <path d="M144 164h224v184H144z" fill="#0f766e" />
-  <path d="M176 196h160v120H176z" fill="#ecfeff" />
-  <path d="M204 236h108M204 276h70" stroke="#08111f" stroke-width="22" stroke-linecap="round" />
-  <circle cx="144" cy="164" r="44" fill="#22d3ee" />
-  <circle cx="368" cy="348" r="44" fill="#a78bfa" />
-  <path d="M144 164h224M144 164v184M368 348V164M144 348h224" stroke="#f8fafc" stroke-width="18" stroke-linecap="round" opacity=".72" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="tracktime">
+  <!-- The brand mark, kept byte-for-byte in step with
+       packages/client/public/brand/mark-tile.svg. The tile variant rather than
+       the bare arc: a favicon sits on browser chrome, where the arc's neutral
+       track ring vanishes. -->
+  <rect width="64" height="64" rx="14" fill="#4F46E5"/>
+  <circle cx="32" cy="32" r="19" fill="none" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="7"/>
+  <path d="M32 13A19 19 0 1 1 15.55 41.5" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="4.5" fill="#FFFFFF"/>
 </svg>
