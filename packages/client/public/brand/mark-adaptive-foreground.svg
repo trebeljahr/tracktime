@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="tracktime">
+  <!-- The mark alone, no ground, scaled into an Android adaptive icon's safe
+       area (the launcher may crop to a circle inscribed in 72/108 of the
+       canvas). Pairs with a flat ground as the background layer; the two are
+       separate because the launcher parallaxes them against each other, so the
+       mark must not be baked into the ground. Same 0.76 scale as
+       mark-maskable.svg, which is the single-layer version of the same idea. -->
+  <g transform="translate(32 32) scale(0.76) translate(-32 -32)">
+    <circle cx="32" cy="32" r="19" fill="none" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="7"/>
+    <path d="M32 13A19 19 0 1 1 15.55 41.5" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round"/>
+    <circle cx="32" cy="32" r="4.5" fill="#FFFFFF"/>
+  </g>
+</svg>
