@@ -33,6 +33,76 @@ function getOptional(key: string, defaultValue = ""): string {
   return process.env[key] ?? defaultValue;
 }
 
+export interface AppUrlSource {
+  appUrl: string;
+  frontendUrl: string;
+  betterAuthUrl: string;
+}
+
+export interface ResolvedAppUrls {
+  frontendUrl: string;
+  betterAuthUrl: string;
+}
+
+/**
+ * One URL instead of two, for the single-domain deployment.
+ *
+ * The hosted deploy is a split — the web app on one host, the API on another —
+ * so there FRONTEND_URL and BETTER_AUTH_URL are genuinely two different values.
+ * Both stay authoritative whenever they are set, which is what keeps that
+ * deploy working untouched. A self-host instead runs everything behind one
+ * reverse proxy on ONE domain (/api and /ws proxied to this server), where the
+ * two are necessarily the same string and asking for it twice is only a way to
+ * get it wrong once. APP_URL supplies both.
+ *
+ * BETTER_AUTH_URL is the API's own base ORIGIN, not the auth mount point:
+ * auth/auth.ts passes it straight to betterAuth({ baseURL }), and better-auth
+ * appends its own basePath (/api/auth) to it. Under a single domain the API
+ * answers at APP_URL/api/*, so APP_URL is exactly right — and must NOT carry
+ * an /api/auth suffix, which would produce /api/auth/api/auth/... routes.
+ *
+ * The trailing slash is stripped from the derived values because both are
+ * concatenated with a leading-slash path downstream, and FRONTEND_URL is
+ * additionally compared against a browser Origin header, which never carries
+ * one. Explicitly-set values are passed through verbatim — normalising them
+ * would change behaviour for a deploy that is already working.
+ *
+ * Throws in production when a value has neither source, the same contract
+ * getRequired() gives the other required variables. The message names both
+ * ways of supplying it, or a self-hoster who set neither goes looking for the
+ * wrong knob.
+ */
+export function resolveAppUrls(
+  source: AppUrlSource,
+  nodeEnv: string,
+): ResolvedAppUrls {
+  const appUrl = source.appUrl.trim().replace(/\/+$/, "");
+  const resolved = {
+    betterAuthUrl: source.betterAuthUrl || appUrl,
+    frontendUrl: source.frontendUrl || appUrl,
+  };
+  const missing = !resolved.betterAuthUrl
+    ? "BETTER_AUTH_URL"
+    : !resolved.frontendUrl
+      ? "FRONTEND_URL"
+      : "";
+  if (missing && nodeEnv === "production") {
+    throw new Error(
+      `Missing required environment variable: ${missing} (or set APP_URL)`,
+    );
+  }
+  return resolved;
+}
+
+const appUrls = resolveAppUrls(
+  {
+    appUrl: getOptional("APP_URL"),
+    frontendUrl: getOptional("FRONTEND_URL"),
+    betterAuthUrl: getOptional("BETTER_AUTH_URL"),
+  },
+  getOptional("NODE_ENV", "development"),
+);
+
 export const env = {
   NODE_ENV: getOptional("NODE_ENV", "development"),
   PORT: parseInt(getOptional("PORT", "5000"), 10),
@@ -41,8 +111,12 @@ export const env = {
 
   // Auth
   BETTER_AUTH_SECRET: getRequired("BETTER_AUTH_SECRET"),
-  BETTER_AUTH_URL: getRequired("BETTER_AUTH_URL"),
-  FRONTEND_URL: getRequired("FRONTEND_URL"),
+  // The single-domain shortcut: set APP_URL alone and both of the next two
+  // derive from it. See resolveAppUrls() above for why that is safe and for
+  // what APP_URL must (and must not) contain.
+  APP_URL: getOptional("APP_URL").trim().replace(/\/+$/, ""),
+  BETTER_AUTH_URL: appUrls.betterAuthUrl,
+  FRONTEND_URL: appUrls.frontendUrl,
   // Additional CORS / auth origins, comma-separated. Use this for
   // native clients:
   //   capacitor://localhost,https://localhost   (Capacitor iOS+Android)
@@ -64,6 +138,26 @@ export const env = {
   STRIPE_SECRET_KEY: getOptional("STRIPE_SECRET_KEY"),
   STRIPE_PUBLISHABLE_KEY: getOptional("STRIPE_PUBLISHABLE_KEY"),
   STRIPE_WEBHOOK_SECRET: getOptional("STRIPE_WEBHOOK_SECRET"),
+
+  // Email — plain SMTP. The default transport, and the only one a self-host
+  // needs: any mailbox provider or relay works. SMTP_HOST alone selects it
+  // (see selectEmailTransport in services/email.ts); the rest are refinements.
+  // SMTP_USER/SMTP_PASSWORD are optional because an unauthenticated relay on
+  // a private network is a legitimate setup — omit both and no AUTH is
+  // attempted, rather than offering empty credentials and being rejected.
+  SMTP_HOST: getOptional("SMTP_HOST"),
+  SMTP_PORT: getOptional("SMTP_PORT", "587"),
+  SMTP_USER: getOptional("SMTP_USER"),
+  SMTP_PASSWORD: getOptional("SMTP_PASSWORD"),
+  // Implicit TLS from the first byte (port 465) rather than STARTTLS on a
+  // plaintext connection (ports 587/25). Left unset it follows the port, which
+  // is right for every provider I know of; set it explicitly for the odd relay
+  // that puts implicit TLS somewhere else.
+  SMTP_SECURE: getOptional("SMTP_SECURE"),
+  // Envelope + header From for SMTP sends. Required with SMTP because relays
+  // reject a message with no sender, and most only accept a domain they have
+  // been configured to send for — there is no default worth guessing.
+  EMAIL_FROM: getOptional("EMAIL_FROM"),
 
   // Email — Listmonk + SES. Listmonk owns the API surface (tx + campaigns
   // + subscriber management); SES is the SMTP relay it sends through.

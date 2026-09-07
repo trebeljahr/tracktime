@@ -1,3 +1,4 @@
+import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "../config/env.js";
 
 interface EmailParams {
@@ -7,30 +8,168 @@ interface EmailParams {
   html?: string;
 }
 
+export type EmailTransportKind = "smtp" | "listmonk" | "console";
+
+/** The subset of the environment that decides how mail leaves this server.
+ *  Declared as its own shape so the selection can be unit-tested without a
+ *  process env, a socket or a database. */
+export interface EmailTransportEnv {
+  SMTP_HOST: string;
+  EMAIL_FROM: string;
+  LISTMONK_URL: string;
+  LISTMONK_API_USER: string;
+  LISTMONK_API_TOKEN: string;
+  LISTMONK_TX_TEMPLATE_ID: string;
+  LISTMONK_FROM_EMAIL: string;
+  LISTMONK_FROM: string;
+}
+
 /**
- * Send a transactional email via Listmonk's /api/tx endpoint (which
- * relays through the SES SMTP identity configured at provision time).
- * Falls back to console logging when Listmonk isn't configured yet.
+ * Which transport a given environment selects, in a fixed order:
  *
- * The transactional template seeded by `hatchkit add <project>
- * listmonk-ses` renders `{{ .Tx.Data.subject }}` for the subject and
- * `{{ .Tx.Data.body }}` raw in the body (tx templates use Go
- * text/template — no `safeHTML` filter — so HTML passes through). When
- * `html` is supplied we send that, otherwise the plaintext body is
- * wrapped in a `<pre>` so the template still receives HTML.
+ *   1. SMTP      — whenever SMTP_HOST is set. First, deliberately: a host
+ *                  typed into SMTP_HOST is an explicit choice, and silently
+ *                  preferring a Listmonk left over from an earlier setup
+ *                  would send mail through a service the operator thought
+ *                  they had replaced.
+ *   2. Listmonk  — only when its whole set is present. A partial Listmonk
+ *                  config is a misconfiguration, not a transport; treating
+ *                  it as one turns every send into a 401 at delivery time.
+ *   3. console   — no mail provider at all. Sends are logged, not delivered,
+ *                  which is right for local dev and is the state a fresh
+ *                  self-host boots in.
+ *
+ * Note that EMAIL_FROM does NOT participate: an SMTP host with no From
+ * address must still select SMTP and then fail loudly at send time, because
+ * falling back to console logging would look like "email is not configured"
+ * to an operator who plainly configured it.
+ */
+export function selectEmailTransport(source: EmailTransportEnv): EmailTransportKind {
+  if (source.SMTP_HOST.trim()) return "smtp";
+
+  const listmonkReady =
+    source.LISTMONK_URL &&
+    source.LISTMONK_API_USER &&
+    source.LISTMONK_API_TOKEN &&
+    source.LISTMONK_TX_TEMPLATE_ID &&
+    (source.LISTMONK_FROM_EMAIL || source.LISTMONK_FROM);
+  return listmonkReady ? "listmonk" : "console";
+}
+
+/** The From address for an SMTP send. EMAIL_FROM wins; the Listmonk sender is
+ *  accepted as a fallback so an instance migrating off Listmonk keeps sending
+ *  from the identity its recipients already recognise. Empty means unset —
+ *  the SMTP branch turns that into a thrown error rather than a guess. */
+export function resolveFromAddress(source: EmailTransportEnv): string {
+  return (
+    source.EMAIL_FROM || source.LISTMONK_FROM || source.LISTMONK_FROM_EMAIL || ""
+  );
+}
+
+/** Implicit TLS (SMTPS) or STARTTLS. SMTP_SECURE overrides; unset follows the
+ *  port, 465 being the only implicit-TLS port in practice. */
+export function resolveSmtpSecure(secure: string, port: number): boolean {
+  const explicit = secure.trim().toLowerCase();
+  if (explicit === "true") return true;
+  if (explicit === "false") return false;
+  return port === 465;
+}
+
+/**
+ * True when a send would actually be delivered rather than logged. Callers
+ * that want to skip the email entirely (auth.ts logs a reset URL to the
+ * server log instead) should branch on this rather than on any one provider's
+ * variables — a Listmonk-shaped check silently ignores a configured SMTP host.
+ */
+export function isEmailDeliveryConfigured(): boolean {
+  return selectEmailTransport(env) !== "console";
+}
+
+// Lazily constructed and memoized, the same shape as storage.ts's getS3():
+// an unconfigured server must never build a transport, and a configured one
+// should keep a single pooled connection rather than reconnecting per email.
+let _transporter: Transporter | null = null;
+
+function getTransporter(): Transporter {
+  if (!_transporter) {
+    const port = Number.parseInt(env.SMTP_PORT, 10) || 587;
+    _transporter = nodemailer.createTransport({
+      host: env.SMTP_HOST,
+      port,
+      secure: resolveSmtpSecure(env.SMTP_SECURE, port),
+      // Only offer credentials when there are credentials. Passing
+      // { user: "", pass: "" } makes nodemailer attempt AUTH and fail against
+      // a relay that does not want any.
+      ...(env.SMTP_USER
+        ? { auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } }
+        : {}),
+    });
+  }
+  return _transporter;
+}
+
+/**
+ * Send a transactional email.
+ *
+ * Three transports, chosen by selectEmailTransport(): plain SMTP (the
+ * default, and all a self-host needs), Listmonk's /api/tx endpoint (opt-in,
+ * used by the hosted deploy, which relays through its SES identity), or a
+ * console log when neither is configured.
+ *
+ * Delivery failures throw. A password reset that fails silently is the worst
+ * outcome here — the user waits for mail that was never sent, and the log
+ * says nothing — so both real transports surface the provider's own error.
  */
 export async function sendEmail(params: EmailParams): Promise<void> {
-  const ready =
-    env.LISTMONK_URL &&
-    env.LISTMONK_API_USER &&
-    env.LISTMONK_API_TOKEN &&
-    env.LISTMONK_TX_TEMPLATE_ID &&
-    (env.LISTMONK_FROM_EMAIL || env.LISTMONK_FROM);
-  if (!ready) {
-    console.log(`[email] Would send to ${params.to}: ${params.subject}`);
-    return;
+  switch (selectEmailTransport(env)) {
+    case "smtp":
+      return sendViaSmtp(params);
+    case "listmonk":
+      return sendViaListmonk(params);
+    case "console":
+      console.log(`[email] Would send to ${params.to}: ${params.subject}`);
+      return;
+  }
+}
+
+async function sendViaSmtp(params: EmailParams): Promise<void> {
+  const from = resolveFromAddress(env);
+  if (!from) {
+    throw new Error(
+      `Cannot send to ${params.to}: SMTP_HOST is set but EMAIL_FROM is not. ` +
+        `Set EMAIL_FROM to an address ${env.SMTP_HOST} is allowed to send from.`,
+    );
   }
 
+  try {
+    await getTransporter().sendMail({
+      from,
+      to: params.to,
+      subject: params.subject,
+      text: params.text,
+      ...(params.html ? { html: params.html } : {}),
+    });
+  } catch (error) {
+    // The underlying error is usually the only thing that identifies the
+    // problem (bad credentials, TLS mismatch, relay refusing the From), so
+    // it is kept verbatim alongside the host and port it was talking to.
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `SMTP send to ${params.to} via ${env.SMTP_HOST}:${env.SMTP_PORT} failed: ${reason}`,
+      { cause: error },
+    );
+  }
+}
+
+/**
+ * Listmonk's transactional endpoint. The template seeded by `hatchkit add
+ * <project> listmonk-ses` renders `{{ .Tx.Data.subject }}` for the subject
+ * and `{{ .Tx.Data.body }}` raw in the body (tx templates use Go
+ * text/template — no `safeHTML` filter — so HTML passes through). When
+ * `html` is supplied we send that, otherwise the plaintext body is wrapped
+ * in a `<pre>` so the template still receives HTML.
+ */
+async function sendViaListmonk(params: EmailParams): Promise<void> {
   const body = params.html ?? `<pre>${escapeHtml(params.text)}</pre>`;
   const baseUrl = env.LISTMONK_URL.replace(/\/$/, "");
   const auth = Buffer.from(

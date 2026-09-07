@@ -5,13 +5,29 @@ import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { organization } from "better-auth/plugins/organization";
 import { MongoClient } from "mongodb";
 import { env, getTrustedOrigins } from "../config/env.js";
-import { sendEmail } from "../services/email.js";
+import { isEmailDeliveryConfigured, sendEmail } from "../services/email.js";
 import {
   DEVICE_FLOW_CLIENT_IDS,
   clientKindFromHeaders,
   normalizeClientKind,
 } from "./client-label.js";
 import { createPersonalWorkspace } from "./personal-workspace.js";
+
+/**
+ * Put an auth link in the server log.
+ *
+ * Two callers per send site, and both matter. With no transport configured
+ * this line *is* the delivery mechanism — the documented way back into a
+ * single-user instance whose owner locked themselves out. With a transport
+ * that is configured but broken (SMTP_HOST set and EMAIL_FROM missing is the
+ * easy mistake, wrong credentials the next one) the send throws, and without
+ * this the one recovery path is removed by exactly the misconfiguration that
+ * needs it. The throw is still propagated — a silent delivery failure is the
+ * worse outcome — the URL just goes to the log on the way out.
+ */
+function logAuthUrl(label: string, recipient: string, url: string): void {
+  console.log(`[auth] ${label} URL for ${recipient}: ${url}`);
+}
 
 /**
  * better-auth instance. Must be initialized AFTER mongoose.connect() because
@@ -37,30 +53,46 @@ export async function initAuth(): Promise<void> {
 
     emailAndPassword: {
       enabled: true,
-      requireEmailVerification: false, // Set to true once Listmonk + SES is configured
+      requireEmailVerification: false, // Set to true once a mail transport is configured
       async sendResetPassword({ user, url }: { user: { email: string }; url: string }) {
-        if (!env.LISTMONK_URL || !env.LISTMONK_TX_TEMPLATE_ID) {
-          console.log(`[auth] Password reset URL for ${user.email}: ${url}`);
+        // Branch on whether *any* transport is configured, never on one
+        // provider's variables: a Listmonk-shaped check would log the reset
+        // URL and return on a self-host that has SMTP set up perfectly well,
+        // leaving the user waiting for mail nobody ever tried to send. With
+        // no transport at all the URL in the server log is the documented
+        // recovery path for a locked-out admin.
+        if (!isEmailDeliveryConfigured()) {
+          logAuthUrl("Password reset", user.email, url);
           return;
         }
-        await sendEmail({
-          to: user.email,
-          subject: "Reset your password",
-          text: `Click this link to reset your password: ${url}`,
-          html: `<p>Click <a href="${url}">here</a> to reset your password.</p>`,
-        });
+        try {
+          await sendEmail({
+            to: user.email,
+            subject: "Reset your password",
+            text: `Click this link to reset your password: ${url}`,
+            html: `<p>Click <a href="${url}">here</a> to reset your password.</p>`,
+          });
+        } catch (error) {
+          logAuthUrl("Password reset", user.email, url);
+          throw error;
+        }
       },
       async sendVerificationEmail({ user, url }: { user: { email: string }; url: string }) {
-        if (!env.LISTMONK_URL || !env.LISTMONK_TX_TEMPLATE_ID) {
-          console.log(`[auth] Verification URL for ${user.email}: ${url}`);
+        if (!isEmailDeliveryConfigured()) {
+          logAuthUrl("Verification", user.email, url);
           return;
         }
-        await sendEmail({
-          to: user.email,
-          subject: "Verify your email",
-          text: `Click this link to verify your email: ${url}`,
-          html: `<p>Click <a href="${url}">here</a> to verify your email.</p>`,
-        });
+        try {
+          await sendEmail({
+            to: user.email,
+            subject: "Verify your email",
+            text: `Click this link to verify your email: ${url}`,
+            html: `<p>Click <a href="${url}">here</a> to verify your email.</p>`,
+          });
+        } catch (error) {
+          logAuthUrl("Verification", user.email, url);
+          throw error;
+        }
       },
     },
 
@@ -145,16 +177,21 @@ export async function initAuth(): Promise<void> {
         }) {
           const url = `${env.FRONTEND_URL.replace(/\/$/, "")}/invite/${invitation.id}`;
           const who = inviter.user.name || inviter.user.email;
-          if (!env.LISTMONK_URL || !env.LISTMONK_TX_TEMPLATE_ID) {
-            console.log(`[auth] Invitation URL for ${email}: ${url}`);
+          if (!isEmailDeliveryConfigured()) {
+            logAuthUrl("Invitation", email, url);
             return;
           }
-          await sendEmail({
-            to: email,
-            subject: `${who} invited you to ${org.name}`,
-            text: `${who} invited you to join ${org.name} on tracktime: ${url}`,
-            html: `<p>${who} invited you to join <strong>${org.name}</strong> on tracktime.</p><p><a href="${url}">Accept the invitation</a></p>`,
-          });
+          try {
+            await sendEmail({
+              to: email,
+              subject: `${who} invited you to ${org.name}`,
+              text: `${who} invited you to join ${org.name} on tracktime: ${url}`,
+              html: `<p>${who} invited you to join <strong>${org.name}</strong> on tracktime.</p><p><a href="${url}">Accept the invitation</a></p>`,
+            });
+          } catch (error) {
+            logAuthUrl("Invitation", email, url);
+            throw error;
+          }
         },
       }),
 
