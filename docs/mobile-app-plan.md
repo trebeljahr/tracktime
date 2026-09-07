@@ -202,6 +202,25 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
 - **No `NativeSessionGate` is involved anywhere**, since stage 1 did not build
   one. The boot seed runs from `MobileBridgeLoader`, which the root layout
   renders first.
+- **Moving the queue mount above the route needed one more fix than the plan
+  says**, and it is a web fix. Draining on every route surfaced a hazard that
+  the old mount had been hiding: a full page navigation aborts the requests in
+  flight, an aborted fetch is indistinguishable from a failed one, so the
+  mutation was queued — and the *next document* replayed it, duplicating an
+  entry the server already had. Previously the replay only happened if the
+  user came back to `/track`. The guess is wrong on its own terms: the request
+  was fully written before the document died, so the server has almost always
+  processed it and only the response was lost. A mutation that fails while the
+  page is being torn down is therefore not queued. Web only — the native
+  shells never tear their document down, and `pagehide` fires there for
+  backgrounding, so a latched flag on a phone would silently stop queueing
+  offline work. Verified on device: a background/foreground cycle with the API
+  down still queues.
+- The critics' `[low]` clock-skew finding is closed with the cheap half they
+  suggested: `clockLooksWrong()` in `use-sync.ts` and a badge in the tracker
+  bar. No server clock offset — a timer frozen at 0:00 is now labelled rather
+  than silently wrong, which is what turns it from an unexplainable bug into a
+  settings change.
 
 ## Summary
 
