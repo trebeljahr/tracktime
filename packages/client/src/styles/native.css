@@ -27,6 +27,13 @@ body.cap {
    */
   --app-header-offset: calc(3.5rem + env(safe-area-inset-top, 0px));
 
+  /*
+   * The bottom tab bar's total height: 3.5rem of cells plus whatever the
+   * home indicator needs under them. Anything that has to sit clear of the
+   * bar reads this rather than repeating the arithmetic.
+   */
+  --app-tab-bar-offset: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+
   /* A grey flash on every tap is a browser affordance, not an app one. */
   -webkit-tap-highlight-color: transparent;
 
@@ -72,11 +79,11 @@ body.cap [data-testid="tracker-bar"] {
 }
 
 /*
- * The last entry row has to clear the home indicator. Stage 3 adds the tab
- * bar's own height to this.
+ * The last entry row has to clear BOTH the tab bar and the home indicator
+ * under it. `1rem` on top so the final row is not flush against the bar.
  */
 body.cap [data-testid="app-main"] {
-  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(1rem + var(--app-tab-bar-offset));
 }
 
 /* The nav drawer is `fixed inset-0`, so both insets are its own problem. */
@@ -162,4 +169,32 @@ body.cap [data-testid="tracker-composer"] [data-testid="tracker-description"] {
 body.cap [data-testid="tracker-composer"] [data-testid="tracker-toggle"] {
   min-height: 2.75rem;
   width: 7rem;
+}
+
+/* ── The bottom tab bar ─────────────────────────────────────────────── */
+
+/*
+ * components/mobile-tab-bar.tsx renders unconditionally with Tailwind's
+ * `hidden`, so it is `display: none` for every web user and every desktop
+ * shell. This is the only rule that reveals it — and it can only match under
+ * `body.cap`, which is the whole reason the component does not branch on
+ * `isNative()` instead: `output: "export"` prerenders in Node, where
+ * `window.Capacitor` cannot exist, so a tree that differs at hydration is a
+ * mismatch React resolves by throwing the served HTML away.
+ *
+ * `display: flex` beats the utility's `display: none` because this file is
+ * unlayered and Tailwind's utilities are in `@layer utilities`.
+ */
+body.cap [data-testid="mobile-tab-bar"] {
+  display: flex;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/*
+ * Every cell is a 44pt-plus thumb target across a third of the screen. The
+ * height is the number `--app-tab-bar-offset` promises, so the padding on
+ * app-main and the bar itself cannot drift apart.
+ */
+body.cap [data-testid="mobile-tab-bar"] > * {
+  min-height: 3.5rem;
 }

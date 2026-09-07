@@ -20,7 +20,6 @@ import {
   User as UserIcon,
   Users,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { formatDuration } from "@starter/shared";
 import type { SyncStatus } from "@starter/core";
@@ -49,15 +48,16 @@ import { useRunningEntry, useSync } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
 import { signOut } from "@/lib/auth-client";
+import { isActiveRoute, type NavItem } from "@/lib/nav";
+import { MobileTabBar } from "@/components/mobile-tab-bar";
+import { useOverlay } from "@/mobile/overlay-stack";
+import { handleBackPress } from "@/mobile/back-button";
+import { setMobileHandlers } from "@/mobile/bridge";
 import { cn } from "@/lib/utils";
 
-type NavItem = {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-  /** Extra path prefixes that should light this item up. */
-  match?: string[];
-};
+// Re-exported because this module has always been where they lived; the rule
+// itself now sits in lib/nav.ts so the tab bar can share it without a cycle.
+export { isActiveRoute, type NavItem };
 
 type NavSection = {
   heading: string | null;
@@ -93,14 +93,6 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
 ];
-
-/** Active when the path is the item's route or a child of it. */
-export const isActiveRoute = (pathname: string, item: NavItem): boolean => {
-  const candidates = [item.href, ...(item.match ?? [])];
-  return candidates.some(
-    (href) => pathname === href || pathname.startsWith(`${href}/`)
-  );
-};
 
 const STATUS_COPY: Record<SyncStatus, { label: string; dot: string }> = {
   open: { label: "Live — changes sync across your devices", dot: "bg-primary" },
@@ -287,6 +279,7 @@ export type AppShellProps = {
  */
 export function AppShell({ children }: AppShellProps): React.JSX.Element {
   const pathname = usePathname();
+  const router = useRouter();
   const status = useSync();
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [lastPath, setLastPath] = React.useState(pathname);
@@ -298,6 +291,34 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
   }
 
   const closeMobile = React.useCallback((): void => setMobileOpen(false), []);
+  const openMobile = React.useCallback((): void => setMobileOpen(true), []);
+
+  // The drawer is an overlay like any dialog, so Android's back button closes
+  // it before it does anything else. Registering here rather than on the
+  // rendered <aside> keeps the stack entry alive for exactly as long as the
+  // state that owns it.
+  useOverlay(mobileOpen, closeMobile);
+
+  /*
+   * Android's hardware back button. The decision itself lives in
+   * mobile/back-button.ts so it can be tested without mounting the shell;
+   * what belongs here is the wiring.
+   *
+   * Registered through `setMobileHandlers` rather than passed into
+   * `initMobile`: that function latches on its first call, which is
+   * MobileBridgeLoader at the app root, long before this shell exists — so
+   * a handler handed to `initMobile` here would be dropped in silence.
+   */
+  const handleBackButton = React.useCallback(
+    (): boolean =>
+      handleBackPress({ pathname, navigate: (href) => router.push(href) }),
+    [pathname, router],
+  );
+
+  React.useEffect(
+    () => setMobileHandlers({ onBackButton: handleBackButton }),
+    [handleBackButton],
+  );
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -363,7 +384,7 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
               variant="ghost"
               size="icon"
               className="md:hidden"
-              onClick={() => setMobileOpen(true)}
+              onClick={openMobile}
               aria-label="Open navigation"
               data-testid="sidebar-toggle"
             >
@@ -386,6 +407,17 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
             {children}
           </main>
         </div>
+
+        {/*
+          Rendered on every platform and hidden with `display: none` unless
+          `body.cap` is set — see components/mobile-tab-bar.tsx for why a
+          runtime `isNative()` branch would be wrong under `output: "export"`.
+        */}
+        <MobileTabBar
+          pathname={pathname}
+          onOpenMore={openMobile}
+          moreOpen={mobileOpen}
+        />
       </div>
     </TooltipProvider>
   );
