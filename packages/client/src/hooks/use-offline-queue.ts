@@ -20,6 +20,10 @@ import {
   type OfflineReplayMutators,
 } from "@/hooks/replay-offline-mutation";
 import { idleWatcher } from "@/lib/idle-watcher";
+import {
+  getServerNetworkOnline,
+  subscribeNetwork,
+} from "@/mobile/network";
 
 export type OfflineQueueState = {
   /** Number of mutations waiting to reach the server. */
@@ -38,29 +42,14 @@ export type OfflineQueueState = {
 
 // ── online/offline, as an external store ─────────────────────────────
 
-type Listener = () => void;
-
-const onlineListeners = new Set<Listener>();
-let onlineBound = false;
-
-const notifyOnline = (): void => {
-  for (const listener of onlineListeners) listener();
-};
-
-const subscribeOnline = (listener: Listener): (() => void) => {
-  onlineListeners.add(listener);
-  if (!onlineBound && typeof window !== "undefined") {
-    onlineBound = true;
-    window.addEventListener("online", notifyOnline);
-    window.addEventListener("offline", notifyOnline);
-  }
-  return () => {
-    onlineListeners.delete(listener);
-  };
-};
-
+/*
+ * The window `online`/`offline` events were the whole story here. They are
+ * still the story in a browser, but in WKWebView they do not fire for airplane
+ * mode and `navigator.onLine` lies about the radio, so the subscription now
+ * goes through `mobile/network.ts` — which listens to the OS on native and to
+ * exactly these two events everywhere else.
+ */
 const getOnline = (): boolean => isOnline();
-const getServerOnline = (): boolean => true;
 
 /**
  * The pending-mutation queue, wired to the things that mean "the network is
@@ -78,9 +67,9 @@ export const useOfflineQueue = (): OfflineQueueState => {
     getServerPendingCount
   );
   const online = React.useSyncExternalStore(
-    subscribeOnline,
+    subscribeNetwork,
     getOnline,
-    getServerOnline
+    getServerNetworkOnline
   );
 
   const [isFlushing, setIsFlushing] = React.useState(false);
@@ -190,13 +179,13 @@ export const useOfflineQueue = (): OfflineQueueState => {
   React.useEffect(() => {
     void refreshPendingCount();
 
-    const handleOnline = (): void => {
+    // Through `subscribeNetwork` rather than `window.addEventListener("online")`
+    // so this fires when a phone leaves airplane mode, which WKWebView does not
+    // report as an `online` event at all.
+    return subscribeNetwork(() => {
+      if (!isOnline()) return;
       void flushRef.current();
-    };
-    window.addEventListener("online", handleOnline);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-    };
+    });
   }, []);
 
   // The socket reopening is the earliest reliable "we are back" signal —

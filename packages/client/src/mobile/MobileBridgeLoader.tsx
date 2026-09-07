@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 
 import { hydrateNativeSession } from "@/lib/native-session";
+import { startNetworkWatch } from "@/mobile/network";
 
 /*
  * Mounts once at app root. If running under Capacitor (iOS/Android
@@ -20,6 +21,12 @@ export function MobileBridgeLoader() {
     // is idempotent and resolves immediately on web, where it only flips the
     // "ready" flag every consumer waits on.
     void hydrateNativeSession();
+
+    // Both of these belong at the app root rather than in the shell: the
+    // network verdict is read by `isNetworkError()` on every failed mutation,
+    // including ones made on /login, and the running-timer seed has to be in
+    // the store before the first screen asks what is running.
+    startNetworkWatch();
 
     const cap = (window as unknown as { Capacitor?: unknown }).Capacitor;
     if (!cap) return;

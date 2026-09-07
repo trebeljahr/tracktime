@@ -4,14 +4,15 @@
  * Every entry mutation goes out optimistically. When the request cannot reach
  * the server — the browser is offline, or the fetch fails at the transport
  * layer — the optimistic cache update stands and the mutation lands here, in a
- * durable localStorage-backed FIFO. On reconnect the queue is replayed in the
- * order the user performed the actions, so start/stop keeps working with the
- * network fully off.
+ * durable FIFO — `localStorage` in a browser, Capacitor Preferences on the
+ * native shells. On reconnect the queue is replayed in the order the user
+ * performed the actions, so start/stop keeps working with the network fully
+ * off.
  *
  * The op/payload contract itself now lives in `@starter/core` so the browser
  * extension writes rows this client can replay, and vice versa. What stays
- * here is the browser-bound half: localStorage selection, the reactive pending
- * count React subscribes to, and the tRPC error classification.
+ * here is the host-bound half: storage selection, the reactive pending count
+ * React subscribes to, and the tRPC error classification.
  */
 
 import {
@@ -49,10 +50,35 @@ export type {
   OfflineUpdateInput,
 } from "@starter/core";
 
+import {
+  preferencesStorage,
+  shouldUseNativeStorage,
+} from "@/mobile/preferences-storage";
+import { getNetworkOnline } from "@/mobile/network";
+
 // ── the queue itself ─────────────────────────────────────────────────
 
+/**
+ * Where the queue lives.
+ *
+ * On the native shells this is Capacitor Preferences, not `localStorage`:
+ * WKWebView may evict web storage after low disk or a week of inactivity, and
+ * what is stored here is time the user tracked that the server has never seen.
+ * `mobile/preferences-storage.ts` also hands over anything a previous build
+ * left in `localStorage`, once — otherwise the change of address would itself
+ * lose every queued row.
+ *
+ * `shouldUseNativeStorage()` is `isNative()`, a synchronous read of
+ * `window.Capacitor` that the native bridge injects before any app code runs.
+ * That is what makes it safe for `getOfflineQueue()` to memoise below: the
+ * branch is decidable on the very first call, so there is no window in which
+ * an early caller could pin the wrong backing store for the rest of the launch.
+ */
 const resolveStorage = (): KeyValueStorage => {
   if (typeof window === "undefined") return memoryStorage();
+  if (shouldUseNativeStorage()) {
+    return preferencesStorage({ migrateKeys: [OFFLINE_QUEUE_STORAGE_KEY] });
+  }
   try {
     return webStorage(window.localStorage);
   } catch {
@@ -71,6 +97,11 @@ export const getOfflineQueue = (): OfflineQueue => {
     });
   }
   return queue;
+};
+
+/** Test seam: drop the memoised queue so the next call re-resolves storage. */
+export const __resetOfflineQueueForTests = (): void => {
+  queue = null;
 };
 
 // ── reactive pending count ───────────────────────────────────────────
@@ -135,14 +166,24 @@ export const cancelQueuedForTemp = async (tempId: string): Promise<boolean> => {
   return removed;
 };
 
+/**
+ * `meta.createdAt` is the raw row's timestamp, handed over separately rather
+ * than folded into the decoded mutation: `decodeOfflineMutation` is core's
+ * pure op contract and several clients pin its exact shape. The replay needs
+ * the age because a queue that now survives an OS kill can hold a row for
+ * days, and some of them stop being safe to replay blind.
+ */
 export const flushOfflineQueue = async (
-  runner: (mutation: OfflineMutation) => Promise<void>
+  runner: (
+    mutation: OfflineMutation,
+    meta: { createdAt: string }
+  ) => Promise<void>
 ): Promise<FlushResult> => {
   const result = await getOfflineQueue().flush(async (row) => {
     const decoded = decodeOfflineMutation(row);
     // A row we can no longer read is dropped by resolving successfully.
     if (decoded === null) return;
-    await runner(decoded);
+    await runner(decoded, { createdAt: row.createdAt });
   });
   await refreshPendingCount();
   return result;
@@ -155,10 +196,14 @@ export const clearOfflineQueue = async (): Promise<void> => {
 
 // ── error classification ─────────────────────────────────────────────
 
-export const isOnline = (): boolean => {
-  if (typeof navigator === "undefined") return true;
-  return navigator.onLine !== false;
-};
+/**
+ * Delegated to `mobile/network.ts`, which prefers the radio's own answer on
+ * native and falls back to `navigator.onLine` everywhere else. In WKWebView
+ * the browser's value is routinely `true` on a dead radio, and this function
+ * is what `isNetworkError()` short-circuits on — so believing it files genuine
+ * server refusals as transport failures and queues them forever.
+ */
+export const isOnline = (): boolean => getNetworkOnline();
 
 /** A tRPC error carrying `data.code` came from the server, not the wire. */
 const hasServerCode = (error: unknown): boolean => {
