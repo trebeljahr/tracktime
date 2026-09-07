@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Pencil, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,13 @@ export type MultiSelectOption = {
   keywords?: string[];
 };
 
+/** A row pinned to the bottom of the list — normally "New client…". */
+export type MultiSelectFooterAction = {
+  label: string;
+  onSelect: () => void;
+  testId?: string;
+};
+
 export type MultiSelectProps = {
   options: MultiSelectOption[];
   value: string[];
@@ -40,6 +47,16 @@ export type MultiSelectProps = {
   emptyText?: string;
   searchPlaceholder?: string;
   disabled?: boolean;
+  /** Pinned rows below the options, always visible regardless of the search. */
+  footerActions?: MultiSelectFooterAction[];
+  /**
+   * When supplied, each row carries a pencil that edits that option instead of
+   * toggling it. The popover closes first, so the dialog it opens is not
+   * fighting the popover for focus.
+   */
+  onEditOption?: (option: MultiSelectOption) => void;
+  /** Accessible name for the pencil, e.g. "Edit client". */
+  editLabel?: string;
   className?: string;
   testId: string;
 };
@@ -79,6 +96,9 @@ export function MultiSelect({
   emptyText = "No matches.",
   searchPlaceholder = "Search...",
   disabled = false,
+  footerActions,
+  onEditOption,
+  editLabel = "Edit",
   className,
   testId,
 }: MultiSelectProps): React.JSX.Element {
@@ -198,11 +218,55 @@ export function MultiSelect({
                         />
                       ) : null}
                       <span className="truncate">{option.label}</span>
+                      {onEditOption ? (
+                        <button
+                          type="button"
+                          aria-label={`${editLabel} ${option.label}`}
+                          className="ml-auto shrink-0 rounded-sm p-1 text-muted-foreground opacity-60 hover:bg-accent hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          // cmdk selects on pointer down as well as on click,
+                          // so both have to be stopped or the pencil would
+                          // toggle the filter on its way to the dialog.
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setOpen(false);
+                            onEditOption(option);
+                          }}
+                          data-testid={`${testId}-edit-${option.value}`}
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                      ) : null}
                     </CommandItem>
                   );
                 })}
               </CommandGroup>
             ))}
+
+            {footerActions && footerActions.length > 0 ? (
+              <>
+                <CommandSeparator />
+                <CommandGroup forceMount>
+                  {footerActions.map((action) => (
+                    <CommandItem
+                      key={action.label}
+                      forceMount
+                      // A leading NUL keeps the row out of the id namespace the
+                      // options use, so a search can never collide with it.
+                      value={`\u0000action-${action.label}`}
+                      onSelect={() => {
+                        setOpen(false);
+                        action.onSelect();
+                      }}
+                      data-testid={action.testId}
+                    >
+                      <Plus className="size-4" />
+                      <span className="truncate">{action.label}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            ) : null}
           </CommandList>
           {value.length > 0 ? (
             <>

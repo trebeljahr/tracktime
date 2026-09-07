@@ -3,6 +3,14 @@
 import * as React from "react";
 import { Search, X } from "lucide-react";
 
+import { ClientFormDialog } from "@/components/catalog/client-form-dialog";
+import { ProjectFormDialog } from "@/components/catalog/project-form-dialog";
+import { TaskFormDialog } from "@/components/catalog/task-form-dialog";
+import type {
+  ClientRow,
+  ProjectRow,
+  TaskRow,
+} from "@/components/catalog/types";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,6 +120,17 @@ function SearchField({
   );
 }
 
+/**
+ * Which catalog dialog is open, and on what. `null` in the `row` slot is a
+ * create; a row is an edit. One piece of state, so opening a second dialog can
+ * never leave the first one mounted behind it.
+ */
+type CatalogDialog =
+  | null
+  | { kind: "client"; row: ClientRow | null }
+  | { kind: "project"; row: ProjectRow | null }
+  | { kind: "task"; row: TaskRow | null };
+
 export type ReportFiltersBarProps = {
   filters: UseReportFiltersResult;
   /** Weekly swaps the range picker for its own week navigation. */
@@ -202,110 +221,203 @@ export function ReportFiltersBar({
 
   const hasProjectSelection = state.projectIds.length > 0;
 
+  // Every filter list doubles as the catalog surface for what it filters by:
+  // the same create/edit dialogs the Clients, Projects and Tasks screens use,
+  // opened in place so a report that is missing a client does not cost a
+  // round trip through another screen and back.
+  const [catalogDialog, setCatalogDialog] = React.useState<CatalogDialog>(null);
+
+  const findClient = (id: string): ClientRow | null =>
+    (clientsQuery.data ?? []).find((client) => client.id === id) ?? null;
+
+  const findProject = (id: string): ProjectRow | null =>
+    (projectsQuery.data ?? []).find((project) => project.id === id) ?? null;
+
+  const findTask = (id: string): TaskRow | null => {
+    for (const query of taskQueries) {
+      const match = (query.data ?? []).find((task) => task.id === id);
+      if (match) return match;
+    }
+    return null;
+  };
+
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2",
-        className
-      )}
-      data-testid="report-filters"
-    >
-      {leading}
-
-      {hideDateRange ? null : (
-        <DateRangePicker
-          value={state.range}
-          onChange={setRange}
-          weekStartsOn={weekStartsOn}
-          testId="filter-range"
-        />
-      )}
-
-      <MultiSelect
-        label="Clients"
-        options={clientOptions}
-        value={state.clientIds}
-        onChange={(ids) => setIds("clientIds", ids)}
-        emptyText="No clients yet."
-        searchPlaceholder="Search clients..."
-        className="w-[9.5rem]"
-        testId="filter-clients"
-      />
-
-      <MultiSelect
-        label="Projects"
-        options={projectOptions}
-        value={state.projectIds}
-        onChange={(ids) => {
-          // Written in one go: two `router.replace` calls in the same tick
-          // would both be computed from the pre-change query string, and the
-          // second would silently drop the first.
-          setParams({
-            [REPORT_PARAM.projects]: ids.length > 0 ? ids.join(",") : null,
-            // Tasks belong to projects - a task filter for a project that is
-            // no longer selected would silently match nothing.
-            [REPORT_PARAM.tasks]: null,
-          });
-        }}
-        emptyText="No projects yet."
-        searchPlaceholder="Search projects..."
-        className="w-[9.5rem]"
-        testId="filter-projects"
-      />
-
-      <MultiSelect
-        label={hasProjectSelection ? "Tasks" : "Tasks (pick a project)"}
-        options={taskOptions}
-        value={state.taskIds}
-        onChange={(ids) => setIds("taskIds", ids)}
-        disabled={!hasProjectSelection}
-        emptyText="No tasks in the selected projects."
-        searchPlaceholder="Search tasks..."
-        className={cn(hasProjectSelection ? "w-[9.5rem]" : "w-[11.5rem]")}
-        testId="filter-tasks"
-      />
-
-      <TagFilter
-        value={state.tagIds}
-        onChange={(ids) => setIds("tagIds", ids)}
-      />
-
-      <Select
-        value={state.billable}
-        onValueChange={(next) => setBillable(next as BillableFilter)}
+    <>
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2",
+          className
+        )}
+        data-testid="report-filters"
       >
-        <SelectTrigger className="w-[9.5rem]" data-testid="filter-billable">
-          <SelectValue>{BILLABLE_LABEL[state.billable]}</SelectValue>
-        </SelectTrigger>
-        <SelectContent data-testid="filter-billable-content">
-          <SelectItem value="all" data-testid="filter-billable-all">
-            All entries
-          </SelectItem>
-          <SelectItem value="yes" data-testid="filter-billable-yes">
-            Billable
-          </SelectItem>
-          <SelectItem value="no" data-testid="filter-billable-no">
-            Non-billable
-          </SelectItem>
-        </SelectContent>
-      </Select>
+        {leading}
 
-      <SearchField value={state.search} onChange={setSearch} />
+        {hideDateRange ? null : (
+          <DateRangePicker
+            value={state.range}
+            onChange={setRange}
+            weekStartsOn={weekStartsOn}
+            testId="filter-range"
+          />
+        )}
 
-      {isFiltered ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={clearFilters}
-          data-testid="filter-clear"
+        <MultiSelect
+          label="Clients"
+          options={clientOptions}
+          value={state.clientIds}
+          onChange={(ids) => setIds("clientIds", ids)}
+          emptyText="No clients yet."
+          searchPlaceholder="Search clients..."
+          className="w-[9.5rem]"
+          testId="filter-clients"
+          editLabel="Edit client"
+          onEditOption={(option) =>
+            setCatalogDialog({ kind: "client", row: findClient(option.value) })
+          }
+          footerActions={[
+            {
+              label: "New client…",
+              onSelect: () => setCatalogDialog({ kind: "client", row: null }),
+              testId: "filter-clients-new",
+            },
+          ]}
+        />
+
+        <MultiSelect
+          label="Projects"
+          options={projectOptions}
+          value={state.projectIds}
+          onChange={(ids) => {
+            // Written in one go: two `router.replace` calls in the same tick
+            // would both be computed from the pre-change query string, and the
+            // second would silently drop the first.
+            setParams({
+              [REPORT_PARAM.projects]: ids.length > 0 ? ids.join(",") : null,
+              // Tasks belong to projects - a task filter for a project that is
+              // no longer selected would silently match nothing.
+              [REPORT_PARAM.tasks]: null,
+            });
+          }}
+          emptyText="No projects yet."
+          searchPlaceholder="Search projects..."
+          className="w-[9.5rem]"
+          testId="filter-projects"
+          editLabel="Edit project"
+          onEditOption={(option) =>
+            setCatalogDialog({
+              kind: "project",
+              row: findProject(option.value),
+            })
+          }
+          footerActions={[
+            {
+              label: "New project…",
+              onSelect: () => setCatalogDialog({ kind: "project", row: null }),
+              testId: "filter-projects-new",
+            },
+          ]}
+        />
+
+        <MultiSelect
+          label={hasProjectSelection ? "Tasks" : "Tasks (pick a project)"}
+          options={taskOptions}
+          value={state.taskIds}
+          onChange={(ids) => setIds("taskIds", ids)}
+          disabled={!hasProjectSelection}
+          emptyText="No tasks in the selected projects."
+          searchPlaceholder="Search tasks..."
+          className={cn(hasProjectSelection ? "w-[9.5rem]" : "w-[11.5rem]")}
+          testId="filter-tasks"
+          editLabel="Edit task"
+          onEditOption={(option) =>
+            setCatalogDialog({ kind: "task", row: findTask(option.value) })
+          }
+          footerActions={[
+            {
+              label: "New task…",
+              onSelect: () => setCatalogDialog({ kind: "task", row: null }),
+              testId: "filter-tasks-new",
+            },
+          ]}
+        />
+
+        <TagFilter
+          value={state.tagIds}
+          onChange={(ids) => setIds("tagIds", ids)}
+        />
+
+        <Select
+          value={state.billable}
+          onValueChange={(next) => setBillable(next as BillableFilter)}
         >
-          <X className="size-4" />
-          Clear
-        </Button>
-      ) : null}
+          <SelectTrigger className="w-[9.5rem]" data-testid="filter-billable">
+            <SelectValue>{BILLABLE_LABEL[state.billable]}</SelectValue>
+          </SelectTrigger>
+          <SelectContent data-testid="filter-billable-content">
+            <SelectItem value="all" data-testid="filter-billable-all">
+              All entries
+            </SelectItem>
+            <SelectItem value="yes" data-testid="filter-billable-yes">
+              Billable
+            </SelectItem>
+            <SelectItem value="no" data-testid="filter-billable-no">
+              Non-billable
+            </SelectItem>
+          </SelectContent>
+        </Select>
 
-      {trailing ? <div className="ml-auto flex items-center gap-2">{trailing}</div> : null}
-    </div>
+        <SearchField value={state.search} onChange={setSearch} />
+
+        {isFiltered ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={clearFilters}
+            data-testid="filter-clear"
+          >
+            <X className="size-4" />
+            Clear
+          </Button>
+        ) : null}
+
+        {trailing ? (
+          <div className="ml-auto flex items-center gap-2">{trailing}</div>
+        ) : null}
+      </div>
+
+      {/*
+        A create here adds to the catalog but deliberately does not tick itself
+        into the filter: a brand-new client has no entries, so selecting it
+        would answer "new client" with an empty report.
+      */}
+      <ClientFormDialog
+        open={catalogDialog?.kind === "client"}
+        onOpenChange={(next) => {
+          if (!next) setCatalogDialog(null);
+        }}
+        client={catalogDialog?.kind === "client" ? catalogDialog.row : null}
+      />
+
+      <ProjectFormDialog
+        open={catalogDialog?.kind === "project"}
+        onOpenChange={(next) => {
+          if (!next) setCatalogDialog(null);
+        }}
+        project={catalogDialog?.kind === "project" ? catalogDialog.row : null}
+        clients={clientsQuery.data ?? []}
+      />
+
+      <TaskFormDialog
+        open={catalogDialog?.kind === "task"}
+        onOpenChange={(next) => {
+          if (!next) setCatalogDialog(null);
+        }}
+        task={catalogDialog?.kind === "task" ? catalogDialog.row : null}
+        // The task filter only exists once a project is picked, so the first
+        // selected project is the only sensible default for a new task.
+        defaultProjectId={state.projectIds[0] ?? null}
+      />
+    </>
   );
 }

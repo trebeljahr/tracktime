@@ -6,8 +6,9 @@ import {
   MultiSelect,
   type MultiSelectOption,
 } from "@/components/reports/multi-select";
+import { TagFormDialog } from "@/components/tags/tag-manager";
 import { pickableTags } from "@/components/tags/tag-picker";
-import { useTags } from "@/components/tags/use-tags";
+import { tagById, useTags, type TagRow } from "@/components/tags/use-tags";
 
 export type TagFilterProps = {
   /** Selected tag ids; empty means "no tag filter", not "untagged only". */
@@ -21,6 +22,10 @@ export type TagFilterProps = {
  * Filters BY tag in the reports filter bar — the read-side counterpart of
  * `TagPicker`. Selecting several tags is an OR ("entries carrying any of
  * these"), matching `ReportFilters.tagIds` on the server.
+ *
+ * It also creates and edits tags, through the same `TagFormDialog` the tag
+ * manager uses — a filter list is where you notice a tag is misnamed, and
+ * sending the user to Settings to fix it loses the report they were reading.
  */
 export function TagFilter({
   value,
@@ -40,19 +45,45 @@ export function TagFilter({
         label: tag.name,
         color: tag.color,
       })),
-    [allTags, value],
+    [allTags, value]
   );
 
+  const [editing, setEditing] = React.useState<TagRow | null>(null);
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+
   return (
-    <MultiSelect
-      label="Tags"
-      options={options}
-      value={value}
-      onChange={onChange}
-      emptyText="No tags yet."
-      searchPlaceholder="Search tags..."
-      className={className}
-      testId={testId}
-    />
+    <>
+      <MultiSelect
+        label="Tags"
+        options={options}
+        value={value}
+        onChange={onChange}
+        emptyText="No tags yet."
+        searchPlaceholder="Search tags..."
+        className={className}
+        testId={testId}
+        editLabel="Edit tag"
+        onEditOption={(option) => {
+          setEditing(tagById(allTags, option.value));
+          setDialogOpen(true);
+        }}
+        footerActions={[
+          {
+            label: "New tag…",
+            onSelect: () => {
+              setEditing(null);
+              setDialogOpen(true);
+            },
+            testId: `${testId}-new`,
+          },
+        ]}
+      />
+
+      <TagFormDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        tag={editing}
+      />
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { signUpViaUI } from "./helpers";
 import { cleanDatabase, closeDbConnection } from "./db-utils";
 
@@ -23,7 +23,9 @@ function dayKey(offsetDays: number): string {
   const date = new Date();
   date.setDate(date.getDate() + offsetDays);
   const pad = (value: number): string => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate()
+  )}`;
 }
 
 /**
@@ -42,7 +44,7 @@ const RANGE_QUERY = `?from=${dayKey(-7)}&to=${dayKey(1)}`;
 async function logManualEntry(
   page: Page,
   description: string,
-  duration: string,
+  duration: string
 ): Promise<void> {
   await page.getByTestId("tracker-manual-open").click();
   await page.getByTestId("manual-entry-description").fill(description);
@@ -57,6 +59,24 @@ async function logManualEntry(
     .filter({ hasText: description });
   await expect(row).toHaveCount(1);
   await expect(row.getByTestId("entry-duration")).toHaveValue(duration);
+}
+
+/**
+ * Read the opaque id out of a `<prefix><id>` test id, once it has settled —
+ * an optimistic row carries a placeholder id that a later assertion would
+ * chase.
+ */
+async function idFromTestId(row: Locator, prefix: string): Promise<string> {
+  await expect
+    .poll(
+      async () => (await row.getAttribute("data-testid"))?.slice(prefix.length),
+      { message: `expected a settled ${prefix}<id> test id` }
+    )
+    .not.toMatch(/^optimistic-/);
+
+  const testId = await row.getAttribute("data-testid");
+  expect(testId, `expected a ${prefix}<id> test id`).not.toBeNull();
+  return (testId ?? "").slice(prefix.length);
 }
 
 test.beforeAll(async () => {
@@ -85,7 +105,7 @@ test.describe("Reports", () => {
     await page.getByTestId("combobox-search").fill(PROJECT_NAME);
     await page.getByTestId("combobox-create").click();
     await expect(page.getByTestId("tracker-project")).toContainText(
-      PROJECT_NAME,
+      PROJECT_NAME
     );
 
     await logManualEntry(page, "Report groundwork", FIRST_DURATION);
@@ -94,7 +114,7 @@ test.describe("Reports", () => {
     // Nothing may be running: a live entry would make the report totals move
     // between assertions.
     await expect(
-      page.locator('[data-testid="entry-row"][data-running="true"]'),
+      page.locator('[data-testid="entry-row"][data-running="true"]')
     ).toHaveCount(0);
   });
 
@@ -109,7 +129,7 @@ test.describe("Reports", () => {
     // Default grouping is by project.
     await expect(page.getByTestId("groupby-project")).toHaveAttribute(
       "aria-pressed",
-      "true",
+      "true"
     );
     const summaryRows = page.locator('[data-testid^="summary-row-"]');
     await expect(summaryRows).toHaveCount(1);
@@ -117,7 +137,7 @@ test.describe("Reports", () => {
     await expect(summaryRows.first()).toContainText(TOTAL_DURATION);
 
     await expect(page.getByTestId("summary-total-duration")).toHaveText(
-      TOTAL_DURATION,
+      TOTAL_DURATION
     );
     await expect(page.getByTestId("summary-empty")).toHaveCount(0);
 
@@ -125,22 +145,66 @@ test.describe("Reports", () => {
     await page.getByTestId("groupby-client").click();
     await expect(page.getByTestId("groupby-client")).toHaveAttribute(
       "aria-pressed",
-      "true",
+      "true"
     );
     await expect(page).toHaveURL(/group=client/);
     await expect(summaryRows).toHaveCount(1);
     // The project has no client, so everything rolls up under the fallback.
     await expect(summaryRows.first()).toContainText("No client");
     await expect(page.getByTestId("summary-total-duration")).toHaveText(
-      TOTAL_DURATION,
+      TOTAL_DURATION
     );
 
     // …and switching back lists the project again.
     await page.getByTestId("groupby-project").click();
     await expect(summaryRows.first()).toContainText(PROJECT_NAME);
     await expect(page.getByTestId("summary-total-duration")).toHaveText(
-      TOTAL_DURATION,
+      TOTAL_DURATION
     );
+  });
+
+  test("creates and renames a client from the filter bar", async ({ page }) => {
+    await page.goto(`/reports/summary${RANGE_QUERY}`);
+    await expect(page.getByTestId("report-filters")).toBeVisible();
+
+    // ── create one, without leaving the report ──────────────────────
+    await page.getByTestId("filter-clients").click();
+    await page.getByTestId("filter-clients-new").click();
+
+    const dialog = page.getByTestId("client-dialog");
+    await expect(dialog).toBeVisible();
+    await page.getByTestId("client-name-input").fill("Filter Bar Co");
+    await page.getByTestId("client-submit").click();
+    await expect(dialog).toBeHidden();
+
+    // It lands in the very list it was created from.
+    await page.getByTestId("filter-clients").click();
+    const option = page
+      .locator('[data-testid^="filter-clients-option-"]')
+      .filter({ hasText: "Filter Bar Co" });
+    await expect(option).toHaveCount(1);
+    const clientId = await idFromTestId(option, "filter-clients-option-");
+
+    // ── and the pencil edits it, rather than ticking the filter ─────
+    await page.getByTestId(`filter-clients-edit-${clientId}`).click();
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("client-name-input")).toHaveValue(
+      "Filter Bar Co"
+    );
+    await page.getByTestId("client-name-input").fill("Filter Bar Ltd");
+    await page.getByTestId("client-submit").click();
+    await expect(dialog).toBeHidden();
+
+    // The pencil is not a selection: no client filter reached the URL.
+    await expect(page).not.toHaveURL(/clients=/);
+    await expect(page.getByTestId("summary-total-duration")).toHaveText(
+      TOTAL_DURATION
+    );
+
+    await page.getByTestId("filter-clients").click();
+    await expect(
+      page.getByTestId(`filter-clients-option-${clientId}`)
+    ).toContainText("Filter Bar Ltd");
   });
 
   test("detailed lists every entry in the range", async ({ page }) => {
@@ -157,13 +221,13 @@ test.describe("Reports", () => {
     await expect(page.getByTestId("detailed-load-more")).toHaveCount(0);
 
     await expect(page.getByTestId("detailed-table")).toContainText(
-      "Report groundwork",
+      "Report groundwork"
     );
     await expect(page.getByTestId("detailed-table")).toContainText(
-      "Report polish",
+      "Report polish"
     );
     await expect(page.getByTestId("detailed-table")).toContainText(
-      PROJECT_NAME,
+      PROJECT_NAME
     );
 
     // Narrowing to a range with no tracked time empties the log rather than
