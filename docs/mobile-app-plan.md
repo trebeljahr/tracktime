@@ -114,6 +114,51 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
   `position: fixed` element — the sticky header, the tracker bar, stage 3's tab
   bar — behind the keyboard, and `"none"` leaves the focused field there.
 
+**Stage 3 corrections**, likewise carried forward:
+
+- `initMobile` no longer takes handlers that matter. The critics' finding was
+  right and the fix is a module-level handler table plus an exported
+  `setMobileHandlers(next)` returning its own teardown; the `backButton` and
+  `appStateChange` listeners are now registered unconditionally on the first
+  init and read *through* that table. The plan's "pass an `onBackButton`
+  handler from AppShell down through `MobileBridgeLoader` into `initMobile`"
+  would have registered nothing.
+- **The back button's exit contract had to change with it.** The plan calls
+  `handled === false && event.canGoBack === false → App.exitApp()` "the right
+  contract", and it is not: adding a `backButton` listener overrides
+  Capacitor's default, and a single-page app accumulates history entries just
+  by moving between tabs, so `canGoBack` is nearly always true and the button
+  became a silent no-op at the root — the one place it must exit. Now: if a
+  handler is registered it is the whole authority (`false` means exit); if none
+  is (the sign-in screen, which is outside `AppShell`), fall back to
+  `history.back()` / `exitApp()` on `canGoBack`.
+- The decision itself lives in `mobile/back-button.ts`, not inline in
+  `AppShell`, so it is unit-testable without mounting the shell. Step 2 is a
+  navigation to `/track`, not `router.back()`: history here is whatever the
+  user browsed, so `back()` from three screens deep walks through them one at a
+  time instead of returning to the root tab.
+- Overlays register in `ui/dialog.tsx`'s `Dialog` wrapper — once, in the
+  primitive — rather than in each of the app's eleven dialogs. Only a
+  *controlled* dialog registers: an uncontrolled one has no `onOpenChange` to
+  close it with, and an entry that back can pop but not close swallows the
+  press and does nothing.
+- `isActiveRoute` (and the `NavItem` type) moved to `lib/nav.ts`. The plan says
+  to reuse the one exported from `app-shell.tsx`, but the shell renders the tab
+  bar, so importing it back would be a cycle whose resolution depends on which
+  module the bundler reaches first — and `isActiveRoute` is a `const`, so the
+  losing order is a TDZ error, not a warning. `app-shell.tsx` re-exports both.
+- The bar is hidden with Tailwind's `hidden` utility and revealed by a single
+  `body.cap` rule, so `native.css` stays entirely `body.cap`-scoped — the file's
+  one rule. `--app-tab-bar-offset` (3.5rem + the bottom inset) is the single
+  number the bar's height and `app-main`'s padding both read.
+- Exactly one tab is ever lit: while the drawer is open it is More, even
+  standing on `/track`. More is also lit on any route no tab owns (`/settings`,
+  `/calendar`), because a bar with nothing lit reads as broken.
+- Stage 9 still owns the real Android verification. The back button cannot be
+  pressed on iOS, so the contract above is covered by a unit test against
+  faked Capacitor plugins (`mobile/bridge-handlers.test.ts`, which fails 7/7
+  against the pre-stage-3 bridge) rather than by a device.
+
 ## Summary
 
 Ship the phone app as the existing Next.js client inside a Capacitor shell — one composition, not a second UI. Everything mobile is either scoped to `body.cap` (a class `packages/client/src/mobile/bridge.ts:30` already sets and nothing styles), behind the synchronous `isNative()` check in that same file, or a correctness fix the web build also wants. No new screens for reports, timesheet, invoices or catalog; they stay honestly cramped one level down. Cookie auth is abandoned for native (a `capacitor://localhost` document is cross-site to the API and loses to WKWebView ITP regardless of SameSite) in favour of the bearer path `packages/core/src/session-auth.ts` was written for — which needs zero server code, only `TRUSTED_ORIGINS`. Stage 1 ends with a signed-in app on the iOS Simulator starting and stopping a real timer against `pnpm run dev`, verified against a real `pnpm build:mobile` bundle rather than live reload, because under live reload the document origin is `http://localhost:7130`, which is same-site with a localhost API and would make cookie auth misleadingly appear to work. Later stages add native chrome, a three-tab bar, resume/offline durability, calendar touch de-hostility, and two zero-custom-native wins (haptics, a runaway-timer local notification). No Swift, no Kotlin, no widget extension, no second HTTP client — the judges called all of that the fatal path.

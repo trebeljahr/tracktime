@@ -291,6 +291,35 @@ on top of it). And `native.css` is unlayered while Tailwind's utilities are in
 `@layer utilities`, so its rules already beat them — no `!important` needed, and
 adding one would only hide the fact that the cascade is doing the work.
 
+**The bottom tab bar renders on every platform.** `components/mobile-tab-bar.tsx`
+ships in the web bundle too and is `display: none` there — Tailwind's `hidden`,
+undone by the one `body.cap` rule in `native.css`. It must not branch on
+`isNative()`: under `output: "export"` every page is prerendered in Node, where
+`window.Capacitor` cannot exist, so a tree that differs at hydration is a
+mismatch React resolves by discarding the served DOM. The same argument applies
+to anything else the phone shows and the web does not. Three tabs, and the third
+opens the *existing* drawer with the *existing* `NAV_SECTIONS` — there is no
+second list of destinations, so a new web screen reaches the phone for free.
+
+**Native handlers are registered with `setMobileHandlers`, never through
+`initMobile`.** `initMobile` latches on its first call, and that call is
+`MobileBridgeLoader` at the app root — before `AppShell` exists, and on screens
+where it never mounts. Handlers passed in afterwards are dropped in silence.
+The `backButton` and `appStateChange` listeners are registered unconditionally
+and read through a mutable table that `setMobileHandlers` fills from a React
+effect; it returns its own teardown, and the teardown clears only the exact
+functions it installed.
+
+Adding a `backButton` listener also *overrides* Capacitor's default, so that
+callback is the whole behaviour of the button. `event.canGoBack` is not the
+signal it looks like: a single-page app accumulates history entries just by
+moving between tabs, so it is nearly always true. The order is
+`mobile/back-button.ts` — close the top overlay, else go to `/track`, else
+return `false`, which means exit. Overlays register themselves in
+`mobile/overlay-stack.ts`; dialogs do it once in `ui/dialog.tsx` rather than
+eleven times, and only when controlled (an uncontrolled dialog has no
+`onOpenChange`, so back would swallow the press and do nothing).
+
 ### Native client auth
 
 Better-auth uses cookies; native shells need extra CORS/trust origins.
