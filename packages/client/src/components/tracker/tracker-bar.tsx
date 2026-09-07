@@ -17,7 +17,7 @@ import { QuickStartMenu } from "@/components/tracker/quick-start-menu";
 import { useEntryMutations } from "@/components/tracker/use-entry-mutations";
 import { useIdleGuard } from "@/components/tracker/use-idle-guard";
 import { useRunawayGuard } from "@/components/tracker/use-runaway-guard";
-import { useOfflineQueue } from "@/hooks/use-offline-queue";
+import { useOfflineQueueState } from "@/providers/offline-queue-provider";
 import { useRunningEntry } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
 import { isNative } from "@/mobile/bridge";
@@ -34,7 +34,9 @@ export function TrackerBar(): React.JSX.Element {
   const format = useFormatSettings();
   const mutations = useEntryMutations();
   useRunawayGuard(mutations);
-  const { pending, online, authBlocked } = useOfflineQueue();
+  // The shell owns the queue, so it keeps draining on Reports and Settings
+  // too — see providers/offline-queue-provider.tsx.
+  const { pending, online, authBlocked } = useOfflineQueueState();
   const projects = trpc.projects.list.useQuery({});
 
   const [manualOpen, setManualOpen] = React.useState(false);

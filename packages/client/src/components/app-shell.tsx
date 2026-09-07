@@ -44,7 +44,9 @@ import {
 } from "@/components/ui/tooltip";
 import { ThemeSync } from "@/components/theme-sync";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useNativeLifecycle } from "@/hooks/use-native-lifecycle";
 import { useRunningEntry, useSync } from "@/hooks/use-sync";
+import { OfflineQueueProvider } from "@/providers/offline-queue-provider";
 import { useFormatSettings } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
 import { signOut } from "@/lib/auth-client";
@@ -274,13 +276,31 @@ export type AppShellProps = {
 
 /**
  * Sidebar + top bar chrome for every signed-in screen. Also the single mount
- * point for the realtime sync socket — mounting it anywhere else would open a
- * second connection per tab.
+ * point for the realtime sync socket and the offline queue — mounting either
+ * anywhere else would open a second connection, or a second flush loop, per
+ * tab.
+ *
+ * The queue is a provider around the shell rather than a hook inside it
+ * because the resume handler needs the same `flush` the tracker bar shows the
+ * pending count for. Until now the queue was mounted in `TrackerBar`, which
+ * renders only on `/track` — so reconnecting on any other screen drained
+ * nothing at all.
  */
 export function AppShell({ children }: AppShellProps): React.JSX.Element {
+  return (
+    <OfflineQueueProvider>
+      <AppShellChrome>{children}</AppShellChrome>
+    </OfflineQueueProvider>
+  );
+}
+
+function AppShellChrome({ children }: AppShellProps): React.JSX.Element {
   const pathname = usePathname();
   const router = useRouter();
   const status = useSync();
+  // Resume/pause for the native shells. A no-op on web, where nothing ever
+  // calls the handlers it registers.
+  useNativeLifecycle();
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [lastPath, setLastPath] = React.useState(pathname);
 
