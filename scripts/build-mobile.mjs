@@ -204,50 +204,108 @@ if (platforms.includes("ios")) {
   console.log(`    ${checked} iOS plugin(s), all SPM-compatible`);
 }
 
-// 3c-bis. The native identifiers and version live in project.pbxproj, which
-// nothing else reads — so drift between it and package.json is invisible until
-// App Store Connect rejects the upload. `cap sync` does not rewrite them.
-if (platforms.includes("ios")) {
-  const pbxproj = readFileSync(
-    resolve(repoRoot, "ios/App/App.xcodeproj/project.pbxproj"),
-    "utf8",
-  );
+// 3c-bis. The native identifiers and version are hand-edits. `cap add` is a
+// bare template extraction — @capacitor/cli/dist/ios/add.js and .../android/add.js
+// call extractTemplate() and nothing else, so the shipped archives' own
+// placeholders (com.getcapacitor.App / "My App" on iOS, com.getcapacitor.myapp +
+// com.getcapacitor.app on Android) survive into the generated tree unless
+// somebody edits them. `cap sync` never rewrites them either, so drift between
+// them and capacitor.config.ts / package.json is invisible until a store
+// rejects the upload. Asserted here, for both platforms.
+{
   const rootVersion = JSON.parse(
     readFileSync(resolve(repoRoot, "package.json"), "utf8"),
   ).version;
   const capConfig = readFileSync(resolve(repoRoot, "capacitor.config.ts"), "utf8");
   const appId = capConfig.match(/appId:\s*"([^"]+)"/)?.[1];
+  const appName = capConfig.match(/appName:\s*"([^"]+)"/)?.[1];
+  const PLACEHOLDERS = ["com.getcapacitor", "com.example"];
 
-  const placeholder = ["com.getcapacitor", "com.example"].find((p) =>
-    pbxproj.includes(p),
-  );
-  if (placeholder) {
-    fail(
-      `ios/ still carries the template identifier "${placeholder}". \`cap add\` does not\n` +
-        "  always write appId into the native project — set PRODUCT_BUNDLE_IDENTIFIER in\n" +
-        "  BOTH the Debug and Release build configurations by hand.",
+  /** Every identifier the file declares must equal `expected`. */
+  const assertAll = (label, file, values, expected) => {
+    const found = [...new Set(values)];
+    if (expected && found.some((v) => v !== expected)) {
+      fail(
+        `${label} (${found.join(", ") || "nothing"}) disagrees with ${expected}.\n` +
+          `  Edit ${file} — every build configuration in it.`,
+      );
+    }
+  };
+
+  if (platforms.includes("ios")) {
+    const pbxPath = "ios/App/App.xcodeproj/project.pbxproj";
+    const pbxproj = readFileSync(resolve(repoRoot, pbxPath), "utf8");
+    const plistPath = "ios/App/App/Info.plist";
+    const plist = readFileSync(resolve(repoRoot, plistPath), "utf8");
+
+    const placeholder = PLACEHOLDERS.find((p) => pbxproj.includes(p));
+    if (placeholder) {
+      fail(
+        `ios/ still carries the template identifier "${placeholder}". \`cap add\` does\n` +
+          "  NOT write appId into the native project — set PRODUCT_BUNDLE_IDENTIFIER in\n" +
+          "  BOTH the Debug and Release build configurations by hand.",
+      );
+    }
+    assertAll(
+      "PRODUCT_BUNDLE_IDENTIFIER",
+      pbxPath,
+      [...pbxproj.matchAll(/PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/g)].map((m) =>
+        m[1].trim(),
+      ),
+      appId,
     );
-  }
-  const bundleIds = [...pbxproj.matchAll(/PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/g)].map(
-    (m) => m[1].trim(),
-  );
-  if (appId && bundleIds.some((id) => id !== appId)) {
-    fail(
-      `PRODUCT_BUNDLE_IDENTIFIER (${[...new Set(bundleIds)].join(", ")}) disagrees with\n` +
-        `  capacitor.config.ts appId (${appId}).`,
+    assertAll(
+      "MARKETING_VERSION",
+      pbxPath,
+      [...pbxproj.matchAll(/MARKETING_VERSION = ([^;]+);/g)].map((m) => m[1].trim()),
+      rootVersion,
     );
+    const displayName = plist
+      .match(/<key>CFBundleDisplayName<\/key>\s*<string>([^<]*)<\/string>/)?.[1]
+      ?.trim();
+    if (appName && displayName !== appName) {
+      fail(
+        `CFBundleDisplayName (${displayName ?? "missing"}) disagrees with\n` +
+          `  capacitor.config.ts appName (${appName}). Edit ${plistPath}.`,
+      );
+    }
+    console.log(`    ios/ is ${appId} "${displayName}" ${rootVersion}`);
   }
-  const marketing = [...pbxproj.matchAll(/MARKETING_VERSION = ([^;]+);/g)].map((m) =>
-    m[1].trim(),
-  );
-  if (marketing.some((v) => v !== rootVersion)) {
-    fail(
-      `MARKETING_VERSION (${[...new Set(marketing)].join(", ")}) disagrees with\n` +
-        `  package.json version (${rootVersion}). Update both build configurations in\n` +
-        "  ios/App/App.xcodeproj/project.pbxproj.",
+
+  if (platforms.includes("android")) {
+    const gradlePath = "android/app/build.gradle";
+    const gradle = readFileSync(resolve(repoRoot, gradlePath), "utf8");
+
+    const placeholder = PLACEHOLDERS.find((p) => gradle.includes(p));
+    if (placeholder) {
+      fail(
+        `android/ still carries the template identifier "${placeholder}". \`cap add\`\n` +
+          "  does NOT write appId into the native project — set BOTH `namespace` and\n" +
+          `  \`applicationId\` in ${gradlePath} by hand.`,
+      );
+    }
+    assertAll(
+      "namespace",
+      gradlePath,
+      [...gradle.matchAll(/^\s*namespace\s*=?\s*["']([^"']+)["']/gm)].map((m) => m[1]),
+      appId,
     );
+    assertAll(
+      "applicationId",
+      gradlePath,
+      [...gradle.matchAll(/^\s*applicationId\s*=?\s*["']([^"']+)["']/gm)].map(
+        (m) => m[1],
+      ),
+      appId,
+    );
+    assertAll(
+      "versionName",
+      gradlePath,
+      [...gradle.matchAll(/^\s*versionName\s*=?\s*["']([^"']+)["']/gm)].map((m) => m[1]),
+      rootVersion,
+    );
+    console.log(`    android/ is ${appId} ${rootVersion}`);
   }
-  console.log(`    ios/ is ${appId} ${rootVersion}`);
 }
 
 // 3d. Xcode toolchain. `cap run ios` shells out to xcodebuild; a

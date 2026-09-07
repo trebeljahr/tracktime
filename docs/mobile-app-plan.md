@@ -19,11 +19,16 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
 
 - The flag is `RELATIVE_ASSET_PREFIX=1`, not `ELECTRON_BUILD=1` (see the
   critics' naming argument), and `NATIVE_BUILD` is gone entirely.
-- `cap add ios` on Capacitor **8.3.4 does** stamp `appId` and `appName` into
-  `project.pbxproj` and `Info.plist` — verified on the generated tree. The
-  critic finding that says otherwise was read off an older CLI. What the CLI
-  does not do is keep them in step afterwards, so `scripts/build-mobile.mjs`
-  asserts them instead.
+- `cap add` on Capacitor **8.3.4 applies neither `appId` nor `appName`** to the
+  native projects — the critic finding is correct, and an earlier note here
+  claiming the opposite was wrong. `@capacitor/cli/dist/ios/add.js` is a bare
+  `extractTemplate()` call with no substitution step, and the shipped
+  `assets/ios-spm-template.tar.gz` carries `PRODUCT_BUNDLE_IDENTIFIER =
+  com.getcapacitor.App` in both configurations plus `CFBundleDisplayName = My
+  App`. `assets/android-template.tar.gz` is the same story with `namespace =
+  "com.getcapacitor.myapp"` and `applicationId "com.getcapacitor.app"`. So the
+  identifiers are hand-edits in both trees, and `scripts/build-mobile.mjs`
+  asserts them — for **iOS and Android alike** — so a placeholder cannot ship.
 - The mobile export lives in `packages/client/out-mobile`, not the shared
   `out/`. With `output: "export"` a custom `distDir` **is** the out dir
   (`next/dist/export/utils.js hasCustomExportOutput`), which is what makes this
