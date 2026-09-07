@@ -352,12 +352,16 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   is `CATALOG_COLORS` in `@starter/shared` — the same list the server assigns
   from and the web picker renders, so a color picked in one client is a color
   the next one can name.
-- Menu bar commands only re-run on their interval (1 min) and when opened, so
-  the clock is `h:mm`; mutations call `refreshMenuBar()` to avoid a stale value.
-  The `Timer` view command is the live counterpart — on screen, so it can hold a
-  one-second interval and push forms, which a menu bar item cannot. Both read
-  `lib/timer-data.ts`, so the two surfaces cannot disagree about what is
-  running.
+- Raycast unloads a menu bar command once its first render settles, so a
+  `setInterval` in it fires once and stops. An unfinished load is the one thing
+  that keeps the process alive: the item passes `isLoading` while a timer runs,
+  which is what lets the clock tick `m:ss` every second, and drops it when the
+  timer stops so an idle item costs nothing. `interval` (30s) and the dropdown
+  opening cover the unloaded case; while alive it re-reads every 20s so a timer
+  started in another client shows up, and mutations call `refreshMenuBar()`
+  rather than waiting for either. The `Timer` view command is the surface that
+  can push forms, which a menu bar item cannot. Both read `lib/timer-data.ts`,
+  so the two surfaces cannot disagree about what is running.
 - Server origin and web origin come from extension preferences. Empty follows
   the build, the same convention as the browser extension's build targets:
   `ray build` → the deployed hosts, `ray develop` → `localhost:5159` /

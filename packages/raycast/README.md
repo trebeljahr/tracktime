@@ -12,7 +12,7 @@ have to search inside of.
 | Command | Mode | What it does |
 | --- | --- | --- |
 | **Timer** | view | Start and stop. Running: the elapsed time ticking by the second, with stop, edit, refile, pin and discard. Idle: the start form, favorites and recent work. |
-| **Timer Menu Bar** | menu bar | The same picture at a glance. Stop, edit, move to a project, pin, discard, continue recent work, today's total. |
+| **Timer Menu Bar** | menu bar | The same picture at a glance, with the clock ticking by the second while a timer runs. Stop, edit, move to a project, pin, discard, continue recent work, today's total. |
 | **Show All Time** | view | Last 14 days grouped by day — continue, edit, delete. |
 | **Open Dashboard** | no-view | Jumps to the web app. |
 
@@ -49,6 +49,13 @@ interruption the extension exists to avoid.
 
 ## Setup
 
+0. Install it: `pnpm build:raycast` from the repo root. `pnpm dev:raycast`
+   installs the extension too, but that build is only as fresh as the last
+   `ray develop` session — leave it at that and the menu bar item eventually
+   belongs to a build nobody is running any more, which looks exactly like the
+   feature not existing. Build once and the item is simply there, at login,
+   without opening Raycast: a menu bar command needs no launch, only the
+   command left enabled (Raycast Settings → Extensions → tracktime).
 1. Run **Timer**. Signed out it offers **Sign in to tracktime**: ⏎ shows a
    short code and opens the approval page in your browser; confirm the code
    there while signed in to the web app. (Pairing has no command of its own —
@@ -88,17 +95,24 @@ committed so `pnpm typecheck` works on machines without Raycast installed.
 
 ### Menu bar refresh, and why the menu bar is a second surface
 
-Raycast only re-runs a menu bar command on its interval (1 minute here) and when
-its dropdown opens, so the clock shows `h:mm` rather than a second-by-second
-count that would be wrong most of the time. Commands that change the timer call
-`refreshMenuBar()` so the menu bar does not sit on a stale value after a hotkey.
+Raycast unloads a menu bar command as soon as its first render settles: a
+`setInterval` in the component fires once and never again, and the item then
+sits on whatever it last drew until the interval (30 seconds here) or an open
+dropdown re-runs it. What keeps the process alive is an unfinished load, so the
+item passes `isLoading` for exactly as long as it has a second to count — a
+running timer ticks `m:ss` off its own clock, and an idle one stops claiming to
+load and is unloaded like any other command. The `tickSeconds` preference turns
+that off for anyone who would rather have the process gone.
 
-**Timer** is the answer to the other half of that: a view command is on screen,
-so it can hold a one-second interval and show a real `0:12:34` that moves, and
-it can push a form — which a menu bar item cannot. That is why **Edit Timer…**
-in the dropdown hands off to it instead of trying to edit in place. Both read
-the same snapshot (`lib/timer-data.ts`), so they can never disagree about what
-is running.
+Alive, the command also re-reads the server every 20 seconds, which is how a
+timer started in the web app or on another machine reaches the menu bar.
+Commands that change the timer themselves call `refreshMenuBar()` instead of
+waiting for that, so a hotkey lands immediately.
+
+**Timer** remains the richer surface: a view command can push a form, which a
+menu bar item cannot. That is why **Edit Timer…** in the dropdown hands off to
+it instead of trying to edit in place. Both read the same snapshot
+(`lib/timer-data.ts`), so they can never disagree about what is running.
 
 ## Troubleshooting
 

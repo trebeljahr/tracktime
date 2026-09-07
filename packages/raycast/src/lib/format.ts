@@ -14,15 +14,34 @@ export const elapsedSec = (entry: TimeEntry): number =>
   entryDurationSec(entry, Date.now());
 
 /**
- * Menu bar clock. Seconds are deliberately left out: a menu bar command only
- * re-runs on its interval, so a ticking second would be wrong most of the
- * time. Minutes are honest at a one-minute refresh.
+ * Menu bar clock for a total that is not moving — today's tracked time while
+ * nothing runs. `h:mm`, because a total nobody is adding to has no second
+ * worth showing.
  */
 export const formatMenuBarDuration = (seconds: number): string => {
   const total = Math.max(0, Math.round(seconds));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   return `${hours}:${String(minutes).padStart(2, "0")}`;
+};
+
+/**
+ * Menu bar clock for the running timer, ticking: `m:ss` under an hour and
+ * `h:mm:ss` above it.
+ *
+ * The elapsed time is derived from the entry's start, not from the server, so
+ * the second only needs the command's own process to still be alive — the
+ * interval refetch is about *which* entry is running, never about the clock.
+ * The hour is dropped below 60 minutes so the item stays about as wide as the
+ * clock beside it in the menu bar.
+ */
+export const formatMenuBarClock = (seconds: number): string => {
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = String(total % 60).padStart(2, "0");
+  if (hours === 0) return `${minutes}:${secs}`;
+  return `${hours}:${String(minutes).padStart(2, "0")}:${secs}`;
 };
 
 /** Respects the workspace's hms/decimal preference when one is loaded. */

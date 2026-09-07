@@ -22,6 +22,8 @@ declare namespace Preferences {
   export type MenuBar = ExtensionPreferences & {
   /** Menu Bar Title - What the menu bar shows while a timer runs. */
   "titleMode": "duration" | "description" | "both" | "icon",
+  /** Clock - Keeps the command loaded so the menu bar clock moves every second. Off shows minutes, refreshed on the command's interval. */
+  "tickSeconds": boolean,
   /** Idle - Keeps the menu bar clean; the item reappears on the next start. */
   "hideWhenIdle": boolean
 }

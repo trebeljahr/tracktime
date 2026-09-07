@@ -21,9 +21,10 @@ import { BRAND_MARK } from "./lib/brand.js";
 import {
   formatClock,
   formatDurationShort,
+  formatMenuBarClock,
   formatMenuBarDuration,
 } from "./lib/format.js";
-import { useApi } from "./lib/hooks.js";
+import { useApi, useNow, usePoll } from "./lib/hooks.js";
 import { webLink } from "./lib/preferences.js";
 import {
   entryHint,
@@ -36,17 +37,49 @@ import { showFailureToast } from "./lib/ui.js";
 /** A dropdown is a glance, not a browser — six rows is already a lot. */
 const RECENT_LIMIT = 6;
 
+/**
+ * How often the item asks the server what is running.
+ *
+ * The clock itself does not need this — it counts up locally from the running
+ * entry's start. This is only about noticing a timer that was started or
+ * stopped somewhere else: the web app, the browser extension, another
+ * machine. Twenty seconds is far below the `interval` in the manifest, which
+ * exists for the case where this process is no longer alive at all.
+ */
+const POLL_MS = 20_000;
+
 /** The live command, where the clock ticks and forms can be pushed. */
 const openTimer = (): void => {
   void launchCommand({ name: "timer", type: LaunchType.UserInitiated });
 };
 
 export default function MenuBar(): React.JSX.Element | null {
-  const { titleMode, hideWhenIdle } =
+  const { titleMode, hideWhenIdle, tickSeconds } =
     getPreferenceValues<Preferences.MenuBar>();
   const { data, isLoading, signedOut, revalidate } = useApi("menu-bar", (api) =>
     loadTimerSnapshot(api, { recentLimit: RECENT_LIMIT }),
   );
+
+  const running = data?.running ?? null;
+
+  /**
+   * Whether this item is currently a clock rather than a label.
+   *
+   * Raycast unloads a menu bar command the moment its first render settles,
+   * and an unloaded command's `setInterval` never fires again — which is why
+   * the title used to be minutes, honest at a one-minute refresh and wrong in
+   * between. The one thing that keeps the process alive is an unfinished
+   * load, so an item that ticks says it is loading for as long as it ticks,
+   * and stops claiming that the second the timer stops.
+   */
+  const ticking = tickSeconds && running !== null;
+
+  // Both hooks run on every render, before any of the early returns below:
+  // React requires it, and the poll has to keep running precisely in the
+  // states where the item shows nothing — a hidden idle item is how a timer
+  // started in the web app would otherwise go unnoticed.
+  const now = useNow(ticking);
+  usePoll(revalidate, POLL_MS);
 
   if (signedOut) {
     return (
@@ -60,11 +93,10 @@ export default function MenuBar(): React.JSX.Element | null {
     );
   }
 
-  const running = data?.running ?? null;
   if (!running && !isLoading && hideWhenIdle) return null;
 
-  const elapsed = running ? entryDurationSec(running, Date.now()) : 0;
-  const clock = formatMenuBarDuration(elapsed);
+  const elapsed = running ? entryDurationSec(running, now) : 0;
+  const clock = formatMenuBarClock(elapsed);
   const label = running ? entryLabel(running) : "";
   const favorites = data?.favorites ?? [];
   const projects = data?.projects ?? [];
@@ -129,7 +161,7 @@ export default function MenuBar(): React.JSX.Element | null {
     <MenuBarExtra
       icon={BRAND_MARK}
       title={title}
-      isLoading={isLoading}
+      isLoading={ticking || isLoading}
       tooltip={
         running
           ? `${label} — ${clock}`
@@ -140,8 +172,7 @@ export default function MenuBar(): React.JSX.Element | null {
     >
       {running ? (
         <MenuBarExtra.Section title={label}>
-          {/* The dropdown re-reads on open, so this line is current whenever
-              it is on screen — the menu bar title only moves on the interval. */}
+          {/* Same clock as the title, spelled out rather than abbreviated. */}
           <MenuBarExtra.Item
             title={`Running for ${formatDurationShort(elapsed)}`}
             subtitle={`since ${formatClock(running.start)}`}

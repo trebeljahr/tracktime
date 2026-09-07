@@ -16,7 +16,7 @@
       "subtitle": "tracktime",
       "description": "Show the running timer in the macOS menu bar.",
       "mode": "menu-bar",
-      "interval": "1m",
+      "interval": "30s",
       "preferences": [
         {
           "name": "titleMode",
@@ -31,6 +31,15 @@
             { "title": "Duration and description", "value": "both" },
             { "title": "Icon only", "value": "icon" }
           ]
+        },
+        {
+          "name": "tickSeconds",
+          "title": "Clock",
+          "label": "Count the seconds up while a timer runs",
+          "description": "Keeps the command loaded so the menu bar clock moves every second. Off shows minutes, refreshed on the command's interval.",
+          "type": "checkbox",
+          "required": false,
+          "default": true
         },
         {
           "name": "hideWhenIdle",

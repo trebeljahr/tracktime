@@ -48,6 +48,21 @@ export function useApi<T>(
 }
 
 /**
+ * Re-run a loader on a timer, for a surface that has to notice a change it
+ * did not make itself.
+ *
+ * Every tracktime client refreshes the menu bar after its own mutations, so
+ * this is only about the ones that cannot: a timer started in the web app, on
+ * another machine, or by a build of this extension that is not running.
+ */
+export function usePoll(revalidate: () => void, intervalMs: number): void {
+  useEffect(() => {
+    const id = setInterval(revalidate, intervalMs);
+    return () => clearInterval(id);
+  }, [revalidate, intervalMs]);
+}
+
+/**
  * A clock that re-renders its caller, so an elapsed time on screen actually
  * moves.
  *
