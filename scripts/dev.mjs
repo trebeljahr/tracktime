@@ -290,12 +290,26 @@ if (existsSync(lockFile)) {
 const devExtensionOrigin = extensionOrigin(
   resolve(repoRoot, "packages/extension/dist"),
 );
+// The Capacitor shells' document origins. A native WKWebView/WebView serves the
+// bundled app from capacitor://localhost (iOS) or https://localhost (Android),
+// and better-auth force-validates Origin whenever a request carries Sec-Fetch-*
+// headers — which every real WebView fetch does — so without these, sign-in
+// answers 403 INVALID_ORIGIN before the password is checked and the socket
+// upgrade is refused as an untrusted origin.
+//
+// They belong HERE and not only in .env.development, because line ~340 passes
+// TRUSTED_ORIGINS on the server child's command line and config/env.ts loads
+// dotenvx without `overload` — so a key already in the environment wins and the
+// file's value is skipped. Same rule as MONGODB_URI above.
+const capacitorOrigins = ["capacitor://localhost", "https://localhost"];
+
 const trustedOrigins = [
   ...(process.env.TRUSTED_ORIGINS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
   devExtensionOrigin,
+  ...capacitorOrigins,
 ];
 
 console.log(`\n  Instance: ${instanceId}`);
@@ -312,7 +326,7 @@ if (includeDocs) {
 console.log(`  Server:   http://${WEB_HOST}:${apiPort}`);
 console.log(`  Database: ${mongoUri}`);
 console.log(`  Next dir: packages/client/${nextDistDir}`);
-console.log(`  Trusts:   ${devExtensionOrigin} (dev extension)\n`);
+console.log(`  Trusts:   ${trustedOrigins.join(", ")}\n`);
 
 if (dryRun) process.exit(0);
 
