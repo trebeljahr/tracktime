@@ -37,6 +37,9 @@ const affectsTimer = (event: SyncEvent): boolean => {
       return true;
     case "invoice.changed":
     case "settings.changed":
+    // An API token or webhook subscription changing alters no timer surface —
+    // it is Settings-only state, and Raycast shows none of it.
+    case "integrations.changed":
       return false;
     default: {
       // A new SyncEvent kind stops this file compiling rather than silently

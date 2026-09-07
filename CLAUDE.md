@@ -337,6 +337,66 @@ the lossless one (colors, archived catalog rows, project rates) and references
 the catalog **by name**, so it can be imported into a different workspace or
 into an empty one after the database it came from is gone.
 
+### Public REST API and webhooks
+
+`/api/v1` is the token-authenticated REST surface third parties integrate
+against — entries, catalog and reports, with webhooks pushing the same events
+out. `docs/api.md` is the maintainer's view; `docs-site/docs/api/` is the
+integrator's.
+
+**REST never enters tRPC.** A request authenticates in `api/v1/auth.ts`, builds
+a `WorkspaceScope`, and calls the same extracted services (`services/entries/`,
+`services/catalog/`) the tRPC resolvers call. No synthetic context, no token
+path through `workspaceProcedure`. That is what makes "a token can never name a
+workspace of its own" structural rather than a rule per handler: the request
+never reaches `workspaceIdFromInput` at all. It also means a REST write
+publishes the same sync event and enqueues the same webhooks as a tRPC one —
+nothing under `api/v1/` re-implements a business rule.
+
+```bash
+pnpm run openapi:emit                 # regenerate the two committed artifacts
+```
+
+Five rules, each of which fails quietly if broken:
+
+- **`API_ROUTES` in `api/v1/routes-table.ts` is the only source of truth.**
+  Express mounts from it and `z.toJSONSchema` builds the OpenAPI document from
+  the same shared zod schemas the handlers validate with (zod 4, native — never
+  add a zod-to-openapi dependency). A route not in the table is not mounted; a
+  route in it with no handler throws at boot rather than 404-ing in production.
+- **`docs-site/static/openapi.json` and `docs-site/docs/api/reference.md` are
+  committed.** A spec regenerated at deploy time is a spec nobody reviews in a
+  diff. `tests/openapi-document.test.ts` fails when either is stale.
+- **A token's visibility is live, intersected with a frozen ceiling.** Revoking
+  a permission narrows it on the next request; granting one never widens a
+  token minted before. A removed member's token is dead — `401`, not `403`.
+- **Money is projected where that is honest and refused where it is not.**
+  `GET /entries*` nulls a colleague's `hourlyRate`, `GET /projects*` nulls
+  `progress`, and `GET /reports/*` answers `403 money-visibility-required`
+  rather than inventing a total. No invoice, CSV or PDF routes in v1, for the
+  same reason. Never recompute an amount at read time.
+- **Cross-workspace and foreign ids answer 404, never 403.** A 403 confirms the
+  id exists somewhere. `403` is for a scope or money refusal on a resource this
+  workspace genuinely owns, and every 5xx `detail` is the same fixed string in
+  every environment — the global `errorHandler` returns `err.message` verbatim
+  outside production, so REST answers its own errors instead of throwing into
+  it.
+
+Errors are RFC 9457 `application/problem+json`; successes are `{ data }`, with
+`nextCursor` always present and `null` on a list's last page. Rate limiting is
+a fixed 60s window per token (`API_RATE_LIMIT_PER_MINUTE`, default 600), Redis
+when there is one and per-process when there is not.
+
+Webhooks sign `HMAC-SHA256(secret, "<timestamp>.<rawBody>")` as `v1=<hex>`, over
+a `rawBody` computed ONCE and handed to `fetch` unchanged — stringify it twice
+and every receiver doing its job rejects the delivery as forged. Deliveries are
+projected at send time against the owner's live visibility (withheld reads as
+`skipped_visibility`, a permission outcome and not a failure), and
+`assertDeliverableUrl` re-resolves DNS before every attempt because a
+create-time-only SSRF check is decorative against rebinding.
+`WEBHOOK_ALLOW_PRIVATE_TARGETS=true` lifts the https and private-address rules
+for a local listener and belongs nowhere else.
+
 ### Raycast extension
 
 `packages/raycast` is a Raycast extension with a deliberately small surface —

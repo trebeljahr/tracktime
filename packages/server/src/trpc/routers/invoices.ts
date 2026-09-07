@@ -45,6 +45,7 @@ import {
 } from "../../services/invoice-number.js";
 import { invoicePdfFilename, renderInvoicePdf } from "../../services/invoice-pdf.js";
 import { publishSync } from "../../ws/sync.js";
+import { emitWebhookEvent } from "../../services/webhooks/emit.js";
 import { workspaceProcedure, router } from "../trpc.js";
 
 const DEFAULT_LIST_LIMIT = 50;
@@ -767,12 +768,19 @@ export const invoicesRouter = router({
         });
       }
 
+      const invoice = toClientInvoice(created);
       void publishSync(
         workspaceId,
         { kind: "invoice.changed", id: invoiceId },
         input.originId,
       );
-      return toClientInvoice(created);
+      // Fire-and-forget beside the sync publish, never awaited into the
+      // failure path: an integration is a consequence of an invoice, never a
+      // precondition of one. Delivery is projected at SEND time, and an
+      // invoice is money end to end, so a subscription owned by somebody
+      // without `canViewOthersMoney` is skipped rather than stripped.
+      emitWebhookEvent(workspaceId, "invoice.created", { kind: "invoice", invoice });
+      return invoice;
     }),
 
   /** Newest first, optionally filtered by status or client. */
@@ -859,12 +867,22 @@ export const invoicesRouter = router({
         });
       }
 
+      const invoice = toClientInvoice(updated);
       void publishSync(
         workspaceId,
         { kind: "invoice.changed", id: String(updated._id) },
         input.originId,
       );
-      return toClientInvoice(updated);
+      // `from` is the status validated against, not a re-read: by the time a
+      // consumer sees this the row has moved on, and re-reading it would
+      // describe a transition nobody made.
+      emitWebhookEvent(workspaceId, "invoice.status_changed", {
+        kind: "invoice-status",
+        invoice,
+        from: current.status,
+        to: input.status,
+      });
+      return invoice;
     }),
 
   /**

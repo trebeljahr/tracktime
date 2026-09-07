@@ -64,6 +64,11 @@ import {
 } from "../../models/TimeEntry.js";
 import { getOrCreateWorkspaceSettings } from "../../models/Settings.js";
 import { authorScopeFilter } from "../../models/WorkspaceMember.js";
+// The escaper is imported, never re-implemented: a second copy is one that
+// eventually misses a metacharacter, and the failure is silent — a search
+// pattern built from caller input reaches Mongo as a live regex, so an
+// unescaped `(a+)+$` lets the caller choose how much CPU the query costs.
+import { escapeRegExp } from "../../services/entries/errors.js";
 import { csvFilename, toCsv, type CsvColumn, type CsvRow } from "../../services/csv.js";
 import {
   renderDetailedPdf,
@@ -81,7 +86,7 @@ import { workspaceProcedure, router } from "../trpc.js";
  * deliberate: a report that forgets the filter does not throw, it silently
  * discloses.
  */
-type ReportScope = {
+export type ReportScope = {
   workspaceId: string;
   visibility: Visibility;
 };
@@ -111,9 +116,6 @@ const MONTH_NAMES = [
 
 const badRequest = (message: string): TRPCError =>
   new TRPCError({ code: "BAD_REQUEST", message });
-
-const escapeRegExp = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // ── range parsing ────────────────────────────────────────────────────
 
@@ -645,7 +647,14 @@ const emptySummary = (currency: string, range: Range, timeZone: string): Summary
   })),
 });
 
-const buildSummary = async (
+/**
+ * Exported for the public REST API, which calls these directly rather than
+ * through tRPC. NOT extracted into `services/`: `buildMatchConditions` is the
+ * one funnel every report's `$match` goes through, and moving 1200 lines to
+ * gain an import path is how a funnel acquires a second entrance.
+ * `WorkspaceScope` is structurally assignable to {@link ReportScope}.
+ */
+export const buildSummary = async (
   scope: ReportScope,
   filters: ReportFilters,
   groupBy: ReportGroupBy,
@@ -767,7 +776,7 @@ const toDetailedEntry = (
   };
 };
 
-const buildDetailed = async (
+export const buildDetailed = async (
   scope: ReportScope,
   filters: ReportFilters,
   page: { cursor?: string; limit?: number },
@@ -867,7 +876,7 @@ const buildDetailed = async (
   };
 };
 
-const buildWeekly = async (
+export const buildWeekly = async (
   scope: ReportScope,
   filters: ReportFilters,
   weekStart: string,

@@ -9,6 +9,7 @@ import { getAuth } from "./auth/auth.js";
 import { appRouter } from "./trpc/router.js";
 import { createContext } from "./trpc/context.js";
 import { registerNewsletterRoutes } from "./services/newsletter/routes.js";
+import { registerApiV1Routes } from "./api/v1/index.js";
 import { isDatabaseReady } from "./db/connection.js";
 import { notFoundHandler, errorHandler } from "./middleware/error-handler.js";
 import { env, getTrustedOrigins } from "./config/env.js";
@@ -23,7 +24,11 @@ const IMPORT_BODY_LIMIT = `${Math.ceil((MAX_IMPORT_BYTES * 2) / 1_000_000)}mb`;
 export function createApp() {
   const app = express();
 
-  app.set("trust proxy", 1);
+  // Configurable, not a hardcoded 1: `req.ip` is a security key now (the
+  // public API meters failed authentication on it), and a hop count that does
+  // not match the deployment breaks it silently in one direction or the other.
+  // See TRUST_PROXY_HOPS in config/env.ts and docs/deploy.md.
+  app.set("trust proxy", env.TRUST_PROXY_HOPS);
 
   // ── 0. CORS — must be before all route handlers so preflight works ─
   const trustedOrigins = getTrustedOrigins();
@@ -96,6 +101,17 @@ export function createApp() {
 
   // ── 5b. Newsletter (Listmonk + SES double-opt-in subscribe + confirm)
   registerNewsletterRoutes(app);
+
+  // ── 5c. Public REST API (/api/v1) — token-authenticated, never tRPC.
+  //
+  // Position is load-bearing in three directions:
+  //  - AFTER better-auth (1), so nothing here can shadow /api/auth or consume
+  //    a request that plugin parses itself.
+  //  - AFTER the raw-body slot (2), so it never eats a body that a signature
+  //    verification needs to see byte-for-byte.
+  //  - AFTER express.json() (3), because these handlers read `req.body`, and
+  //    BEFORE the 404/500 handlers (7), which would otherwise answer first.
+  registerApiV1Routes(app);
 
   // ── 6. Health endpoint ─────────────────────────────────────────────
   app.get("/api/health", (_req, res) => {

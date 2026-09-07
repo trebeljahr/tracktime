@@ -35,13 +35,24 @@
  *
  * ── Author-scoped, like every other running-timer path ───────────────
  *
- * The running entry is found by `authorId` and carries no workspace filter,
- * for the same reason `entries.stop` does: one running timer per HUMAN across
- * every workspace they belong to. The maximum therefore comes from the
+ * For a PERSON the running entry is found by `authorId` with no workspace
+ * filter, for the same reason `entries.stop` does: one running timer per HUMAN
+ * across every workspace they belong to. The maximum therefore comes from the
  * person's preferences (see MaxDurationSettings), while the rate snapshot on a
  * cap comes from the ENTRY's workspace — `finalizeStop` already gets that
  * right — and the event is published into that workspace, which may not be the
  * one whose read triggered the guard.
+ *
+ * A workspace-bound API token is NOT the person, so it hands in the workspace
+ * it is confined to and the guard looks no further. This is a MUTATING path —
+ * it caps or flags an entry and publishes into that entry's workspace — so
+ * left author-scoped it would let a workspace-A token end a workspace-B
+ * client's billable time through the back door, on an entry the same token is
+ * answered 400 workspace-not-addressable for the moment it names it. The
+ * parameter is required and has no default, because the value that would have
+ * to be the default is the permissive one and the failure being prevented is
+ * precisely a new call site inheriting it by silence. See `TimerReach` in
+ * services/entries/timer.ts, which is where the callers get the value.
  *
  * ── How it and idle stay out of each other's way ─────────────────────
  *
@@ -81,6 +92,12 @@ export type GuardOutcome =
 /**
  * Look at whatever this person has running and act on it if it has run away.
  *
+ * `confineToWorkspaceId` is `null` for a person (look wherever their timer
+ * runs) and a workspace id for a token bound to one, which then cannot reach
+ * an entry outside it — see the header. A confined call whose timer runs
+ * elsewhere is simply `{ kind: "none" }`: nothing capped, nothing flagged,
+ * nothing published, and no hint that anything was there.
+ *
  * Deliberately never takes an `originId`. A server-initiated cap has no
  * originating client, and passing the originId of whoever happened to trigger
  * the read would make exactly that one device — usually the device sitting in
@@ -94,16 +111,21 @@ export type GuardOutcome =
  */
 export async function enforceMaxEntryDuration(
   userId: string,
+  confineToWorkspaceId: string | null,
   now: Date = new Date(),
 ): Promise<GuardOutcome> {
   try {
-    return await run(userId, now);
+    return await run(userId, confineToWorkspaceId, now);
   } catch {
     return { kind: "none" };
   }
 }
 
-const run = async (userId: string, now: Date): Promise<GuardOutcome> => {
+const run = async (
+  userId: string,
+  confineToWorkspaceId: string | null,
+  now: Date,
+): Promise<GuardOutcome> => {
   const preferences = await getOrCreateUserPreferences(userId);
   const maxDuration: MaxDurationSettings = preferences.maxDuration;
 
@@ -111,9 +133,17 @@ const run = async (userId: string, now: Date): Promise<GuardOutcome> => {
   // guard is switched off.
   if (maxDuration.maxHours <= 0) return { kind: "none" };
 
-  // No workspace filter, on purpose — see the header.
-  const running = await TimeEntry.findOne({ authorId: userId, end: null })
-    .lean();
+  // No workspace filter for a person, on purpose — see the header. For a
+  // confined caller the filter is the whole point: it is what makes this
+  // mutation unable to reach another workspace's entry even if one is opened
+  // between the caller's own check and this read.
+  const running = await TimeEntry.findOne({
+    authorId: userId,
+    end: null,
+    ...(confineToWorkspaceId === null
+      ? {}
+      : { workspaceId: confineToWorkspaceId }),
+  }).lean();
   if (!running) return { kind: "none" };
 
   const decision = evaluateRunaway({

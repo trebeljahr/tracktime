@@ -152,6 +152,37 @@ pnpm --filter @starter/server exec dotenvx set TRUSTED_ORIGINS "chrome-extension
 Raycast and CLI clients need no origin at all — their `fetch` sends neither
 `Origin` nor `Sec-Fetch-*`. The device flow guards them instead.
 
+## TRUST_PROXY_HOPS
+
+How many reverse proxies sit between the internet and the server process.
+Express hands `req.ip` to the public API's failed-authentication meter, and
+derives it as the (n+1)-th address from the *right* of `X-Forwarded-For`.
+
+**This deployment has two.** Cloudflare proxies the record (that is why the
+origin IP stays hidden, and why the single-domain certificate works at all),
+and Coolify's Traefik sits behind it. Cloudflare appends the caller to
+`X-Forwarded-For`, Traefik appends Cloudflare's edge address, so the header
+reaching the app reads `<caller>, <cf-edge>` and only `TRUST_PROXY_HOPS=2`
+resolves `req.ip` to the caller. The default is **1**, which is the safe
+generic value, not the right one here — set it explicitly.
+
+Both directions fail silently:
+
+- **Too high** — a directly-exposed container believes an `X-Forwarded-For`
+  the caller wrote. A prober sends a fresh address per request, every request
+  gets its own key, and the meter never accumulates. Verified: reached
+  directly, a request carrying `X-Forwarded-For: 203.0.113.99` yields
+  `req.ip === "203.0.113.99"`.
+- **Too low** — left at 1 behind Cloudflare, `req.ip` collapses to the edge
+  address and every caller in the world shares one key.
+
+A wrong count is *not* a lockout risk for valid tokens: the meter is keyed on
+the presented token prefix as well as the address, so even a fully collapsed
+`req.ip` cannot make one caller's rejected credential refuse another's working
+one. What a wrong count costs is the meter's usefulness — which is why nothing
+raises when it is wrong, and why it has to be re-counted whenever a hop is
+added or removed in front of the server.
+
 ## The client image serves a static export
 
 `packages/client/next.config.ts` sets `output: "export"`, because the desktop

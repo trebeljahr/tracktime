@@ -100,7 +100,10 @@ export function setupWebSocket(server: Server): WebSocketServer {
       // timer here, before it renders a clock that has been counting all
       // weekend. Deliberately not awaited: the socket is live either way, and
       // anything the guard does reaches this room as a normal sync event.
-      void enforceMaxEntryDuration(ws.userId);
+      // `null`, i.e. unconfined: a socket is authenticated as the PERSON, so
+      // the guard should reach their timer wherever it is running. A token
+      // principal passes its workspace id instead — see services/runaway.ts.
+      void enforceMaxEntryDuration(ws.userId, null);
     }
 
     // Ping/pong heartbeat

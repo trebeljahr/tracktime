@@ -7,7 +7,9 @@ import { AccountSettings } from "@/components/settings/account-settings";
 import { ExportPanel } from "@/components/data/export-panel";
 import { ImportHistory } from "@/components/data/import-history";
 import { ImportPanel } from "@/components/data/import-panel";
+import { ApiTokensPanel } from "@/components/settings/api-tokens";
 import { DevicesPanel } from "@/components/settings/devices";
+import { WebhooksPanel } from "@/components/settings/webhooks";
 import { BillingSettings } from "@/components/settings/billing-settings";
 import { GeneralSettings } from "@/components/settings/general-settings";
 import { IdleSettingsPanel } from "@/components/settings/idle-settings";
@@ -21,6 +23,7 @@ const TABS = [
   { value: "limits", label: "Limits" },
   { value: "data", label: "Data" },
   { value: "devices", label: "Devices" },
+  { value: "integrations", label: "Integrations" },
   { value: "account", label: "Account" },
 ];
 
@@ -90,6 +93,14 @@ export default function SettingsPage() {
         </TabsContent>
         <TabsContent value="devices" data-testid="settings-panel-devices">
           <DevicesPanel />
+        </TabsContent>
+        <TabsContent
+          value="integrations"
+          className="space-y-6"
+          data-testid="settings-panel-integrations"
+        >
+          <ApiTokensPanel />
+          <WebhooksPanel />
         </TabsContent>
         <TabsContent value="account" data-testid="settings-panel-account">
           <AccountSettings />

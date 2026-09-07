@@ -63,7 +63,16 @@ export type SyncEvent =
    * re-rendering instead of showing the result. Every cache is stale after
    * this, so clients invalidate rather than patch.
    */
-  | { kind: "data.imported"; batchId: string; undone: boolean };
+  | { kind: "data.imported"; batchId: string; undone: boolean }
+  /**
+   * An API token or a webhook subscription was created, changed or revoked.
+   *
+   * Carries no id and no payload: both lists are short, both are read only on
+   * a settings screen, and a token's plaintext exists exactly once — putting
+   * any part of one on a broadcast that every device in the workspace
+   * receives is a shape worth not having at all.
+   */
+  | { kind: "integrations.changed"; scope: "api-token" | "webhook" };
 
 /** Room name every sync event for a given owner is published to. */
 export const userRoomId = (ownerId: string): string => `user:${ownerId}`;

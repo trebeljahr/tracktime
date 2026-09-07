@@ -1,0 +1,409 @@
+// Projects: the middle of the catalog, and the only catalog row that carries
+// money (an hourly rate and a budget).
+//
+// `list` resolves the owning client (even an archived one) and aggregates
+// entry counts / tracked seconds in a single pipeline — never N+1.
+import { TRPCError } from "@trpc/server";
+import mongoose from "mongoose";
+import {
+  PROJECT_COLOR_OFFSET,
+  pickCatalogColor,
+  type BudgetProgress,
+  type CreateProjectInput,
+  type Project as ProjectWire,
+  projectRemoveResult,
+  rollupVisibility,
+  type OwnCollateralCounts,
+  type ProjectListInput,
+  type UpdateProjectInput,
+} from "@starter/shared";
+import { Favorite } from "../../models/Favorite.js";
+import {
+  Project,
+  toClientProject,
+  type ProjectDocLike,
+} from "../../models/Project.js";
+import { TimeEntry } from "../../models/TimeEntry.js";
+import { authorScopeFilter } from "../../models/WorkspaceMember.js";
+import { getOrCreateWorkspaceSettings } from "../../models/Settings.js";
+import { publishSync } from "../../ws/sync.js";
+import type { CatalogRemoveResult } from "../../trpc/routers/catalog-cascade.js";
+import { cascadeDeleteProject } from "../../trpc/routers/catalog-cascade.js";
+import {
+  budgetWrite,
+  loadBudgetProgress,
+  needsCurrency,
+  touchesBudget,
+} from "../../trpc/routers/project-budgets.js";
+import type { WorkspaceScope } from "../scope.js";
+import { assertClientOwned, assertObjectId } from "./guards.js";
+import { assertUniqueCatalogName } from "./names.js";
+import { catalogEntryRollup } from "./rollup.js";
+
+/** A project plus its joined client and rolled-up time totals. */
+export type ProjectWithStats = ProjectWire & {
+  clientName: string | null;
+  clientColor: string | null;
+  /**
+   * Number of time entries booked on this project, counted under the CALLER's
+   * roll-up scope — their own entries only unless they may see BOTH others'
+   * time and others' money (`rollupVisibility`). A whole-workspace count here
+   * would hand a member the colleague hours the entry list refuses them, one
+   * subtraction away; and beside `hourlyRate`, which every project row
+   * carries, it also rebuilds the `progress.spentAmount` below by one
+   * multiplication.
+   */
+  entryCount: number;
+  /** Sum of `durationSec` across those same entries (running ones count 0). */
+  totalSec: number;
+  /**
+   * Lifetime progress against the project's estimate/budget, or null when it
+   * has neither. Null is the "no target set" signal — a project with a target
+   * of zero still gets a progress object.
+   *
+   * Unlike the two counts above this is NOT author-scoped: a budget is the
+   * project's, not one person's, so it deliberately spans every member. That
+   * is exactly what makes it a disclosure, and why the REST layer withholds it
+   * from a caller who may not see others' time or money
+   * (`projectProjectForVisibility` in @starter/shared).
+   */
+  progress: BudgetProgress | null;
+};
+
+/** Raw shape produced by the `list` aggregation. */
+type ProjectAggregateRow = ProjectDocLike & {
+  clientDoc: { name: string; color: string }[];
+  stats: { entryCount: number; totalSec: number }[];
+};
+
+const notFound = (): TRPCError =>
+  new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
+
+const assertUniqueProjectName = (
+  workspaceId: string,
+  name: string,
+  excludeId?: string,
+): Promise<void> =>
+  assertUniqueCatalogName({
+    model: Project,
+    filter: { workspaceId },
+    name,
+    ...(excludeId ? { excludeId } : {}),
+    label: "project",
+  });
+
+/**
+ * The one pipeline. `list` and `get` differ only in their `$match`, so they
+ * share this — a separate single-row query is how the two stop agreeing about
+ * what `totalSec` and `progress` mean.
+ */
+async function aggregateProjects(
+  scope: WorkspaceScope,
+  match: Record<string, unknown>,
+): Promise<ProjectWithStats[]> {
+  const workspaceId = scope.workspaceId;
+  const rows = await Project.aggregate<ProjectAggregateRow>([
+    { $match: { workspaceId, ...match } },
+    {
+      // Archived clients must still resolve, so this joins by id only.
+      $lookup: {
+        from: "clients",
+        let: { cid: "$clientId" },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: [{ $toString: "$_id" }, "$$cid"] },
+            },
+          },
+          { $project: { _id: 0, name: 1, color: 1 } },
+        ],
+        as: "clientDoc",
+      },
+    },
+    // Author-scoped: see the note on `entryCount` above. Narrowed through
+    // `rollupVisibility` and not passed straight, so the total is the caller's
+    // own whenever the money it prices is withheld.
+    catalogEntryRollup({
+      workspaceId,
+      visibility: rollupVisibility(scope.visibility),
+      entryField: "projectId",
+      as: "stats",
+    }),
+    { $addFields: { sortName: { $toLower: "$name" } } },
+    { $sort: { sortName: 1 } },
+  ]);
+
+  const projects = rows.map((row) => {
+    const client = row.clientDoc[0];
+    const stats = row.stats[0];
+    return {
+      ...toClientProject(row),
+      clientName: client?.name ?? null,
+      clientColor: client?.color ?? null,
+      entryCount: stats?.entryCount ?? 0,
+      totalSec: stats?.totalSec ?? 0,
+    };
+  });
+
+  // Costs nothing until a project actually carries a target, and archived
+  // projects keep reporting: their history is still the answer to
+  // "did that job come in under budget?".
+  const progress = await loadBudgetProgress(workspaceId, projects);
+
+  return projects.map((project) => ({
+    ...project,
+    progress: progress.get(project.id) ?? null,
+  }));
+}
+
+export async function listProjects(
+  scope: WorkspaceScope,
+  input: ProjectListInput,
+): Promise<ProjectWithStats[]> {
+  if (typeof input.clientId === "string") assertObjectId(input.clientId);
+
+  return aggregateProjects(scope, {
+    ...(input.includeArchived ? {} : { archived: false }),
+    ...(input.clientId !== undefined
+      ? { clientId: input.clientId ?? null }
+      : {}),
+  });
+}
+
+/** One project by id, with the same joined shape `list` produces. */
+export async function getProject(
+  scope: WorkspaceScope,
+  id: string,
+): Promise<ProjectWithStats> {
+  assertObjectId(id);
+  const [found] = await aggregateProjects(scope, {
+    // Ids are strings on the wire but ObjectIds in the collection, so the
+    // match has to be on `_id` as Mongoose casts it — `assertObjectId` above
+    // is what makes that cast safe.
+    _id: new mongoose.Types.ObjectId(id),
+  });
+  if (!found) throw notFound();
+  return found;
+}
+
+export async function createProject(
+  scope: WorkspaceScope,
+  input: CreateProjectInput,
+): Promise<ProjectWire> {
+  const name = input.name.trim();
+  await assertUniqueProjectName(scope.workspaceId, name);
+  if (input.clientId) await assertClientOwned(scope.workspaceId, input.clientId);
+
+  const existing = await Project.countDocuments({
+    workspaceId: scope.workspaceId,
+  });
+  // Only read settings when a money budget is actually being set — every
+  // other create stays a single write.
+  const workspaceCurrency = needsCurrency(input)
+    ? (await getOrCreateWorkspaceSettings(scope.workspaceId)).currency
+    : "";
+  const created = await Project.create({
+    workspaceId: scope.workspaceId,
+    createdBy: scope.userId,
+    name,
+    color: input.color ?? pickCatalogColor(existing, PROJECT_COLOR_OFFSET),
+    clientId: input.clientId ?? null,
+    billableDefault: input.billableDefault ?? true,
+    hourlyRate: input.hourlyRate ?? null,
+    estimatedHours: null,
+    budgetAmount: null,
+    budgetCurrency: null,
+    ...budgetWrite(input, workspaceCurrency),
+    idleBehavior: input.idleBehavior ?? null,
+    archived: false,
+  });
+
+  void publishSync(
+    scope.workspaceId,
+    { kind: "catalog.changed", scope: "project" },
+    input.originId,
+  );
+  return toClientProject(created);
+}
+
+export async function updateProject(
+  scope: WorkspaceScope,
+  input: UpdateProjectInput,
+): Promise<ProjectWire> {
+  assertObjectId(input.id);
+  if (input.name !== undefined) {
+    await assertUniqueProjectName(scope.workspaceId, input.name, input.id);
+  }
+  if (input.clientId) await assertClientOwned(scope.workspaceId, input.clientId);
+
+  // Changing a budget's amount must keep the currency it was agreed in,
+  // so the existing snapshot is read before it is overwritten. An
+  // estimate-only edit needs neither lookup.
+  let budgetSet: Record<string, unknown> = {};
+  if (touchesBudget(input)) {
+    if (needsCurrency(input)) {
+      const [settings, existing] = await Promise.all([
+        getOrCreateWorkspaceSettings(scope.workspaceId),
+        Project.findOne({ _id: input.id, workspaceId: scope.workspaceId })
+          .select("budgetAmount budgetCurrency")
+          .lean(),
+      ]);
+      budgetSet = budgetWrite(input, settings.currency, {
+        budgetAmount: existing?.budgetAmount ?? null,
+        budgetCurrency: existing?.budgetCurrency ?? null,
+      });
+    } else {
+      budgetSet = budgetWrite(input, "");
+    }
+  }
+
+  const updated = await Project.findOneAndUpdate(
+    { _id: input.id, workspaceId: scope.workspaceId },
+    {
+      $set: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.color !== undefined ? { color: input.color } : {}),
+        ...(input.clientId !== undefined
+          ? { clientId: input.clientId ?? null }
+          : {}),
+        ...(input.billableDefault !== undefined
+          ? { billableDefault: input.billableDefault }
+          : {}),
+        ...(input.hourlyRate !== undefined
+          ? { hourlyRate: input.hourlyRate ?? null }
+          : {}),
+        ...(input.idleBehavior !== undefined
+          ? { idleBehavior: input.idleBehavior ?? null }
+          : {}),
+        ...(input.archived !== undefined ? { archived: input.archived } : {}),
+        ...budgetSet,
+      },
+    },
+    { returnDocument: "after" },
+  ).lean();
+
+  if (!updated) throw notFound();
+
+  void publishSync(
+    scope.workspaceId,
+    { kind: "catalog.changed", scope: "project" },
+    input.originId,
+  );
+  return toClientProject(updated);
+}
+
+export async function archiveProject(
+  scope: WorkspaceScope,
+  input: { id: string; archived?: boolean; originId?: string },
+): Promise<ProjectWire> {
+  assertObjectId(input.id);
+
+  const updated = await Project.findOneAndUpdate(
+    { _id: input.id, workspaceId: scope.workspaceId },
+    { $set: { archived: input.archived ?? true } },
+    { returnDocument: "after" },
+  ).lean();
+
+  if (!updated) throw notFound();
+
+  void publishSync(
+    scope.workspaceId,
+    { kind: "catalog.changed", scope: "project" },
+    input.originId,
+  );
+  return toClientProject(updated);
+}
+
+/**
+ * The caller's own share of what a cascading delete is about to detach, or
+ * `null` when they may be told the workspace's numbers as they are.
+ *
+ * Counted BEFORE the cascade runs, which is the whole reason this is a
+ * separate query rather than a projection of the result: afterwards nothing
+ * points at the deleted row any more and the same count comes back zero.
+ *
+ * Shared with `removeTask` rather than copied, because two copies is how one
+ * of them goes on reporting the whole workspace's collateral six months after
+ * the other was fixed. What it may report is decided by
+ * `projectRemoveResult` in @starter/shared, which is where the rule is
+ * written down.
+ *
+ * Matching on the catalog id alone mirrors what the cascade detaches: an entry
+ * or a pin that carries a task always carries that task's project too (the
+ * cascade matches both only to stay correct if that ever drifts). Should it
+ * drift, this count can only come out LOW — never disclosing a row the caller
+ * may not see, which is the direction that matters here.
+ */
+export async function ownCascadeCollateral(
+  scope: WorkspaceScope,
+  match: { projectId: string } | { taskId: string },
+): Promise<OwnCollateralCounts | null> {
+  const authorScope = authorScopeFilter(scope.visibility);
+  // Nothing to withhold, and no extra round trip for the common case.
+  if (authorScope === null) return null;
+
+  const [entriesDetached, favoritesDetached] = await Promise.all([
+    TimeEntry.countDocuments({
+      workspaceId: scope.workspaceId,
+      ...match,
+      ...authorScope,
+    }),
+    // A pin is filed under `userId`, not `authorId` — it is one person's
+    // shortcut, so the caller's own pins are the ones they may be told about.
+    Favorite.countDocuments({
+      workspaceId: scope.workspaceId,
+      ...match,
+      userId: scope.visibility.userId,
+    }),
+  ]);
+
+  return { entriesDetached, favoritesDetached };
+}
+
+/**
+ * Always deletes. Tasks go with the project; entries booked on either keep
+ * their tracked time and become project-less. Use `archive` to keep the
+ * project around instead.
+ *
+ * The collateral it reports is the CALLER's when they may not see others'
+ * work — `ownCascadeCollateral` above, and `projectRemoveResult` for why.
+ */
+export async function removeProject(
+  scope: WorkspaceScope,
+  input: { id: string; originId?: string },
+): Promise<CatalogRemoveResult> {
+  assertObjectId(input.id);
+
+  const project = await Project.findOne({
+    _id: input.id,
+    workspaceId: scope.workspaceId,
+  }).lean();
+  if (!project) throw notFound();
+
+  const own = await ownCascadeCollateral(scope, { projectId: input.id });
+  const result = await cascadeDeleteProject(scope.workspaceId, input.id);
+
+  // The SYNC events below deliberately read the cascade's whole-workspace
+  // counts, never the projected ones: they decide whose cached lists must be
+  // refetched, and a member who may not see an entry still has a stale screen
+  // when it moves. Only the RESPONSE is narrowed, at the end.
+  void publishSync(
+    scope.workspaceId,
+    {
+      kind: "catalog.changed",
+      scope: "project",
+      entriesTouched: result.entriesDetached > 0,
+    },
+    input.originId,
+  );
+  // A detached pin still points somewhere it did not a moment ago, and
+  // `catalog.changed` does not cover the favorites cache.
+  if (result.favoritesDetached > 0) {
+    void publishSync(
+      scope.workspaceId,
+      { kind: "favorites.changed" },
+      input.originId,
+    );
+  }
+  return projectRemoveResult(result, own);
+}

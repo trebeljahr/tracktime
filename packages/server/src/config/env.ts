@@ -103,9 +103,76 @@ const appUrls = resolveAppUrls(
   getOptional("NODE_ENV", "development"),
 );
 
+/**
+ * A positive integer, or the default — never NaN.
+ *
+ * `parseInt` answers NaN for an empty string and happily answers 600 for
+ * "600/min", and every comparison against NaN is false. A NaN rate limit
+ * therefore refuses the FIRST request of every window (`count <= NaN` is
+ * false) and advertises `RateLimit-Limit: NaN`, so one stray character typed
+ * into a hosting panel's env editor takes the entire public API down while
+ * looking like a limiter working as designed. `Number` rather than `parseInt`
+ * so a trailing-garbage value is rejected outright instead of silently read as
+ * its numeric prefix, which is the other half of the same surprise.
+ *
+ * A value that was PRESENT but unusable is warned about rather than swallowed:
+ * falling back silently would express the typo as "the limit is mysteriously
+ * 600 again", which nobody traces back to the env var.
+ */
+function getPositiveInt(key: string, defaultValue: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === "") return defaultValue;
+
+  const parsed = Number(raw.trim());
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.warn(
+      `[env] ${key}=${JSON.stringify(raw)} is not a positive integer — using ${defaultValue}.`,
+    );
+    return defaultValue;
+  }
+  return parsed;
+}
+
+/**
+ * A non-negative integer, or the default — never NaN.
+ *
+ * The same parse as {@link getPositiveInt} and for the same reason, except
+ * that ZERO is a meaningful value here rather than a typo: `TRUST_PROXY_HOPS=0`
+ * is how a directly-exposed container says "believe the socket, never an
+ * `X-Forwarded-For` header". Rejecting it would pin that deployment to a hop
+ * count it does not have, which is the misconfiguration the variable exists to
+ * let an operator fix.
+ */
+function getNonNegativeInt(key: string, defaultValue: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === "") return defaultValue;
+
+  const parsed = Number(raw.trim());
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    console.warn(
+      `[env] ${key}=${JSON.stringify(raw)} is not a non-negative integer — using ${defaultValue}.`,
+    );
+    return defaultValue;
+  }
+  return parsed;
+}
+
 export const env = {
   NODE_ENV: getOptional("NODE_ENV", "development"),
-  PORT: parseInt(getOptional("PORT", "5000"), 10),
+  PORT: getPositiveInt("PORT", 5000),
+
+  // How many reverse proxies sit in front of this process, for Express's
+  // `trust proxy`. Express then reads `req.ip` as the (n+1)-th address from
+  // the RIGHT of `X-Forwarded-For`, so the number has to match the deployment:
+  //   too high — a directly-exposed container believes a header the caller
+  //     wrote, so anyone picks their own `req.ip` per request and the public
+  //     API's failed-authentication meter, which is keyed on it, never
+  //     accumulates at all;
+  //   too low — with a CDN in front of a reverse proxy, every caller collapses
+  //     onto the edge's address and shares one key.
+  // 1 is right for the deployed topology (one Traefik hop, see
+  // docs/deploy.md). 0 means "no proxy, believe the socket".
+  TRUST_PROXY_HOPS: getNonNegativeInt("TRUST_PROXY_HOPS", 1),
   MONGODB_URI: getRequired("MONGODB_URI"),
   REDIS_URL: getOptional("REDIS_URL"),
 
@@ -197,6 +264,23 @@ export const env = {
   ML_3D_SAM_BODY_ENDPOINT: getOptional("ML_3D_SAM_BODY_ENDPOINT"),
   ML_3D_HUNYUAN_ENDPOINT: getOptional("ML_3D_HUNYUAN_ENDPOINT"),
   ML_3D_TRELLIS_ENDPOINT: getOptional("ML_3D_TRELLIS_ENDPOINT"),
+
+  // Public REST API
+  // Fixed-window rate limit per API token, per minute. Fixed window rather
+  // than a token bucket because it is INCR + EXPIRE — two commands, no Lua,
+  // no stored clock. Without Redis it degrades to per-process, which is the
+  // documented caveat for a single-container self-host.
+  // Validated, not parsed: an unusable value here would 429 every caller.
+  API_RATE_LIMIT_PER_MINUTE: getPositiveInt("API_RATE_LIMIT_PER_MINUTE", 600),
+
+  // Webhooks
+  // Opt-in for delivering to private/loopback addresses and over plain http.
+  // OFF by default because a webhook URL is attacker-controlled input: with
+  // this on, anyone who can create a subscription can make this server issue
+  // requests into its own network (SSRF). Turn it on only to point a local
+  // listener at a dev server.
+  WEBHOOK_ALLOW_PRIVATE_TARGETS:
+    getOptional("WEBHOOK_ALLOW_PRIVATE_TARGETS") === "true",
 
   // Monitoring
   SENTRY_DSN: getOptional("SENTRY_DSN"),

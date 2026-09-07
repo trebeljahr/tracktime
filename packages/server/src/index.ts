@@ -7,6 +7,7 @@ import { connectToDB, disconnectFromDB } from "./db/connection.js";
 import { connectRedis, disconnectRedis } from "./db/redis.js";
 import { initAuth, disconnectAuth } from "./auth/auth.js";
 import { setupWebSocket } from "./ws/handler.js";
+import { startWebhookSweeper } from "./services/webhooks/sweeper.js";
 import { env } from "./config/env.js";
 
 const app = createApp();
@@ -22,7 +23,12 @@ async function start(): Promise<void> {
     // 2. Initialize auth (needs DB connection)
     await initAuth();
 
-    // 3. Start listening
+    // 3. Start the webhook delivery loop. After initAuth() because a
+    //    delivery resolves the subscription owner's membership before it
+    //    decides what that owner may see. No-op under NODE_ENV=test.
+    startWebhookSweeper();
+
+    // 4. Start listening
     server.listen(env.PORT, () => {
       console.log(`[server] Listening on http://127.0.0.1:${env.PORT}`);
       console.log(`[server] Environment: ${env.NODE_ENV}`);

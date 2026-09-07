@@ -107,6 +107,14 @@ const invalidateFor = (utils: Utils, event: SyncEvent): void => {
       void utils.tags.invalidate();
       void utils.data.invalidate();
       return;
+    case "integrations.changed":
+      // API tokens and webhook subscriptions are read only on the settings
+      // screen, and both lists are short — refetch rather than patch, so a
+      // token revoked on a laptop disappears from the phone without either
+      // client having to reconstruct what changed from a payload.
+      if (event.scope === "api-token") void utils.apiTokens.invalidate();
+      else void utils.webhooks.invalidate();
+      return;
     default: {
       // A new SyncEvent kind with no case here would otherwise be a silent
       // cross-device staleness bug that no test catches. Fail the BUILD

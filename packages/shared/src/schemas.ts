@@ -13,6 +13,8 @@ import {
   type RunawayResolution,
 } from "./runaway.js";
 import type { IdleBehavior, RunawayBehavior } from "./types.js";
+import { API_TOKEN_SCOPES } from "./api-tokens.js";
+import { WEBHOOK_EVENTS } from "./webhooks.js";
 
 export const updateProfileSchema = z.object({
   bio: z.string().max(500).optional(),
@@ -553,6 +555,63 @@ export const deviceCodeSchema = z.object({
     .transform((value) => value.trim().toUpperCase()),
 });
 
+// ── API tokens ───────────────────────────────────────────────────────
+
+/**
+ * Declared from {@link API_TOKEN_SCOPES} rather than repeating the literals,
+ * so a scope added to the type cannot be silently rejected by validation.
+ */
+export const apiTokenScopeSchema = z.enum(API_TOKEN_SCOPES);
+
+/**
+ * Minting a token.
+ *
+ * `scopes` has NO default and no `.min(1)`. A zero-scope token is legal and
+ * grants nothing, which is the correct closed position: deny-by-default is a
+ * property of the guard (`requireScope` asks `scopes.includes(...)`), never of
+ * a default value that a future refactor could widen. `.max(5)` is the length
+ * of the list — asking for the same scope twice is not a way to get past it.
+ */
+export const createApiTokenSchema = z.object({
+  name: z.string().min(1).max(120),
+  scopes: z.array(apiTokenScopeSchema).max(API_TOKEN_SCOPES.length),
+  /** Null / absent means "never expires". */
+  expiresAt: isoDateTimeSchema.nullish(),
+  originId,
+});
+
+export const revokeApiTokenSchema = z.object({ id: idString, originId });
+
+// ── webhooks ─────────────────────────────────────────────────────────
+
+export const webhookEventSchema = z.enum(WEBHOOK_EVENTS);
+
+/**
+ * Creating a subscription. `events` requires at least one — unlike a token's
+ * scopes, an empty list here is not a closed position but a subscription that
+ * exists to do nothing, and the user almost certainly meant to pick something.
+ */
+export const createWebhookSchema = z.object({
+  url: z.url().max(2000),
+  events: z.array(webhookEventSchema).min(1).max(WEBHOOK_EVENTS.length),
+  originId,
+});
+
+export const updateWebhookSchema = z.object({
+  id: idString,
+  url: z.url().max(2000).optional(),
+  events: z.array(webhookEventSchema).min(1).max(WEBHOOK_EVENTS.length).optional(),
+  enabled: z.boolean().optional(),
+  originId,
+});
+
+/** The delivery log for one subscription, newest first. */
+export const webhookDeliveryListSchema = z.object({
+  subscriptionId: idString,
+  limit: z.number().int().min(1).max(100).optional(),
+  cursor: z.string().max(256).optional(),
+});
+
 // ── inferred input types ─────────────────────────────────────────────
 
 export type IdInput = z.infer<typeof idInputSchema>;
@@ -599,3 +658,10 @@ export type ResolveRunawayInput = z.infer<typeof resolveRunawaySchema>;
 export type RevokeDeviceInput = z.infer<typeof revokeDeviceSchema>;
 export type RevokeOtherDevicesInput = z.infer<typeof revokeOtherDevicesSchema>;
 export type DeviceCodeInput = z.infer<typeof deviceCodeSchema>;
+export type CreateApiTokenInput = z.infer<typeof createApiTokenSchema>;
+export type RevokeApiTokenInput = z.infer<typeof revokeApiTokenSchema>;
+export type CreateWebhookInput = z.infer<typeof createWebhookSchema>;
+export type UpdateWebhookInput = z.infer<typeof updateWebhookSchema>;
+export type WebhookDeliveryListInput = z.infer<
+  typeof webhookDeliveryListSchema
+>;
