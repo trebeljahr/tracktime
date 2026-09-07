@@ -20,3 +20,15 @@ allowBuilds:
 # version keeps the hoist deterministic.
 overrides:
   "@types/react": "^19.2.14"
+
+# `pnpm deploy` — which packages/server/Dockerfile runs to materialise the
+# production dependency closure at /prod — refuses to run from pnpm v10 onward
+# unless the workspace opts in, and fails the image build outright with
+# ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE. The two ways out are injected
+# workspace packages, which changes how every workspace dependency is linked
+# for everyone, or this, which changes nothing but `deploy` itself.
+#
+# It lives here rather than in .npmrc or as a --legacy flag on the command
+# because pnpm-workspace.yaml is the only one of the three that both Dockerfiles
+# already COPY into the build context.
+forceLegacyDeploy: true
