@@ -1,0 +1,192 @@
+# Publishes multi-arch, version-tagged images for self-hosters.
+#
+# ADDITIVE — this workflow deploys nothing and changes nothing about the
+# owner's setup. The Coolify production deploy still runs from
+# build-and-deploy.yml on every push to main, still builds linux/amd64 only,
+# and still publishes the `:main` / `:<sha>` tags it always has. Nothing here
+# touches those tags or that pipeline.
+#
+# Two images come out of a release, and they are NOT the same two images
+# build-and-deploy.yml produces:
+#
+#   ghcr.io/<owner>/<repo>-server            same Dockerfile as the deploy
+#                                            workflow, now also built for
+#                                            arm64 and tagged by version.
+#
+#   ghcr.io/<owner>/<repo>-client-selfhost   a DIFFERENT BUILD of the client
+#                                            from the deploy workflow's
+#                                            `-client` image, under a
+#                                            deliberately different package
+#                                            name.
+#
+# The client name is separate because NEXT_PUBLIC_* values are inlined into
+# the browser bundle at image BUILD time, so a client image is permanently
+# bound to whatever API origin it was built against. build-and-deploy.yml
+# bakes the owner's api.<domain> into `-client`; this workflow builds with an
+# EMPTY NEXT_PUBLIC_API_URL so the browser falls back to its own origin and
+# the image works behind any domain, given a reverse proxy that routes /api/*
+# and /ws to the server container. Those two builds cannot share a package:
+# publishing them side by side would mean `-client:latest` and `-client:main`
+# silently talk to different hosts, and a self-hoster who pulled the wrong one
+# would get a login screen that posts to a domain they do not own. The suffix
+# makes the distinction impossible to get wrong at `docker pull` time.
+#
+# Analytics build args are deliberately omitted, not passed empty: with
+# NEXT_PUBLIC_OPENPANEL_CLIENT_ID and NEXT_PUBLIC_PLAUSIBLE_DOMAIN unset the
+# client emits no third-party script tags at all, so a self-hosted instance
+# makes no outbound request the operator did not ask for.
+#
+# Note that `v*` tags ALSO trigger desktop-release.yml, mobile-release.yml and
+# tauri-release.yml. One `git tag v1.2.3 && git push --tags` therefore fans out
+# to four workflows; that is expected.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to (re-)publish images for, e.g. v1.2.3"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Resolves one version string for both build jobs, so a manual re-cut
+  # publishes the same tags a pushed tag would. On workflow_dispatch,
+  # github.ref_name is a BRANCH, which would make metadata-action's semver
+  # parsing produce nothing at all — hence the explicit input and the
+  # `ref:` checkout in the build jobs.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      latest: ${{ steps.resolve.outputs.latest }}
+    steps:
+      - id: resolve
+        env:
+          RAW_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="$RAW_VERSION"
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$version' is not a vX.Y.Z tag. Release images are version-tagged; refusing to publish an unversioned one."
+            exit 1
+          fi
+          # A prerelease (v1.2.3-rc.1) gets its exact tag and nothing else.
+          # Moving `:latest` onto it would hand every self-hoster tracking
+          # latest an unfinished build without them doing anything.
+          case "$version" in
+            *-*) latest=false ;;
+            *)   latest=true ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version (latest=$latest)"
+
+  release-server:
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-server
+          # latest=false because `latest` is added explicitly below, gated on
+          # the prerelease check — the default `latest=auto` reads the event
+          # ref, which is a branch on workflow_dispatch.
+          flavor: latest=false
+          tags: |
+            type=semver,pattern=v{{version}},value=${{ needs.prepare.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare.outputs.version }}
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.latest == 'true' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/server/Dockerfile
+          push: true
+          # arm64 is built under QEMU emulation, which makes the install and
+          # tsc steps several times slower than native. The gha cache is what
+          # keeps a re-cut release from paying that twice.
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=release-server
+          cache-to: type=gha,mode=max,scope=release-server
+
+  release-client-selfhost:
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-client-selfhost
+          flavor: latest=false
+          tags: |
+            type=semver,pattern=v{{version}},value=${{ needs.prepare.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare.outputs.version }}
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.latest == 'true' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Deliberately NOT packages/client/Dockerfile — that one packages the
+          # owner's deploy. This file builds the static export and serves it
+          # from a plain static server, which is what the single-domain
+          # reverse-proxy layout needs.
+          file: packages/client/Dockerfile.selfhost
+          push: true
+          platforms: linux/amd64,linux/arm64
+          # An EMPTY value, passed explicitly so the intent is visible in the
+          # build log rather than looking like an omission. Empty makes every
+          # client call site fall back to a relative URL: tRPC to /api/trpc,
+          # better-auth to window.location.origin, and the sync socket to
+          # wss://<host>/ws. That is what lets one image serve any domain.
+          #
+          # NEXT_PUBLIC_WS_URL is deliberately absent: it is read nowhere in
+          # the source, and offering the knob would send anyone debugging a
+          # WebSocket problem down a dead end.
+          build-args: |
+            NEXT_PUBLIC_API_URL=
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=release-client-selfhost
+          cache-to: type=gha,mode=max,scope=release-client-selfhost
