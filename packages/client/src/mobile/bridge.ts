@@ -7,6 +7,8 @@
  * the web view.
  */
 
+import type { StatusBar as StatusBarPlugin, Style as StyleEnum } from "@capacitor/status-bar";
+
 export interface MobileHandlers {
   onBackButton?: () => boolean;
   onPause?: () => void;
@@ -14,6 +16,21 @@ export interface MobileHandlers {
 }
 
 let initialized = false;
+
+/** Light glyphs on a dark app, dark glyphs on a light one. */
+function applyStatusBarStyle(
+  StatusBar: typeof StatusBarPlugin,
+  Style: typeof StyleEnum,
+): void {
+  const dark = document.documentElement.classList.contains("dark");
+  // Capacitor names these for the CONTENT they produce, not the background:
+  // `Style.Dark` is light text, for a dark app.
+  void StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light }).catch(
+    () => {
+      /* ignore — a status bar that keeps its old style is cosmetic */
+    },
+  );
+}
 
 export async function initMobile(handlers: MobileHandlers = {}): Promise<void> {
   if (initialized) return;
@@ -27,14 +44,37 @@ export async function initMobile(handlers: MobileHandlers = {}): Promise<void> {
 
   if (!Capacitor.isNativePlatform()) return;
 
+  // app/layout.tsx already did both of these before the first paint — every
+  // `body.cap` rule in styles/native.css has to be in force by then or the
+  // app lays out once without the safe-area insets and jumps. These stay as
+  // the idempotent backstop for the case where that script did not run.
   document.body.classList.add("cap");
   document.body.setAttribute("data-platform", Capacitor.getPlatform());
 
+  // `viewportFit: "cover"` means the WebView reaches under the status bar,
+  // so the status bar has no background of its own any more — it sits on top
+  // of the app header, and native.css pads the header to leave room. Without
+  // overlay the OS reserves an opaque strip in its own colour, which is a
+  // white band above a dark header.
   try {
-    await StatusBar.setStyle({ style: Style.Default });
+    await StatusBar.setOverlaysWebView({ overlay: true });
   } catch {
-    /* ignore */
+    /* Android-only on some versions; iOS overlays regardless. */
   }
+
+  applyStatusBarStyle(StatusBar, Style);
+
+  // Style.Default asks the OS to choose, and the OS chooses from the SYSTEM
+  // appearance — so a phone in light mode running the app in dark mode gets
+  // dark glyphs on a near-black header, i.e. an invisible clock. The theme
+  // lives in a class on <html> (app/layout.tsx's pre-paint script and
+  // components/theme-toggle.tsx), so follow that instead.
+  new MutationObserver(() => {
+    applyStatusBarStyle(StatusBar, Style);
+  }).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
 
   if (handlers.onBackButton) {
     App.addListener("backButton", (event) => {

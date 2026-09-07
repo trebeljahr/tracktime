@@ -56,6 +56,23 @@ const config: CapacitorConfig = {
     : {}),
 
   plugins: {
+    /*
+     * `resize: "native"` hands the keyboard's height to the WebView as a real
+     * viewport resize, which is what `interactiveWidget: "resizes-content"`
+     * in app/layout.tsx needs to have anything to react to. The alternatives
+     * are worse in specific ways: "body" resizes the body element and leaves
+     * `position: fixed` chrome — the sticky header, the tracker bar, the tab
+     * bar stage 3 adds — sitting behind the keyboard, and "none" leaves the
+     * focused field behind it instead.
+     *
+     * The accessory bar stays: it is where "Done" lives, and a numeric
+     * TimeField has no other way to dismiss the keyboard.
+     */
+    Keyboard: {
+      resize: "native",
+      resizeOnFullScreen: true,
+    },
+
     SplashScreen: {
       launchShowDuration: 2000,
       launchAutoHide: false,
