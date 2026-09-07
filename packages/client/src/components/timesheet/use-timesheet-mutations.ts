@@ -27,6 +27,7 @@ import {
   type OfflineUpdateInput,
 } from "@/lib/offline";
 import { trpc } from "@/lib/trpc";
+import { entrySource } from "@/lib/entry-source";
 
 /** What a plan needs to know beyond the numbers: which row it belongs to. */
 export type CellEditContext = {
@@ -217,7 +218,7 @@ export const useTimesheetMutations = (
         billable,
         start,
         end,
-        source: "web",
+        source: entrySource(),
         timeZone: deviceTimeZone(),
         originId: ORIGIN_ID,
       };

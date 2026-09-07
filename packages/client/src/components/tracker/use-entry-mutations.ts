@@ -37,6 +37,7 @@ import {
   type OfflineStopInput,
   type OfflineUpdateInput,
 } from "@/lib/offline";
+import { entrySource } from "@/lib/entry-source";
 
 /**
  * The entry list covers all of history and is paged with the server cursor, so
@@ -589,7 +590,7 @@ export const useEntryMutations = (): EntryMutations => {
   const startWith = React.useCallback(
     (quick: QuickStart, now?: Date, tagIds?: string[]): void => {
       const input: OfflineStartInput = buildQuickStartInput(quick, {
-        source: "web",
+        source: entrySource(),
         timeZone: deviceTimeZone(),
         originId: ORIGIN_ID,
         now,
@@ -698,7 +699,7 @@ export const useEntryMutations = (): EntryMutations => {
         billable: args.billable,
         start: args.start,
         end: args.end,
-        source: "web",
+        source: entrySource(),
         timeZone: deviceTimeZone(),
         tagIds: args.tagIds ?? [],
         originId: ORIGIN_ID,

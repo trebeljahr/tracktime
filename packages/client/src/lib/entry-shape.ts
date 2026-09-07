@@ -21,6 +21,7 @@ import {
   type ResolvedSettings,
   type TimeEntry,
 } from "@starter/shared";
+import { entrySource } from "@/lib/entry-source";
 
 /** The catalog fields an optimistic entry needs. Matches `projects.list`. */
 export type ShapeableProject = {
@@ -147,7 +148,7 @@ export const buildOptimisticEntry = (
     durationSec,
     hourlyRate,
     currency: settings?.currency ?? "EUR",
-    source: "web",
+    source: entrySource(),
     timeZone: deviceTimeZone(),
     // Server-owned: only the runaway guard ever writes it.
     runaway: null,

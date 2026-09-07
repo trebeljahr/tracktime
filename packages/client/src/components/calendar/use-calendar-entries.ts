@@ -28,6 +28,7 @@ import {
   type HistoryStep,
   type StepBody,
 } from "./calendar-history";
+import { entrySource } from "@/lib/entry-source";
 
 /** The exact `entries.list` input the calendar screen is showing. */
 export type CalendarQueryInput = {
@@ -247,7 +248,7 @@ export const useCalendarActions = (
         durationSec,
         hourlyRate: null,
         currency,
-        source: "web",
+        source: entrySource(),
         timeZone: variables.timeZone ?? null,
         // Server-owned: only the runaway guard ever writes it.
         runaway: null,
