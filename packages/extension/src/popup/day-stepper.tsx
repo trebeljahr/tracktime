@@ -7,7 +7,7 @@ import { entryDayLabel } from "./entry-format";
  *
  * Never `<input type="date">`, for the reason {@link ./time-field} gives about
  * `type="time"`: Chrome's date picker is an overlay anchored to the input, and
- * inside a 360×560 popup it clips against the window instead of escaping it.
+ * inside a 380×580 popup it clips against the window instead of escaping it.
  * Two arrows also fit what this is actually used for — a manual entry is
  * almost always today or yesterday, and a calendar to reach yesterday is three
  * interactions where this is one.

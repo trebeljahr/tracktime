@@ -80,7 +80,7 @@ export type SettingRowProps = {
 };
 
 /**
- * Label above control, never beside it. At 360px a two-column row would give
+ * Label above control, never beside it. At 380px a two-column row would give
  * the label about nine characters, and the settings that need explaining are
  * exactly the ones whose names do not fit in nine characters.
  */

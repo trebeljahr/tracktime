@@ -20,7 +20,7 @@ import { useElapsedSec } from "./use-elapsed";
 /**
  * The last two weeks of tracked time, in a list you can edit from.
  *
- * A fixed trailing window rather than the web app's sentinel range: a 360px
+ * A fixed trailing window rather than the web app's sentinel range: a 380px
  * list with no filter and no search should not be able to grow without limit,
  * and the window is the worker's own — this screen renders what the snapshot
  * carries and never asks for more than one more page of it.

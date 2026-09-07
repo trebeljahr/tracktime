@@ -52,7 +52,7 @@ const TODAY_ENTRY_LIMIT = 500;
 
 /**
  * How many chips the popup's quick-start row shows. Lower than the web app's:
- * the popup is 360px wide, and a row that scrolls sideways is worse than a
+ * the popup is 380px wide, and a row that scrolls sideways is worse than a
  * short one.
  */
 const QUICK_START_LIMIT = 5;

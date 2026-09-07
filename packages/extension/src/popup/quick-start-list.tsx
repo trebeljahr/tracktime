@@ -19,7 +19,7 @@ export type QuickStartListProps = {
 /**
  * The quick-start rail above the popup's start form.
  *
- * This is the surface the whole feature is for. At 360px, retyping a
+ * This is the surface the whole feature is for. At 380px, retyping a
  * description and re-picking a project is the most expensive thing the popup
  * asks of anyone — one row of "the things you actually track" removes it.
  *
@@ -34,7 +34,7 @@ export function QuickStartList({
   onUnpin,
 }: QuickStartListProps): JSX.Element | null {
   // Nothing tracked and nothing pinned. An empty rail explaining itself would
-  // cost more of a 360px surface than it is worth.
+  // cost more of a 380px surface than it is worth.
   if (items.length === 0) return null;
 
   return (

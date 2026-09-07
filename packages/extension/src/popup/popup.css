@@ -3,7 +3,7 @@
  *
  * The web client's styling is Tailwind v4 wired through Next's postcss
  * pipeline; pulling that into this package would mean new dependencies and a
- * second build config for one 360px surface. A stylesheet is cheaper and the
+ * second build config for one 380px surface. A stylesheet is cheaper and the
  * popup's whole visual vocabulary fits in one file.
  */
 
@@ -86,25 +86,66 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Every hover and focus affordance in here is a colour change, so one rule
+ * covers the lot — and one rule is also all it takes to honour a user who has
+ * asked for less movement.
+ */
+.button,
+.input,
+.select,
+.switch,
+.icon-button,
+.menu__item,
+.menu__trigger,
+.quick__start,
+.quick__pin,
+.combobox__row,
+.suggest__row,
+.suggest__fill,
+.tag {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
+
+/*
+ * A thin scrollbar, because the popup's body scrolls constantly and Chrome's
+ * default one eats 15px of a surface that has none to spare.
+ */
+.popup__body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .popup {
   /* Chrome sizes the popup to its content, so the width lives here rather
      than in a viewport unit — and a max-height keeps a long project list
      from growing the popup past the screen. */
-  width: 360px;
-  max-height: 560px;
+  width: 380px;
+  max-height: 580px;
   display: flex;
   flex-direction: column;
 }
 
 .popup__body {
-  padding: 12px;
+  padding: 14px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   /* A picker opened near the foot of a settings section has to be able to
      scroll itself clear of the bottom edge, not just up to it. */
   scroll-padding-block-end: 200px;
@@ -128,7 +169,7 @@ body {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
 .field__label {
@@ -142,38 +183,55 @@ body {
 .input,
 .select {
   width: 100%;
-  padding: 7px 9px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg);
   color: var(--fg);
   font: inherit;
 }
 
+.input:hover:not(:disabled),
+.select:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+/*
+ * A ring rather than an outline: an `outline` on a rounded control draws a
+ * rectangle around it at the offsets this file used to use, and three of these
+ * controls sit inside a dropdown where a hard 2px line reads as a second
+ * border.
+ */
 .input:focus-visible,
 .select:focus-visible,
-.button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.button:focus-visible,
+.switch:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 /* ── buttons ─────────────────────────────────────────────────────── */
 
 .button {
-  padding: 8px 12px;
+  padding: 9px 13px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface);
   color: var(--fg);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--border-strong);
 }
 
 .button:disabled {
@@ -187,10 +245,22 @@ body {
   color: var(--accent-fg);
 }
 
+/* Darkened by overlaying the text colour rather than by a second hard-coded
+   hue, so the two themes' accents stay the only place a brand colour lives. */
+.button--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, var(--fg));
+  border-color: transparent;
+}
+
 .button--danger {
   background: transparent;
   border-color: var(--danger);
   color: var(--danger);
+}
+
+.button--danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger);
 }
 
 .button--link {
@@ -215,14 +285,18 @@ body {
 }
 
 .notice {
-  padding: 7px 9px;
-  border-radius: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  /* The stripe is what tells the two apart at a glance, without either of them
+     having to shout in a colour that fights the theme. */
+  border-left: 3px solid var(--danger);
   font-size: 12px;
   background: var(--danger-bg);
   color: var(--danger);
 }
 
 .notice--ok {
+  border-left-color: var(--ok);
   background: var(--surface);
   color: var(--muted);
 }
@@ -243,9 +317,9 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 9px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg);
   color: var(--muted);
   font: inherit;
@@ -254,8 +328,13 @@ body {
   cursor: pointer;
 }
 
+.switch:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
 .switch--on {
   border-color: var(--accent);
+  background: var(--accent-soft);
   color: var(--fg);
 }
 
@@ -364,7 +443,7 @@ button.tag:hover .tag__x {
 
 .footer {
   border-top: 1px solid var(--border);
-  padding: 8px 12px 12px;
+  padding: 10px 14px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -426,7 +505,7 @@ button.tag:hover .tag__x {
 
 /* ── searchable pickers ──────────────────────────────────────────────
  *
- * The list is positioned, not in flow: at 360px a list that pushed the Start
+ * The list is positioned, not in flow: at 380px a list that pushed the Start
  * button down would move the thing you were aiming at while you aimed at it.
  */
 
@@ -443,12 +522,14 @@ button.tag:hover .tag__x {
   margin: 0;
   padding: 4px;
   list-style: none;
-  max-height: 190px;
+  max-height: 200px;
   overflow-y: auto;
-  background: var(--bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
 }
 
 /* Opened upward when the list would run off the bottom of the popup. Chrome
@@ -476,7 +557,7 @@ button.tag:hover .tag__x {
 }
 
 .combobox__row--active {
-  background: var(--surface);
+  background: var(--accent-soft);
 }
 
 .combobox__label {
@@ -565,7 +646,7 @@ button.tag:hover .tag__x {
 }
 
 .suggest__row--active {
-  background: var(--surface);
+  background: var(--accent-soft);
 }
 
 .suggest__dot {
@@ -626,8 +707,7 @@ button.tag:hover .tag__x {
 .quick {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 4px;
+  gap: 5px;
 }
 
 .quick__row {
@@ -642,9 +722,9 @@ button.tag:hover .tag__x {
   min-width: 0;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface);
   color: var(--fg);
   font: inherit;
@@ -654,6 +734,7 @@ button.tag:hover .tag__x {
 
 .quick__start:hover:not(:disabled) {
   border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .quick__start:disabled,
@@ -713,18 +794,12 @@ button.tag:hover .tag__x {
   color: var(--accent);
 }
 
-.quick__start:focus-visible,
-.quick__pin:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 /* ── inline creation panel ─────────────────────────────────────────── */
 
 .panel {
-  padding: 10px;
+  padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
 }
 
@@ -742,7 +817,7 @@ button.tag:hover .tag__x {
 }
 
 .panel__actions {
-  /* Wraps because the idle panel's three answers do not fit on one 360px row,
+  /* Wraps because the idle panel's three answers do not fit on one 380px row,
      and truncating any of them would make one choice harder to reach than the
      others. */
   display: flex;
@@ -782,10 +857,10 @@ button.tag:hover .tag__x {
   bottom: calc(100% + 6px);
   min-width: 200px;
   padding: 4px;
-  background: var(--bg);
+  background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
 }
 
 .menu__item {
@@ -802,7 +877,7 @@ button.tag:hover .tag__x {
 }
 
 .menu__item:hover {
-  background: var(--surface);
+  background: var(--accent-soft);
 }
 
 /* The menu's separator, its danger item and its shared-session note are gone
@@ -820,8 +895,8 @@ button.tag:hover .tag__x {
   align-items: center;
   gap: 6px;
   flex: none;
-  min-height: 32px;
-  padding: 0 6px 0 8px;
+  min-height: 36px;
+  padding: 0 8px 0 10px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -864,9 +939,12 @@ button.tag:hover .tag__x {
   color: var(--fg);
 }
 
-.icon-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.icon-button:focus-visible,
+.quick__start:focus-visible,
+.quick__pin:focus-visible,
+.section__header:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 /* ── screens ───────────────────────────────────────────────────────── */
@@ -907,11 +985,6 @@ button.tag:hover .tag__x {
   cursor: pointer;
 }
 
-.section__header:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
 .section__caret {
   color: var(--muted);
   font-size: 10px;
@@ -945,7 +1018,7 @@ button.tag:hover .tag__x {
   gap: 10px;
 }
 
-/* Label above control, never beside it: at 360px a two-column row leaves the
+/* Label above control, never beside it: at 380px a two-column row leaves the
    label about nine characters, and the settings that need explaining are
    exactly the ones whose names do not fit in nine. */
 .setting {
@@ -1209,7 +1282,7 @@ button.tag:hover .tag__x {
 }
 
 /* Start, end and duration on one row — three fields that are read together
-   and, at 360px, only make sense side by side. */
+   and, at 380px, only make sense side by side. */
 .range {
   display: flex;
   align-items: flex-end;

@@ -9,7 +9,7 @@ import {
  * A clock time, typed as text.
  *
  * Never `<input type="time">`. Chrome anchors that control's native overlay to
- * the input and clips it against a 360×560 extension popup rather than letting
+ * the input and clips it against a 380×580 extension popup rather than letting
  * it escape, it forces a locale-driven clock that ignores the user's own
  * `timeFormat`, and it renders nothing like the rest of `.input`. A text field
  * parsed by `parseTimeOfDayInZone` accepts everything the native one would —

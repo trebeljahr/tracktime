@@ -9,7 +9,7 @@ import { useSelectWhenCreated } from "./use-created-row";
  * Two fields, so it cannot be done from inside the picker the way a tag or a
  * task can: naming the project is step one, filing it under a client is step
  * two, and the second step is where a client can be created too. The panel
- * replaces the picker rather than sitting beside it, because at 360px there is
+ * replaces the picker rather than sitting beside it, because at 380px there is
  * no beside.
  *
  * Shared by the tracker's composer and both entry forms. Reaching for a

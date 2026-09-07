@@ -18,7 +18,7 @@ import {
  * button.
  *
  * Deliberately not a listbox that steals the whole popup: it renders inline and
- * closes on blur, because at 360px an overlay covering the timer is worse than
+ * closes on blur, because at 380px an overlay covering the timer is worse than
  * a list that pushes the button down a little.
  */
 

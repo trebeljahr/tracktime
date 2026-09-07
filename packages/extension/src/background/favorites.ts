@@ -1,7 +1,7 @@
 /**
  * The quick-start tier: pinned favorites and derived recents.
  *
- * The 360px popup is where retyping a description and re-picking a project
+ * The 380px popup is where retyping a description and re-picking a project
  * hurts most, so this is the highest-value surface for the feature — but the
  * worker owns all the state, exactly as it does for the catalog. The popup
  * never fetches; it renders whatever the snapshot carries.

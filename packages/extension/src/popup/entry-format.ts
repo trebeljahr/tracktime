@@ -1,5 +1,5 @@
 /**
- * How an entry reads in a 360px list.
+ * How an entry reads in a 380px list.
  *
  * Every formatter here delegates to `@starter/shared` and then trims: the
  * shared helpers are written for a screen with room, and the popup's job is to
@@ -23,7 +23,7 @@ import {
  *
  * The format is a parameter rather than a constant because the popup can now
  * set it, and a running clock that stayed h:mm:ss would put two spellings of a
- * duration on one screen. In h:mm:ss the leading "0:" is trimmed: at 360px it
+ * duration on one screen. In h:mm:ss the leading "0:" is trimmed: at 380px it
  * is noise for the first hour, which is where most entries live. Decimal has
  * nothing to trim, so the branch simply does not fire.
  */

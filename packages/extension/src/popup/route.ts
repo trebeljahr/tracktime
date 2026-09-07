@@ -89,7 +89,7 @@ export function topOf(stack: PopupStack): Route {
  * Go to a route.
  *
  * A total function of the target alone: the resulting stack depends only on
- * where you are going, never on where you were. That is what keeps a 360px
+ * where you are going, never on where you were. That is what keeps a 380px
  * surface from turning into a maze — level-1 routes REPLACE each other rather
  * than pushing, so settings → entries is a move sideways and not a third
  * level with two back steps out of it.

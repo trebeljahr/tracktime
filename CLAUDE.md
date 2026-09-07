@@ -508,6 +508,42 @@ The client image serves the static export: `output: "export"` leaves no
 The E2E suite runs that same file, so the deployed and tested servers cannot
 drift apart.
 
+### Browser extension
+
+Five things the 380px popup does that are easy to break:
+
+- **Descriptions autocomplete from `entries.descriptions`, searched
+  server-side.** The rows are a page out of six months, so filtering a cached
+  list locally answers "no match" for a description that is certainly there.
+  The query rides on `descriptions:search`, which is answered with a whole
+  snapshot like every other message and carries `descriptionsFor` beside the
+  rows — typing outruns the round trip, and without the query the list would
+  spend most of its life describing a prefix already moved past. It fails
+  silently by design: a typeahead that raises the error banner because the
+  network blinked is worse than one that offers nothing.
+- **Tab completes, Enter does not.** Nothing is highlighted until a deliberate
+  arrow press, so Enter still belongs to the surrounding form and starts the
+  timer. A row's `＋` (or ⌘⏎) takes the project, task, tags and billable flag
+  the newest entry with that name carried; the plain row takes the name alone,
+  because overwriting a project the user already picked is the destructive
+  reading of "autofill the description".
+- **One `DescriptionField` for all three surfaces**, and one `ProjectPicker`.
+  Commit-on-blur, Escape-reverts-without-the-blur-saving-it and the
+  name-then-file-under-a-client panel are each fiddly enough that a second copy
+  drifts. `DescriptionField` is controlled: each caller already owns when its
+  text may be replaced, and a second copy of that rule could disagree.
+- **Creating a catalog row selects it** (`useSelectWhenCreated`). The worker
+  answers a create with a snapshot rather than the row, so there is no id at
+  the call site and reading the list straight after the await races the
+  render — waiting for the row to appear in props is the version that cannot.
+  Before this, creating a tag mid-timer added it to the list and not to the
+  entry.
+- **The theme is a synced user preference**, applied from `<html data-theme>`
+  before React's first render out of a `localStorage` copy. The popup is
+  rebuilt on every open, so learning the theme from the worker's answer would
+  flash the wrong one several times a day. The media query is guarded on the
+  attribute being absent, so it cannot fight an explicit choice.
+
 ### Browser extension build modes
 
 `packages/extension` bakes its API URL in at build time, so a build is a

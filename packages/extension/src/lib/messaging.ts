@@ -56,7 +56,7 @@ export type SettingsPatch = Omit<UpdateSettingsInput, "originId">;
  * The bounded window of past entries the popup browses.
  *
  * `entries.list` needs both ends, so the popup gets a fixed trailing window
- * rather than the web app's sentinel range: a 360px list nobody can filter or
+ * rather than the web app's sentinel range: a 380px list nobody can filter or
  * search should not be able to grow without limit.
  *
  * `DetailedEntry`, not `TimeEntry` — the server already denormalizes the
@@ -197,7 +197,7 @@ export type PopupToBackground =
    *
    * `end` is deliberately not nullable. Clearing it re-opens the entry, which
    * either starts a second timer or fails with CONFLICT against the one already
-   * running; neither is something a 360px surface should be able to do.
+   * running; neither is something a 380px surface should be able to do.
    */
   | {
       type: "entry:update";

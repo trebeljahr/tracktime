@@ -26,7 +26,7 @@ import {
 /**
  * How many rows one query answers with.
  *
- * Lower than the server's own default: the popup is 360px wide and the list
+ * Lower than the server's own default: the popup is 380px wide and the list
  * hangs under a field that already has a start button below it, so a longer
  * list is scrolled past rather than read.
  */

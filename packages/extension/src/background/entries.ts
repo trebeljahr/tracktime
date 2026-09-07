@@ -13,7 +13,7 @@
  *
  * The window is fixed at {@link ENTRY_WINDOW_DAYS} days and capped at
  * {@link ENTRY_MAX_ROWS} rows, matching Raycast rather than the web app's
- * sentinel range: a 360px list with no filter and no search should not be able
+ * sentinel range: a 380px list with no filter and no search should not be able
  * to grow without limit, and the cap is stated on screen so it reads as a
  * decision rather than a bug.
  */

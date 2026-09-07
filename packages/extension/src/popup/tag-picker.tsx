@@ -10,7 +10,7 @@ import { useSelectWhenCreated } from "./use-created-row";
  * The picker only ever offers tags that are NOT already on the entry, and a
  * pick means "add this one". That keeps one search-and-create control in the
  * extension instead of two, and the selected tags render as removable chips
- * above it — at 360px a list of checkboxes would push Start off the popup.
+ * above it — at 380px a list of checkboxes would push Start off the popup.
  */
 
 export type TagPickerProps = {

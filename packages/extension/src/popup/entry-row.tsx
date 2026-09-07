@@ -19,7 +19,7 @@ import {
  * Read-only, and the whole row is one button that pushes the detail screen.
  * There is no inline delete and no inline field editing, for three reasons:
  * `Combobox` caps its dropdown at 190px and would clip at an arbitrary scroll
- * offset even with the flip fix; at 360px the row's width is already spent on
+ * offset even with the flip fix; at 380px the row's width is already spent on
  * a description, a range and a duration; and a 28px destructive control next
  * to a scroll target is a mis-tap generator.
  */
