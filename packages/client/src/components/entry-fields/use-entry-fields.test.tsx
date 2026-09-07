@@ -45,21 +45,19 @@ describe("useWriteThroughEntryFields", () => {
     });
   });
 
-  // The whole reason project and task are one control: the server refuses the
-  // pair when they disagree, so both have to travel in one write.
-  it("commits the cleared task together with a project change", () => {
+  // Project and task are independent references, so re-filing an entry must
+  // not quietly throw away what it says the work was.
+  it("commits a project change without disturbing the task", () => {
     const { commit, view } = setup();
     const next = withProject(view.result.current.fields, "p2");
 
     act(() => {
-      view.result.current.onChange(next, {
-        projectId: next.projectId,
-        taskId: next.taskId,
-      });
+      view.result.current.onChange(next, { projectId: next.projectId });
     });
 
     expect(commit).toHaveBeenCalledTimes(1);
-    expect(commit).toHaveBeenCalledWith({ projectId: "p2", taskId: null });
+    expect(commit).toHaveBeenCalledWith({ projectId: "p2" });
+    expect(view.result.current.fields.taskId).toBe("t1");
   });
 
   it("commits a tag change immediately", () => {

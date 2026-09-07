@@ -54,7 +54,7 @@ export async function loadCatalogLookup(
     taskIds.size === 0
       ? []
       : Task.find({ workspaceId, _id: { $in: objectIds(taskIds) } })
-          .select({ name: 1, projectId: 1 })
+          .select({ name: 1 })
           .lean(),
   ]);
 
@@ -73,7 +73,7 @@ export async function loadCatalogLookup(
   const tasks = new Map<string, CatalogTask>(
     taskDocs.map((task) => [
       String(task._id),
-      { name: task.name, projectId: task.projectId },
+      { name: task.name },
     ]),
   );
 

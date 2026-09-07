@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import {
   deviceTimeZone,
   formatDuration,
@@ -76,7 +76,6 @@ export type EntryFormProps = {
    * arrow per render would fetch the task list on every snapshot, each fetch
    * producing the snapshot that triggers the next.
    */
-  onSelectProject: (projectId: string | null) => Promise<boolean>;
   onCreateTag: (name: string) => Promise<boolean>;
 };
 
@@ -194,7 +193,6 @@ export function EntryForm({
   locked = false,
   readOnly = false,
   onChange,
-  onSelectProject,
   onCreateTag,
 }: EntryFormProps): JSX.Element {
   const timeFormat: TimeFormat = state.settings?.timeFormat ?? "24h";
@@ -212,15 +210,8 @@ export function EntryForm({
     setText(values.description);
   }
 
-  // Tasks belong to a project, so whichever project is on screen has to have
-  // its list fetched. The worker holds the list; this only asks for it.
-  useEffect(() => {
-    void onSelectProject(values.projectId);
-  }, [values.projectId, onSelectProject]);
-
-  // The worker's task list can lag a project change by one round trip, and
-  // showing the previous project's tasks would be actively wrong.
-  const tasks = state.tasksProjectId === values.projectId ? state.tasks : [];
+  // Tasks are workspace-wide, so the snapshot always carries the whole list.
+  const tasks = state.tasks;
 
   const change = (next: Partial<EntryDraft>, patch: EntryFieldPatch): void => {
     onChange({ ...values, ...next }, patch);
@@ -260,9 +251,8 @@ export function EntryForm({
 
   const selectProject = (next: string | null): void => {
     if (next === values.projectId) return;
-    // A task from the old project would be silently wrong against the new one,
-    // and `resolveRefs` rejects the pair server-side — so both always travel
-    // together, even when only the project was touched.
+    // The task is deliberately left alone: it names what the work was, which a
+    // change of project does not revise.
     if (mode === "create") {
       // Only a draft follows the project's default, the same rule the tracker
       // applies: changing the project under an existing entry must not
@@ -275,7 +265,6 @@ export function EntryForm({
       change(
         {
           projectId: next,
-          taskId: null,
           billable: untouched
             ? billableDefaultFor(state.projects, next)
             : values.billable,
@@ -284,7 +273,7 @@ export function EntryForm({
       );
       return;
     }
-    change({ projectId: next, taskId: null }, { projectId: next, taskId: null });
+    change({ projectId: next }, { projectId: next });
   };
 
   const setDay = (dayKey: DayKey): void => {
@@ -390,14 +379,8 @@ export function EntryForm({
         onChange={(next) => change({ taskId: next }, { taskId: next })}
         emptyLabel="No task"
         placeholder="Search tasks…"
-        disabled={factsLocked || values.projectId === null}
-        disabledHint={
-          locked
-            ? "On an invoice"
-            : values.projectId === null
-              ? "Pick a project first"
-              : "Not sent yet"
-        }
+        disabled={factsLocked}
+        disabledHint={locked ? "On an invoice" : "Not sent yet"}
         testId="entry-task"
       />
 

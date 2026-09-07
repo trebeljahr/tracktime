@@ -23,15 +23,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/sonner";
-import { ORIGIN_ID } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
-import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import {
   useClientMutations,
   useProjectMutations,
 } from "./use-catalog-mutations";
-import { ProjectTasksField } from "./project-tasks-field";
 import type { ClientRow, ProjectRow } from "./types";
 
 export type ProjectFormDialogProps = {
@@ -135,7 +132,6 @@ function ProjectForm({
   const [idleBehavior, setIdleBehavior] = React.useState<IdleBehavior | "">(
     project?.idleBehavior ?? ""
   );
-  const [pendingTasks, setPendingTasks] = React.useState<string[]>([]);
   const [nameError, setNameError] = React.useState<string | null>(null);
   const [rateError, setRateError] = React.useState<string | null>(null);
   const [estimateError, setEstimateError] = React.useState<string | null>(null);
@@ -160,8 +156,6 @@ function ProjectForm({
     onConflict: setNameError,
   });
   const { createClient, updateClient } = useClientMutations();
-  const utils = trpc.useUtils();
-  const createTaskForNewProject = trpc.tasks.create.useMutation();
 
   const clientOptions = React.useMemo<ComboboxOption[]>(
     () =>
@@ -258,29 +252,8 @@ function ProjectForm({
       budgetAmount,
       ...(budgetAmount === null ? {} : { budgetCurrency }),
       idleBehavior: idle,
-    }).then(async (created) => {
+    }).then((created) => {
       if (!created) return;
-
-      // Tasks queued while the project had no id yet. Written in order so the
-      // list reads the way it was typed.
-      //
-      // Guarded as a whole: the project itself already exists, so a task that
-      // fails to write must not strand the dialog open with no way out.
-      try {
-        for (const taskName of pendingTasks) {
-          await createTaskForNewProject
-            .mutateAsync({
-              projectId: created.id,
-              name: taskName,
-              originId: ORIGIN_ID,
-            })
-            .catch(() => null);
-        }
-        await utils.tasks.invalidate();
-      } catch {
-        toast.error("The project was created, but its tasks were not.");
-      }
-
       toast.success(`Project "${created.name}" created.`);
       onDone(created);
     });
@@ -362,12 +335,6 @@ function ProjectForm({
           />
         </div>
       </div>
-
-      <ProjectTasksField
-        projectId={project?.id ?? null}
-        pending={pendingTasks}
-        onPendingChange={setPendingTasks}
-      />
 
       {/* Everything below is optional and inherits a workspace default when
           left alone, so it is folded away on create — a new project needs a

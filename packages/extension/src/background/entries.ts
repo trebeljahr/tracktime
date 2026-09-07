@@ -111,8 +111,7 @@ export const decorateEntry = (entry: TimeEntry): DetailedEntry => {
   const task =
     entry.taskId === null
       ? null
-      : (getCachedTasks(entry.projectId)?.find((it) => it.id === entry.taskId) ??
-        null);
+      : (getCachedTasks()?.find((it) => it.id === entry.taskId) ?? null);
 
   return {
     ...entry,

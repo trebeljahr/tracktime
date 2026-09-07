@@ -35,45 +35,31 @@ import { useAllTimeRange } from "@/lib/entry-links";
 import { CatalogName } from "./catalog-name";
 import { ConfirmDialog } from "./confirm-dialog";
 import { EntriesLink, ShowEntriesItem } from "./entries-link";
-import { ProjectFormDialog } from "./project-form-dialog";
 import { TaskFormDialog } from "./task-form-dialog";
-import type { ClientRow, ProjectRow, TaskRow } from "./types";
+import type { TaskRow } from "./types";
 import { useTaskMutations } from "./use-catalog-mutations";
 
 export type TasksTableProps = {
   tasks: TaskRow[];
-  /**
-   * Every project, so the Project cell can open the project it names. A task
-   * row carries its project's name and colour but not the row itself.
-   */
-  projects: ProjectRow[];
-  /** Passed straight through to the project dialog opened from a row. */
-  clients: ClientRow[];
   isLoading: boolean;
   /** True when filters are hiding rows, so the empty state can say so. */
   isFiltered: boolean;
   onCreate: () => void;
 };
 
-/** Every task the owner has, across projects — the Tasks manage screen. */
+/** Every task in the workspace — the Tasks manage screen. */
 export function TasksTable({
   tasks,
-  projects,
-  clients,
   isLoading,
   isFiltered,
   onCreate,
 }: TasksTableProps): React.JSX.Element {
   const format = useFormatSettings();
-  const { updateTask, setTaskArchived, removeTask } = useTaskMutations(null);
+  const { updateTask, setTaskArchived, removeTask } = useTaskMutations();
   // The Tracked column is a lifetime total, so its link has to span one too.
   const allTime = useAllTimeRange();
 
   const [editing, setEditing] = React.useState<TaskRow | null>(null);
-  /** The task row's project, opened for editing from the Project cell. */
-  const [editingProject, setEditingProject] = React.useState<ProjectRow | null>(
-    null,
-  );
   const [pendingDelete, setPendingDelete] = React.useState<TaskRow | null>(
     null,
   );
@@ -95,8 +81,8 @@ export function TasksTable({
         title={isFiltered ? "No tasks match these filters" : "No tasks yet"}
         description={
           isFiltered
-            ? "Try clearing the search or project filter, or turn on “Show archived”."
-            : "Tasks break a project down. Time can still be tracked straight on the project."
+            ? "Try clearing the search, or turn on “Show archived”."
+            : "Tasks name the kind of work. An entry can carry one, a project, both, or neither."
         }
         action={
           isFiltered ? undefined : (
@@ -119,7 +105,6 @@ export function TasksTable({
             <TableRow>
               <TableHead className="w-10" />
               <TableHead>Task</TableHead>
-              <TableHead>Project</TableHead>
               <TableHead className="text-right">Tracked</TableHead>
               <TableHead className="w-10" />
             </TableRow>
@@ -153,36 +138,12 @@ export function TasksTable({
                   />
                 </TableCell>
 
-                <TableCell className="text-muted-foreground">
-                  {task.projectName ? (
-                    <CatalogName
-                      name={task.projectName}
-                      color={task.projectColor}
-                      nameClassName="font-normal"
-                      editLabel={`Edit project "${task.projectName}"`}
-                      onEdit={() => {
-                        const project = projects.find(
-                          (row) => row.id === task.projectId,
-                        );
-                        if (project) setEditingProject(project);
-                      }}
-                      testId={`task-project-${task.id}`}
-                    />
-                  ) : (
-                    <span className="text-muted-foreground/70">—</span>
-                  )}
-                </TableCell>
-
                 <TableCell
                   className="text-right tabular-nums"
                   data-testid={`task-total-${task.id}`}
                 >
                   <EntriesLink
-                    target={{
-                      dimension: "task",
-                      id: task.id,
-                      projectId: task.projectId,
-                    }}
+                    target={{ dimension: "task", id: task.id }}
                     range={allTime}
                     label={task.name}
                     testId={`task-total-link-${task.id}`}
@@ -206,11 +167,7 @@ export function TasksTable({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <ShowEntriesItem
-                        target={{
-                          dimension: "task",
-                          id: task.id,
-                          projectId: task.projectId,
-                        }}
+                        target={{ dimension: "task", id: task.id }}
                         range={allTime}
                         testId={`task-entries-menu-${task.id}`}
                       />
@@ -252,15 +209,6 @@ export function TasksTable({
           </TableBody>
         </Table>
       </div>
-
-      <ProjectFormDialog
-        open={editingProject !== null}
-        onOpenChange={(next) => {
-          if (!next) setEditingProject(null);
-        }}
-        project={editingProject}
-        clients={clients}
-      />
 
       <TaskFormDialog
         open={editing !== null}

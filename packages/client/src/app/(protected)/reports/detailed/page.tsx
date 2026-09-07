@@ -255,23 +255,17 @@ function DetailedReport(): React.JSX.Element {
           return {
             ...entry,
             projectId,
-            // The task belonged to the previous project, so it cannot survive.
-            taskId: null,
+            // The task is left alone: it names what the work was, which moving
+            // the entry to another project does not revise.
             projectName: project?.name ?? null,
             projectColor: project?.color ?? null,
             clientName: project?.clientName ?? null,
-            taskName: null,
             hourlyRate: rate,
             amount: entryAmount(entry.durationSec, rate),
           };
         },
         (id) =>
-          updateEntry.mutateAsync({
-            id,
-            projectId,
-            taskId: null,
-            originId: ORIGIN_ID,
-          }),
+          updateEntry.mutateAsync({ id, projectId, originId: ORIGIN_ID }),
         projectId === null
           ? `Removed the project from ${selectedIds.length} entries`
           : `Moved ${selectedIds.length} entries to ${project?.name ?? "the project"}`

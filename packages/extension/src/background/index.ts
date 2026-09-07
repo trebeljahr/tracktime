@@ -25,7 +25,6 @@ import {
   createTag,
   createProject,
   createTask,
-  selectProjectTasks,
 } from "./catalog";
 import { listDevices, revokeDevice, revokeOtherDevices } from "./devices";
 import {
@@ -243,8 +242,6 @@ const apply = async (message: PopupToBackground): Promise<void> => {
       return;
     case "favorite:remove":
       return removeFavorite(message.id);
-    case "tasks:for-project":
-      return selectProjectTasks(message.projectId);
     case "client:create":
       await createClient(message.name);
       return;
@@ -255,7 +252,7 @@ const apply = async (message: PopupToBackground): Promise<void> => {
       await createProject(message.name, message.clientId);
       return;
     case "task:create":
-      await createTask(message.projectId, message.name);
+      await createTask(message.name);
       return;
     case "config:set-api-url":
       return setApiUrl(message.apiUrl);

@@ -29,7 +29,7 @@ const catalog: CatalogLookup = {
       { name: "Old Site", color: "#64748b", clientId: null, archived: true },
     ],
   ]),
-  tasks: new Map([[TASK, { name: "Invoicing", projectId: ACME }]]),
+  tasks: new Map([[TASK, { name: "Invoicing" }]]),
   clients: new Map([[CLIENT, "Acme Inc"]]),
 };
 

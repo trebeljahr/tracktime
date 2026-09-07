@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type JSX } from "react";
+import { useRef, useState, type FormEvent, type JSX } from "react";
 import {
   createId,
   deviceTimeZone,
@@ -64,11 +64,10 @@ export type TrackerScreenProps = {
   onOpenSettings: () => void;
   onOpenEntries: () => void;
   /** Loads the task list for a project into the worker's snapshot. */
-  onSelectProject: (projectId: string | null) => Promise<boolean>;
   onCreateClient: (name: string) => Promise<boolean>;
   onCreateTag: (name: string) => Promise<boolean>;
   onCreateProject: (name: string, clientId: string | null) => Promise<boolean>;
-  onCreateTask: (projectId: string, name: string) => Promise<boolean>;
+  onCreateTask: (name: string) => Promise<boolean>;
 };
 
 /** Local-clock seconds elapsed today, the ceiling on a running entry's share. */
@@ -161,7 +160,6 @@ export function TrackerScreen({
   onAnswerIdle,
   onOpenSettings,
   onOpenEntries,
-  onSelectProject,
   onCreateClient,
   onCreateTag,
   onCreateProject,
@@ -218,13 +216,6 @@ export function TrackerScreen({
     }
   }
 
-  // Tasks belong to a project, so whichever project is on screen — the running
-  // entry's or the draft's — has to have its task list fetched. The worker
-  // holds the list; this only asks for it.
-  useEffect(() => {
-    void onSelectProject(projectId);
-  }, [projectId, onSelectProject]);
-
   /**
    * Push an edit at the running entry, or do nothing when composing a draft.
    *
@@ -238,9 +229,9 @@ export function TrackerScreen({
   };
 
   /**
-   * The five fields as `@starter/core` sees them, so the popup answers the
-   * project/task coupling with the same rules the web app does rather than a
-   * second implementation of them that can drift.
+   * The five fields as `@starter/core` sees them, so the popup answers project
+   * and task with the same rules the web app does rather than a second
+   * implementation of them that can drift.
    */
   const fields: EntryFields = {
     description,
@@ -254,12 +245,9 @@ export function TrackerScreen({
     const updated = withProject(fields, next);
     if (updated === fields) return;
     setProjectId(updated.projectId);
-    // A task from the old project would be silently wrong against the new one,
-    // so `withProject` clears it and the patch carries both.
-    setTaskId(updated.taskId);
 
     if (running !== null) {
-      patchRunning({ projectId: updated.projectId, taskId: updated.taskId });
+      patchRunning({ projectId: updated.projectId });
       return;
     }
     // Only a draft follows the project's default. Changing the project under a
@@ -269,9 +257,9 @@ export function TrackerScreen({
 
   const selectTask = (next: string | null): void => {
     const updated = withTask(fields, next);
+    if (updated === fields) return;
     setTaskId(updated.taskId);
-    if (updated.projectId !== projectId) setProjectId(updated.projectId);
-    patchRunning({ taskId: updated.taskId, projectId: updated.projectId });
+    patchRunning({ taskId: updated.taskId });
   };
 
   const selectTags = (next: string[]): void => {
@@ -329,8 +317,7 @@ export function TrackerScreen({
   };
 
   const createTask = async (name: string): Promise<void> => {
-    if (projectId === null) return;
-    await onCreateTask(projectId, name);
+    await onCreateTask(name);
   };
 
   /**
@@ -435,9 +422,8 @@ export function TrackerScreen({
     running === null ? 0 : Math.min(elapsedSec, secondsSinceMidnight());
   const todaySec = state.todaySec + runningToday;
 
-  // The worker's task list can lag a project change by one round trip; showing
-  // the previous project's tasks would be actively wrong, so show none.
-  const tasks = state.tasksProjectId === projectId ? state.tasks : [];
+  // Tasks are workspace-wide, so the snapshot always carries the whole list.
+  const tasks = state.tasks;
 
   const sync = describeSync(
     state.syncStatus,
@@ -599,8 +585,6 @@ export function TrackerScreen({
             onChange={selectTask}
             emptyLabel="No task"
             placeholder="Search tasks…"
-            disabled={projectId === null}
-            disabledHint="Pick a project first"
             onCreate={createTask}
             createLabel={(name) => `Create task “${name}”`}
             testId="tracker-task"

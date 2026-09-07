@@ -72,31 +72,16 @@ export const fetchClients = async (api: ApiClient): Promise<Client[]> => {
  * state — an entry need not belong to a project — and yields no tasks rather
  * than a request for tasks of nothing.
  */
-export const fetchTasks = async (
-  api: ApiClient,
-  projectId: string | null,
-): Promise<Task[]> => {
-  if (projectId === null) return [];
-
-  const cached = getCachedTasks(projectId);
+export const fetchTasks = async (api: ApiClient): Promise<Task[]> => {
+  const cached = getCachedTasks();
   if (cached !== null) return cached;
 
   const tasks = await api.query<Task[]>("tasks.list", {
-    projectId,
     includeArchived: false,
   });
-  setCachedTasks(projectId, tasks);
+  setCachedTasks(tasks);
   return tasks;
 };
-
-/** Load the tasks for a project into the cache, so the next state carries them. */
-export async function selectProjectTasks(
-  projectId: string | null,
-): Promise<void> {
-  const current = await ensureReady();
-  if (!current.session) return;
-  await fetchTasks(current.api, projectId);
-}
 
 export async function createClient(name: string): Promise<Client> {
   const current = await ensureReady();
@@ -127,16 +112,12 @@ export async function createProject(
   return created;
 }
 
-export async function createTask(
-  projectId: string,
-  name: string,
-): Promise<Task> {
+export async function createTask(name: string): Promise<Task> {
   const current = await ensureReady();
   const created = await current.api.mutate<Task>("tasks.create", {
-    projectId,
     name: name.trim(),
     originId: ORIGIN_ID,
   });
-  setCachedTasks(projectId, [...(getCachedTasks(projectId) ?? []), created]);
+  setCachedTasks([...(getCachedTasks() ?? []), created]);
   return created;
 }

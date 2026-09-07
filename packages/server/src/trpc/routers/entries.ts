@@ -285,39 +285,28 @@ const loadProject = async (
 };
 
 /**
- * Validate that the referenced project/task belong to the caller and agree
- * with each other. A task given without a project adopts the task's project.
+ * Validate that the referenced project and task belong to the caller.
+ *
+ * The two are independent: a task does not belong to a project, so there is no
+ * agreement to check between them and no project to infer from a task. Any
+ * combination of the two — both, either, neither — is a legal entry.
  */
 const resolveRefs = async (
   workspaceId: string,
   projectId: string | null,
   taskId: string | null,
 ): Promise<ResolvedRefs> => {
-  let effectiveProjectId = projectId;
-  let project = effectiveProjectId
-    ? await loadProject(workspaceId, effectiveProjectId)
-    : null;
+  const project = projectId ? await loadProject(workspaceId, projectId) : null;
 
-  if (!taskId) {
-    return { projectId: effectiveProjectId, taskId: null, project };
-  }
+  if (!taskId) return { projectId, taskId: null, project };
 
-  const task = await Task.findOne({
+  const task = await Task.exists({
     _id: requireObjectId(taskId, "Task not found"),
     workspaceId,
-  }).lean();
+  });
   if (!task) throw notFound("Task not found");
 
-  if (effectiveProjectId && task.projectId !== effectiveProjectId) {
-    throw badRequest("Task does not belong to the given project");
-  }
-
-  if (!effectiveProjectId) {
-    effectiveProjectId = task.projectId;
-    project = await loadProject(workspaceId, effectiveProjectId);
-  }
-
-  return { projectId: effectiveProjectId, taskId, project };
+  return { projectId, taskId, project };
 };
 
 // ── running-timer helpers ────────────────────────────────────────────

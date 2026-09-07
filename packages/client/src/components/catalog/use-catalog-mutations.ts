@@ -18,7 +18,7 @@ import {
   errorMessage,
   isConflict,
   sortByName,
-  taskListInput,
+  TASK_LIST_INPUT,
   type ClientRow,
   type CreatedClient,
   type CreatedProject,
@@ -481,21 +481,14 @@ export type TaskMutations = {
 };
 
 /**
- * `projectId` selects which task cache is written optimistically: a project id
- * for a project row's inline panel, `null` for the Tasks screen's "every task"
- * listing. Both are invalidated on settle, so the two views never disagree.
+ * Tasks are a flat, workspace-wide catalog, so there is exactly one listing to
+ * write optimistically and one cache key to invalidate.
  */
 export function useTaskMutations(
-  projectId: string | null,
   handlers: CatalogErrorHandlers = {},
 ): TaskMutations {
   const utils = trpc.useUtils();
-  const input = taskListInput(projectId);
-
-  const findProject = (id: string): ProjectRow | null => {
-    const projects = utils.projects.list.getData(PROJECT_LIST_INPUT) ?? [];
-    return projects.find((project) => project.id === id) ?? null;
-  };
+  const input = TASK_LIST_INPUT;
 
   const writeTasks = (update: (rows: TaskRow[]) => TaskRow[]): void => {
     utils.tasks.list.setData(input, (old) =>
@@ -514,8 +507,6 @@ export function useTaskMutations(
     if (previous !== undefined) utils.tasks.list.setData(input, previous);
   };
 
-  // Both the scoped and the unscoped listing hold the same rows, so neither
-  // can be left behind — `invalidate()` with no key covers both.
   const settleTasks = (): void => {
     void utils.tasks.list.invalidate();
   };
@@ -524,19 +515,15 @@ export function useTaskMutations(
     onMutate: async (vars) => {
       const context = await beginTaskWrite();
       const now = new Date().toISOString();
-      const project = findProject(vars.projectId);
       const optimistic: TaskRow = {
         id: `optimistic-${createId()}`,
         workspaceId: "",
         createdBy: "",
-        projectId: vars.projectId,
         name: vars.name.trim(),
         done: false,
         archived: false,
         createdAt: now,
         updatedAt: now,
-        projectName: project?.name ?? null,
-        projectColor: project?.color ?? null,
         totalSec: 0,
       };
       writeTasks((rows) => sortByName([...rows, optimistic]));
@@ -618,16 +605,8 @@ export function useTaskMutations(
   });
 
   return {
-    createTask: (vars) => {
-      const target = vars.projectId ?? projectId;
-      if (!target) {
-        toast.error("Pick a project for the task first.");
-        return Promise.resolve(null);
-      }
-      return create
-        .mutateAsync({ ...vars, projectId: target, originId: ORIGIN_ID })
-        .catch(() => null);
-    },
+    createTask: (vars) =>
+      create.mutateAsync({ ...vars, originId: ORIGIN_ID }).catch(() => null),
     updateTask: (vars) =>
       update.mutateAsync({ ...vars, originId: ORIGIN_ID }).catch(() => null),
     setTaskArchived: (id, archived) => {

@@ -147,7 +147,7 @@ const lower = (value: string): string => value.trim().toLowerCase();
 type CatalogIndex = {
   clients: Map<string, string>;
   projects: Map<string, ProjectRef>;
-  /** Keyed `${projectId}::${lowercased task name}`. */
+  /** Keyed by lowercased task name — tasks are workspace-wide, not per project. */
   tasks: Map<string, string>;
   tags: Map<string, string>;
   /** Names by id, for turning existing entries back into fingerprints. */
@@ -168,7 +168,7 @@ async function loadCatalog(workspaceId: string): Promise<CatalogIndex> {
       { workspaceId },
       { name: 1, clientId: 1, hourlyRate: 1, billableDefault: 1 },
     ).lean(),
-    Task.find({ workspaceId }, { name: 1, projectId: 1 }).lean(),
+    Task.find({ workspaceId }, { name: 1 }).lean(),
     Tag.find({ workspaceId }, { name: 1 }).lean(),
   ]);
 
@@ -192,7 +192,7 @@ async function loadCatalog(workspaceId: string): Promise<CatalogIndex> {
     index.projectNameById.set(id, project.name);
   }
   for (const task of tasks) {
-    index.tasks.set(`${task.projectId}::${lower(task.name)}`, String(task._id));
+    index.tasks.set(lower(task.name), String(task._id));
   }
   for (const tag of tags) index.tags.set(lower(tag.name), String(tag._id));
 
@@ -316,12 +316,8 @@ function missingNames(
     if (row.projectName && !catalog.projects.has(lower(row.projectName))) {
       projects.set(lower(row.projectName), row.projectName);
     }
-    if (row.taskName && row.projectName) {
-      const project = catalog.projects.get(lower(row.projectName));
-      const key = project
-        ? `${project.id}::${lower(row.taskName)}`
-        : `new:${lower(row.projectName)}::${lower(row.taskName)}`;
-      if (!catalog.tasks.has(key)) tasks.set(key, row.taskName);
+    if (row.taskName && !catalog.tasks.has(lower(row.taskName))) {
+      tasks.set(lower(row.taskName), row.taskName);
     }
     for (const tag of row.tagNames) {
       if (!catalog.tags.has(lower(tag))) tags.set(lower(tag), tag);
@@ -647,18 +643,15 @@ async function createMissingCatalog(args: {
     created.tagIds.push(id);
   }
 
-  // Tasks last: a task without a project has nowhere to live, so a row naming
-  // one but no project simply has no task rather than an orphaned one.
+  // Tasks are workspace-wide, so a row naming a task but no project still
+  // gets one: the entry keeps the task and is simply project-less.
   for (const row of rows) {
-    if (!row.taskName || !row.projectName) continue;
-    const project = catalog.projects.get(lower(row.projectName));
-    if (!project) continue;
-    const key = `${project.id}::${lower(row.taskName)}`;
+    if (!row.taskName) continue;
+    const key = lower(row.taskName);
     if (catalog.tasks.has(key)) continue;
     const doc = await Task.create({
       workspaceId,
       createdBy,
-      projectId: project.id,
       name: row.taskName,
     });
     const id = String(doc._id);
@@ -949,18 +942,11 @@ async function buildWorkspaceExport(args: {
       idleBehavior: project.idleBehavior ?? null,
       archived: project.archived,
     })),
-    tasks: catalogTasks.flatMap((task) => {
-      const project = projectById.get(task.projectId);
-      if (!project) return [];
-      return [
-        {
-          name: task.name,
-          projectName: project.name,
-          done: task.done,
-          archived: task.archived,
-        },
-      ];
-    }),
+    tasks: catalogTasks.map((task) => ({
+      name: task.name,
+      done: task.done,
+      archived: task.archived,
+    })),
     tags: catalogTags.map((tag) => ({
       name: tag.name,
       color: tag.color,
@@ -1121,11 +1107,9 @@ export const dataRouter = router({
         const project = row.projectName
           ? (catalog.projects.get(lower(row.projectName)) ?? null)
           : null;
-        const taskId =
-          project && row.taskName
-            ? (catalog.tasks.get(`${project.id}::${lower(row.taskName)}`) ??
-              null)
-            : null;
+        const taskId = row.taskName
+          ? (catalog.tasks.get(lower(row.taskName)) ?? null)
+          : null;
         const billable =
           row.billable ?? project?.billableDefault ?? defaultBillable;
         return {
@@ -1320,7 +1304,6 @@ export const dataRouter = router({
         for (const id of batch.projectIds) {
           const used = await TimeEntry.exists({ workspaceId, projectId: id });
           if (used) continue;
-          await Task.deleteMany({ workspaceId, projectId: id });
           await Project.deleteOne({ _id: id, workspaceId });
           result.projectsDeleted += 1;
         }

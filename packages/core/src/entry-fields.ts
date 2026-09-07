@@ -53,49 +53,25 @@ export const entryFieldsFrom = (entry: {
 });
 
 /**
- * Move an entry to another project, taking its task with it.
+ * Move an entry to another project.
  *
- * A task belongs to exactly one project, and the server refuses the pair when
- * they disagree — `entries.update` answers "Task does not belong to the given
- * project". So changing the project must clear the task in the SAME step: a
- * surface that sends the project alone turns an ordinary re-file into a 400
- * the moment the entry happens to carry a task.
- *
- * Re-picking the project that is already set leaves the task alone, so that
- * closing a picker on the current value is never destructive.
+ * The task is deliberately left alone. A task does not belong to a project —
+ * "Design review" is the same work whichever project it happens on — so
+ * re-filing an entry must not throw away what it says the work WAS. The server
+ * validates the two references independently, so any pair is legal.
  */
 export const withProject = (
   fields: EntryFields,
   projectId: string | null,
 ): EntryFields =>
-  projectId === fields.projectId
-    ? fields
-    : { ...fields, projectId, taskId: null };
+  projectId === fields.projectId ? fields : { ...fields, projectId };
 
-/**
- * Pick a task, adopting the project it belongs to.
- *
- * The adoption is what makes "create a task from the picker" work: the task
- * dialog carries a project picker of its own, so the task that comes back may
- * belong somewhere other than where the composer was pointing. Following it is
- * the only reading that keeps the pair valid — the alternative is a task filed
- * under a project it is not part of.
- *
- * `taskProjectId` is optional so callers picking from a list already scoped to
- * the current project need not look it up again.
- */
+/** Pick a task. Independent of the project, so nothing else moves. */
 export const withTask = (
   fields: EntryFields,
   taskId: string | null,
-  taskProjectId?: string | null,
-): EntryFields => ({
-  ...fields,
-  taskId,
-  projectId:
-    taskId !== null && taskProjectId != null
-      ? taskProjectId
-      : fields.projectId,
-});
+): EntryFields =>
+  taskId === fields.taskId ? fields : { ...fields, taskId };
 
 /** Replace the whole tag set, preserving the order they were picked in. */
 export const withTags = (

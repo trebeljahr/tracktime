@@ -8,7 +8,7 @@ import {
   useNavigation,
 } from "@raycast/api";
 import type { DetailedEntry } from "@starter/core";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { getTracktime } from "../lib/api.js";
 import { refreshMenuBar, showFailureToast } from "../lib/ui.js";
 import { DescriptionPicker } from "./description-picker.js";
@@ -56,19 +56,12 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
   const [tagIds, setTagIds] = useState<string[]>(entry.tagIds);
   const [submitting, setSubmitting] = useState(false);
 
-  const catalog = useEntryCatalog(projectId);
-
-  // Dropping the project orphans the task — a task only exists inside one.
-  useEffect(() => {
-    if (projectId === NONE && taskId !== NONE) setTaskId(NONE);
-  }, [projectId, taskId]);
+  const catalog = useEntryCatalog();
 
   if (catalog.signedOut) return <SignedOutView />;
 
-  const pickProject = (value: string): void => {
-    setProjectId(value);
-    setTaskId(NONE);
-  };
+  // No `pickProject`: a task does not belong to a project, so changing
+  // one leaves the other alone.
 
   const submit = async (values: FormValues): Promise<void> => {
     if (values.start && values.end && values.end <= values.start) {
@@ -133,8 +126,8 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
               />
             }
           />
-          {catalogActions(catalog, projectId, {
-            onProject: pickProject,
+          {catalogActions(catalog, {
+            onProject: setProjectId,
             onTask: setTaskId,
             onTag: (id) => setTagIds((current) => [...current, id]),
           })}
@@ -149,8 +142,8 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
         onChange={setDescription}
         info="⌘⇧D searches what you have tracked before."
       />
-      {projectField(catalog, projectId, pickProject)}
-      {taskField(catalog, projectId, taskId, setTaskId)}
+      {projectField(catalog, projectId, setProjectId)}
+      {taskField(catalog, taskId, setTaskId)}
       {tagsField(catalog, tagIds, setTagIds)}
       <Form.Checkbox
         id="billable"

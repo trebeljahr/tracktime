@@ -9,7 +9,9 @@
 //  - `order` is dense from 0 within that pair. `create` appends, `remove`
 //    closes the gap, `reorder` rewrites the whole list.
 //  - Pins are unique by (description, projectId, taskId, billable) — pinning
-//    the same job twice is always a mistake, never an intent.
+//    the same job twice is always a mistake, never an intent. The project and
+//    the task are independent references, so any combination of the two is a
+//    legal pin.
 //  - Every mutation calls `publishToUser(ctx.user.id, { kind:
 //    "favorites.changed" }, input.originId)` — a pin change reaches that
 //    person's own devices and nobody else's.
@@ -136,16 +138,10 @@ export const favoritesRouter = router({
       // because it fails later, on the surface built to be one click.
       if (taskId !== null) {
         const task = mongoose.isValidObjectId(taskId)
-          ? await Task.findOne({ _id: taskId, workspaceId: ctx.workspaceId }).lean()
+          ? await Task.exists({ _id: taskId, workspaceId: ctx.workspaceId })
           : null;
         if (task === null) {
           throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
-        }
-        if (projectId !== null && task.projectId !== projectId) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Task does not belong to the given project",
-          });
         }
       }
 

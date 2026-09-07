@@ -21,7 +21,7 @@ export type CatalogProject = {
 };
 
 /** The fields a task contributes. */
-export type CatalogTask = { name: string; projectId: string };
+export type CatalogTask = { name: string };
 
 /** Everything the label resolver may look at, keyed by id. */
 export type CatalogLookup = {

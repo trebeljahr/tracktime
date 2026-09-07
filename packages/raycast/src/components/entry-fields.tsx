@@ -44,17 +44,13 @@ export type EntryCatalog = {
 /**
  * Everything the three field renderers below read.
  *
- * Tasks are scoped to the project and reload when it changes; tags are not,
- * because a tag belongs to the workspace rather than to any one project.
+ * Tasks and tags are both workspace-wide: neither belongs to a project, so
+ * neither reloads when the project changes.
  */
-export function useEntryCatalog(projectId: string): EntryCatalog {
+export function useEntryCatalog(): EntryCatalog {
   const projects = useApi("projects", (api) => api.projects());
   const tags = useApi("tags", (api) => api.tags());
-  const tasks = useApi(
-    `tasks:${projectId}`,
-    (api) => (projectId === NONE ? Promise.resolve([]) : api.tasks(projectId)),
-    { execute: projectId !== NONE },
-  );
+  const tasks = useApi("tasks", (api) => api.tasks());
 
   return {
     projects,
@@ -163,12 +159,11 @@ export const projectField = (
 
 export const taskField = (
   catalog: EntryCatalog,
-  projectId: string,
   taskId: string,
   onChange: (value: string) => void,
 ): React.JSX.Element | null => {
   const tasks = catalog.tasks.data ?? [];
-  if (projectId === NONE || tasks.length === 0) return null;
+  if (tasks.length === 0) return null;
 
   return (
     <Form.Dropdown id="taskId" title="Task" value={taskId} onChange={onChange}>
@@ -234,7 +229,6 @@ export type CatalogActionHandlers = {
  */
 export const catalogActions = (
   catalog: EntryCatalog,
-  projectId: string,
   handlers: CatalogActionHandlers,
 ): React.JSX.Element[] => {
   const actions = [
@@ -254,25 +248,22 @@ export const catalogActions = (
     />,
   ];
 
-  if (projectId !== NONE) {
-    actions.push(
-      <Action.Push
-        key="task"
-        title="New Task…"
-        icon={Icon.List}
-        shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
-        target={
-          <TaskForm
-            projectId={projectId}
-            onSaved={(created) => {
-              handlers.onTask(created.id);
-              catalog.tasks.revalidate();
-            }}
-          />
-        }
-      />,
-    );
-  }
+  actions.push(
+    <Action.Push
+      key="task"
+      title="New Task…"
+      icon={Icon.List}
+      shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
+      target={
+        <TaskForm
+          onSaved={(created) => {
+            handlers.onTask(created.id);
+            catalog.tasks.revalidate();
+          }}
+        />
+      }
+    />,
+  );
 
   actions.push(
     <Action.Push

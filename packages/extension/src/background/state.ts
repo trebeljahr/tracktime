@@ -32,7 +32,6 @@ import {
   getCachedTags,
   getCachedRecents,
   getCachedTasks,
-  getCachedTasksProjectId,
   getCachedTodaySec,
   getSyncStatus,
   isTransportFailure,
@@ -71,7 +70,6 @@ const signedOutState = (
   clients: [],
   tags: [],
   tasks: [],
-  tasksProjectId: null,
   quickStarts: [],
   favorites: [],
   recents: [],
@@ -186,10 +184,6 @@ export async function buildState(): Promise<BackgroundState> {
     }
   };
 
-  // Whichever project the popup last asked about — carried through so a
-  // rebuild of the snapshot does not silently empty the task picker under it.
-  const tasksProjectId = getCachedTasksProjectId();
-
   // Which surface the popup declared it is on. The whole snapshot is still
   // whole; the view only decides which of its expensive halves is worth
   // fetching, and `null` for the rest means "not loaded for this view" rather
@@ -220,12 +214,7 @@ export async function buildState(): Promise<BackgroundState> {
     softRead(() => fetchProjects(current.api), getCachedProjects() ?? []),
     softRead(() => fetchClients(current.api), getCachedClients() ?? []),
     softRead(() => fetchTags(current.api), getCachedTags() ?? []),
-    // Also a local read as far as reachability goes: it answers from cache,
-    // and from nothing at all when no project is selected.
-    localRead(
-      () => fetchTasks(current.api, tasksProjectId),
-      getCachedTasks(tasksProjectId) ?? [],
-    ),
+    softRead(() => fetchTasks(current.api), getCachedTasks() ?? []),
     softRead(() => fetchTodaySec(current.api), getCachedTodaySec() ?? 0),
     softRead(() => fetchFavorites(current.api), getCachedFavorites() ?? []),
     softRead(() => fetchRecents(current.api), getCachedRecents() ?? []),
@@ -269,7 +258,6 @@ export async function buildState(): Promise<BackgroundState> {
     clients,
     tags,
     tasks,
-    tasksProjectId,
     // Merged here rather than in the popup: the worker owns all state, and
     // the merge rule has to match the web app's or one browser disagrees
     // with itself about what is pinned.

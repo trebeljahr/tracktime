@@ -35,7 +35,6 @@ export type EntryCreateScreenProps = {
   onGoTracker: () => void;
   onDraftChange: (draft: EntryDraft) => void;
   onCreateEntry: (draft: EntryDraft) => Promise<boolean>;
-  onSelectProject: (projectId: string | null) => Promise<boolean>;
   onCreateTag: (name: string) => Promise<boolean>;
 };
 
@@ -48,7 +47,6 @@ export function EntryCreateScreen({
   onGoTracker,
   onDraftChange,
   onCreateEntry,
-  onSelectProject,
   onCreateTag,
 }: EntryCreateScreenProps): JSX.Element {
   const [busy, setBusy] = useState(false);
@@ -132,7 +130,6 @@ export function EntryCreateScreen({
             // there is no earlier recording whose zone it should inherit.
             zone={deviceTimeZone()}
             onChange={(next) => onDraftChange(next)}
-            onSelectProject={onSelectProject}
             onCreateTag={onCreateTag}
           />
 

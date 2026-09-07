@@ -1,4 +1,4 @@
-// Cascading deletes for the catalog (Client → Project → Task).
+// Cascading deletes for the catalog (Client → Project, and Task alongside).
 //
 // Deleting a catalog row never deletes tracked time. Entries keep their
 // start/end/duration and simply lose the reference — `TimeEntry.projectId`
@@ -23,29 +23,20 @@ const EMPTY_RESULT: CatalogRemoveResult = {
 };
 
 /**
- * Delete a project: its tasks go with it, and every entry that pointed at
- * either the project or one of those tasks is detached from both.
+ * Delete a project. Entries pointing at it keep their tracked time and their
+ * task, and lose only the project.
+ *
+ * Tasks are deliberately untouched: they are a workspace-wide catalog, not a
+ * project's children, so "Design review" outliving the project it happened on
+ * is the correct outcome rather than collateral.
  */
 export async function cascadeDeleteProject(
   workspaceId: string,
   projectId: string,
 ): Promise<CatalogRemoveResult> {
-  const tasks = await Task.find({ workspaceId, projectId })
-    .select({ _id: 1 })
-    .lean();
-  const taskIds = tasks.map((task) => String(task._id));
-
-  // An entry carrying a task always carries that task's project too, but
-  // matching on both keeps the cascade correct even if that ever drifts.
   const detached = await TimeEntry.updateMany(
-    {
-      workspaceId,
-      $or: [
-        { projectId },
-        ...(taskIds.length > 0 ? [{ taskId: { $in: taskIds } }] : []),
-      ],
-    },
-    { $set: { projectId: null, taskId: null } },
+    { workspaceId, projectId },
+    { $set: { projectId: null } },
   );
 
   // Favorites are detached, not deleted, for the same reason entries are: a
@@ -53,23 +44,15 @@ export async function cascadeDeleteProject(
   // filed under is no reason to silently unpin it. It degrades to a
   // project-less pin, which every surface already renders.
   const favorites = await Favorite.updateMany(
-    {
-      workspaceId,
-      $or: [
-        { projectId },
-        ...(taskIds.length > 0 ? [{ taskId: { $in: taskIds } }] : []),
-      ],
-    },
-    { $set: { projectId: null, taskId: null } },
+    { workspaceId, projectId },
+    { $set: { projectId: null } },
   );
 
-  await Task.deleteMany({ workspaceId, projectId });
   await Project.deleteOne({ _id: projectId, workspaceId });
 
   return {
     ...EMPTY_RESULT,
     entriesDetached: detached.modifiedCount,
-    tasksDeleted: taskIds.length,
     favoritesDetached: favorites.modifiedCount,
   };
 }

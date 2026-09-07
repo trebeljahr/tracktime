@@ -42,7 +42,6 @@ export type EntryDetailScreenProps = {
   onGoTracker: () => void;
   onUpdateEntry: (id: string, patch: EntryFieldPatch) => Promise<boolean>;
   onDeleteEntry: (id: string) => Promise<boolean>;
-  onSelectProject: (projectId: string | null) => Promise<boolean>;
   onCreateTag: (name: string) => Promise<boolean>;
   /** The window has loaded and no longer holds this id — deleted elsewhere. */
   onMissing: () => void;
@@ -71,7 +70,6 @@ export function EntryDetailScreen({
   onGoTracker,
   onUpdateEntry,
   onDeleteEntry,
-  onSelectProject,
   onCreateTag,
   onMissing,
 }: EntryDetailScreenProps): JSX.Element {
@@ -222,8 +220,7 @@ export function EntryDetailScreen({
               locked={invoiced}
               readOnly={queued}
               onChange={commit}
-              onSelectProject={onSelectProject}
-              onCreateTag={onCreateTag}
+                onCreateTag={onCreateTag}
             />
 
             {confirming ? (

@@ -28,12 +28,6 @@ const DETAILED_REPORT_PATH = "/reports/detailed";
 export type EntriesLinkTarget = {
   dimension: EntryFilterDimension;
   id: string;
-  /**
-   * The task's project. Only meaningful for `dimension: "task"`, where it is
-   * carried so the report's task multi-select — which lists the tasks of the
-   * SELECTED projects — can actually render the filter it arrived with.
-   */
-  projectId?: string | null;
 };
 
 /**
@@ -52,10 +46,6 @@ export const entriesHref = (
     [REPORT_PARAM.to]: range.to,
     [PARAM_FOR_DIMENSION[target.dimension]]: target.id,
   });
-
-  if (target.dimension === "task" && target.projectId) {
-    params.set(REPORT_PARAM.projects, target.projectId);
-  }
 
   return `${DETAILED_REPORT_PATH}?${params.toString()}`;
 };

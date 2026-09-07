@@ -43,7 +43,7 @@ export function StartTimer(): React.JSX.Element {
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const catalog = useEntryCatalog(projectId);
+  const catalog = useEntryCatalog();
 
   // A project carries its own billable default; respect it until the user
   // overrides the checkbox themselves.
@@ -51,10 +51,8 @@ export function StartTimer(): React.JSX.Element {
 
   if (catalog.signedOut) return <SignedOutView />;
 
-  const pickProject = (value: string): void => {
-    setProjectId(value);
-    setTaskId(NONE);
-  };
+  // No `pickProject`: a task does not belong to a project, so changing
+  // one leaves the other alone.
 
   const submit = async (values: FormValues): Promise<void> => {
     setSubmitting(true);
@@ -115,8 +113,8 @@ export function StartTimer(): React.JSX.Element {
               />
             }
           />
-          {catalogActions(catalog, projectId, {
-            onProject: pickProject,
+          {catalogActions(catalog, {
+            onProject: setProjectId,
             onTask: setTaskId,
             onTag: (id) => setTagIds((current) => [...current, id]),
           })}
@@ -136,8 +134,8 @@ export function StartTimer(): React.JSX.Element {
         onChange={setDescription}
         info="⌘⇧D searches what you have tracked before."
       />
-      {projectField(catalog, projectId, pickProject)}
-      {taskField(catalog, projectId, taskId, setTaskId)}
+      {projectField(catalog, projectId, setProjectId)}
+      {taskField(catalog, taskId, setTaskId)}
       {tagsField(catalog, tagIds, setTagIds)}
       <Form.Checkbox
         id="billable"

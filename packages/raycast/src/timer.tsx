@@ -129,11 +129,9 @@ export default function Timer(): React.JSX.Element {
   ): Promise<void> =>
     run(async () => {
       const api = await getTracktime();
-      await api.update({
-        id: entry.id,
-        projectId: project?.id ?? null,
-        taskId: null,
-      });
+      // The task is left alone: moving an entry to another project does not
+      // revise what the work was.
+      await api.update({ id: entry.id, projectId: project?.id ?? null });
       return project ? `Moved to ${project.name}` : "Project cleared";
     }, "Could not change the project");
 

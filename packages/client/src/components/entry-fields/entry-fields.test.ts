@@ -16,22 +16,22 @@ const fields = (overrides: Partial<EntryFields> = {}): EntryFields => ({
 });
 
 describe("withProject", () => {
-  it("drops the task, because a task belongs to one project", () => {
+  it("keeps the task, because a task does not belong to a project", () => {
     const moved = withProject(
       fields({ projectId: "p1", taskId: "t1" }),
       "p2",
     );
     expect(moved.projectId).toBe("p2");
-    expect(moved.taskId).toBeNull();
+    expect(moved.taskId).toBe("t1");
   });
 
-  it("drops the task when the project is cleared", () => {
+  it("keeps the task when the project is cleared", () => {
     const cleared = withProject(
       fields({ projectId: "p1", taskId: "t1" }),
       null,
     );
     expect(cleared.projectId).toBeNull();
-    expect(cleared.taskId).toBeNull();
+    expect(cleared.taskId).toBe("t1");
   });
 
   // Closing a picker on the value it already had must not be destructive.
@@ -52,21 +52,20 @@ describe("withProject", () => {
 });
 
 describe("withTask", () => {
-  it("adopts the project a task created elsewhere belongs to", () => {
-    const picked = withTask(fields({ projectId: "p1" }), "t9", "p2");
-    expect(picked.taskId).toBe("t9");
-    expect(picked.projectId).toBe("p2");
-  });
-
-  it("keeps the current project when the task is already scoped to it", () => {
-    const picked = withTask(fields({ projectId: "p1" }), "t1");
-    expect(picked).toEqual(fields({ projectId: "p1", taskId: "t1" }));
+  it("leaves the project alone when a task is picked", () => {
+    const picked = withTask(fields({ projectId: "p1" }), "t9");
+    expect(picked).toEqual(fields({ projectId: "p1", taskId: "t9" }));
   });
 
   it("keeps the project when the task is cleared", () => {
     const cleared = withTask(fields({ projectId: "p1", taskId: "t1" }), null);
     expect(cleared.projectId).toBe("p1");
     expect(cleared.taskId).toBeNull();
+  });
+
+  it("returns the same object when the task is unchanged", () => {
+    const before = fields({ projectId: "p1", taskId: "t1" });
+    expect(withTask(before, "t1")).toBe(before);
   });
 });
 

@@ -280,12 +280,6 @@ export function App(): JSX.Element {
     [send],
   );
 
-  const selectProject = useCallback(
-    (projectId: string | null): Promise<boolean> =>
-      send({ type: "tasks:for-project", projectId }),
-    [send],
-  );
-
   const createTag = useCallback(
     (name: string): Promise<boolean> => send({ type: "tag:create", name }),
     [send],
@@ -303,8 +297,7 @@ export function App(): JSX.Element {
   );
 
   const createTask = useCallback(
-    (projectId: string, name: string): Promise<boolean> =>
-      send({ type: "task:create", projectId, name }),
+    (name: string): Promise<boolean> => send({ type: "task:create", name }),
     [send],
   );
 
@@ -497,7 +490,6 @@ export function App(): JSX.Element {
             onAnswerIdle: (answer) => send({ type: "idle:answer", answer }),
             onOpenSettings: () => openSection(null),
             onOpenEntries: () => go({ name: "entries" }),
-            onSelectProject: selectProject,
             onCreateClient: createClient,
             onCreateTag: createTag,
             onCreateProject: createProject,
@@ -535,7 +527,6 @@ export function App(): JSX.Element {
             onGoTracker: goTracker,
             onUpdateEntry: updateEntry,
             onDeleteEntry: deleteEntry,
-            onSelectProject: selectProject,
             onCreateTag: createTag,
             onMissing: entryMissing,
           }}
@@ -547,7 +538,6 @@ export function App(): JSX.Element {
             onGoTracker: goTracker,
             onDraftChange: changeDraft,
             onCreateEntry: createEntry,
-            onSelectProject: selectProject,
             onCreateTag: createTag,
           }}
         />

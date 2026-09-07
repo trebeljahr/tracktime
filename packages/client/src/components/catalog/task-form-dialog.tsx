@@ -2,7 +2,6 @@
 
 import * as React from "react";
 
-import { ProjectPicker } from "@/components/project-picker";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,27 +22,23 @@ export type TaskFormDialogProps = {
   onOpenChange: (open: boolean) => void;
   /** Omitted/null creates; otherwise the dialog edits this task. */
   task?: TaskRow | null;
-  /** Preselected project for a new task. */
-  defaultProjectId?: string | null;
   /**
    * Called with the newly created task. Lets a caller act on the result — the
    * tracker's task picker selects it immediately, so "New task…" leaves you
    * ready to start the timer.
    */
-  onCreated?: (task: { id: string; name: string; projectId: string }) => void;
+  onCreated?: (task: { id: string; name: string }) => void;
 };
 
 /**
- * The create/edit form behind every "New task…" surface. Unlike the inline
- * panel on a project row, a task created here has to name its project
- * explicitly — through the same picker the tracker bar uses, so a project (and
- * its client) missing from the list can be created without leaving the dialog.
+ * The create/edit form behind every "New task…" surface. A task is a
+ * workspace-wide label for a kind of work, so a name is all it needs — there
+ * is no project to file it under.
  */
 export function TaskFormDialog({
   open,
   onOpenChange,
   task,
-  defaultProjectId = null,
   onCreated,
 }: TaskFormDialogProps): React.JSX.Element {
   return (
@@ -53,7 +48,6 @@ export function TaskFormDialog({
           <TaskForm
             key={task?.id ?? "new"}
             task={task ?? null}
-            defaultProjectId={defaultProjectId}
             onDone={(created) => {
               onOpenChange(false);
               if (created) onCreated?.(created);
@@ -67,32 +61,21 @@ export function TaskFormDialog({
 
 type TaskFormProps = {
   task: TaskRow | null;
-  defaultProjectId: string | null;
   /** Receives the created task on create; nothing on edit. */
-  onDone: (created?: { id: string; name: string; projectId: string }) => void;
+  onDone: (created?: { id: string; name: string }) => void;
 };
 
-function TaskForm({
-  task,
-  defaultProjectId,
-  onDone,
-}: TaskFormProps): React.JSX.Element {
+function TaskForm({ task, onDone }: TaskFormProps): React.JSX.Element {
   const [name, setName] = React.useState(task?.name ?? "");
-  const [projectId, setProjectId] = React.useState<string | null>(
-    task?.projectId ?? defaultProjectId,
-  );
   const [nameError, setNameError] = React.useState<string | null>(null);
-  const [projectError, setProjectError] = React.useState<string | null>(null);
 
-  // Unscoped: the form's own project field decides where the task lands.
-  const { createTask, updateTask, isSaving } = useTaskMutations(null, {
+  const { createTask, updateTask, isSaving } = useTaskMutations({
     onConflict: setNameError,
   });
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     setNameError(null);
-    setProjectError(null);
 
     const trimmed = name.trim();
     if (trimmed === "") {
@@ -109,15 +92,10 @@ function TaskForm({
       return;
     }
 
-    if (projectId === null) {
-      setProjectError("Pick the project this task belongs to");
-      return;
-    }
-
-    void createTask({ name: trimmed, projectId }).then((created) => {
+    void createTask({ name: trimmed }).then((created) => {
       if (!created) return;
       toast.success(`Task "${created.name}" created.`);
-      onDone({ id: created.id, name: created.name, projectId });
+      onDone({ id: created.id, name: created.name });
     });
   };
 
@@ -126,8 +104,8 @@ function TaskForm({
       <DialogHeader>
         <DialogTitle>{task ? "Edit task" : "New task"}</DialogTitle>
         <DialogDescription>
-          Tasks break a project down. Time can still be tracked straight on the
-          project.
+          Tasks name the kind of work, whichever project it happens on. An
+          entry can carry one, a project, both, or neither.
         </DialogDescription>
       </DialogHeader>
 
@@ -152,30 +130,6 @@ function TaskForm({
           </p>
         ) : null}
       </div>
-
-      {task ? null : (
-        <div className="space-y-2">
-          <Label>Project</Label>
-          <ProjectPicker
-            value={projectId}
-            onChange={(next) => {
-              setProjectId(next);
-              if (projectError) setProjectError(null);
-            }}
-            placeholder="Pick a project"
-            className="w-full"
-            testId="task-project-picker"
-          />
-          {projectError ? (
-            <p
-              className="text-sm text-destructive"
-              data-testid="task-project-error"
-            >
-              {projectError}
-            </p>
-          ) : null}
-        </div>
-      )}
 
       <DialogFooter>
         <Button

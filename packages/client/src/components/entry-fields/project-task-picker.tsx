@@ -27,11 +27,7 @@ export const useProjectClientName = (projectId: string | null): string | null =>
 
 export type ProjectTaskPickerProps = {
   value: EntryFields;
-  /**
-   * `patch` is exactly the fields that changed, ready to send to
-   * `entries.update` — which is why a project change arrives as
-   * `{ projectId, taskId: null }` rather than as two separate writes.
-   */
+  /** `patch` is exactly the fields that changed, ready for `entries.update`. */
   onChange: (next: EntryFields, patch: Partial<EntryFields>) => void;
   /**
    * "row" lays the three out inline. "contents" dissolves the wrapper with
@@ -59,22 +55,13 @@ export type ProjectTaskPickerProps = {
 };
 
 /**
- * Project and task, as one control rather than two that happen to sit
- * together.
+ * Project and task, laid out together because they are read together — not
+ * because either owns the other.
  *
- * They are coupled in both directions and neither coupling is optional:
- *
- *  - a task belongs to exactly one project, so changing the project CLEARS the
- *    task in the same write. Sending the project alone is what made re-filing
- *    a tasked entry fail with "Task does not belong to the given project" —
- *    the server checks the pair, and every surface that shipped only a project
- *    picker was quietly relying on the entry not having a task.
- *  - creating a task from the picker can hand back a task filed under a
- *    DIFFERENT project (the task dialog carries a project picker of its own),
- *    so the project follows the task.
- *
- * Both rules live in `@starter/core` so the browser extension and the Raycast
- * forms answer them the same way.
+ * The two references are independent: a task names WHAT the work was, a
+ * project names what it was FOR, and every combination of the two is a legal
+ * entry. So changing one never touches the other, and the client between them
+ * is read off the project rather than picked.
  */
 export function ProjectTaskPicker({
   value,
@@ -94,7 +81,7 @@ export function ProjectTaskPicker({
     (projectId: string | null): void => {
       const next = withProject(value, projectId);
       if (next === value) return;
-      onChange(next, { projectId: next.projectId, taskId: next.taskId });
+      onChange(next, { projectId: next.projectId });
     },
     [onChange, value]
   );
@@ -102,17 +89,8 @@ export function ProjectTaskPicker({
   const handleTask = React.useCallback(
     (taskId: string | null): void => {
       const next = withTask(value, taskId);
+      if (next === value) return;
       onChange(next, { taskId: next.taskId });
-    },
-    [onChange, value]
-  );
-
-  // A task created for another project drags the project with it, so the pair
-  // stays valid rather than being refused on save.
-  const handleTaskProject = React.useCallback(
-    (projectId: string): void => {
-      const next = { ...value, projectId };
-      onChange(next, { projectId });
     },
     [onChange, value]
   );
@@ -123,11 +101,10 @@ export function ProjectTaskPicker({
   /**
    * The client, read-only.
    *
-   * Never a picker: a client owns projects, a project owns tasks, and an entry
-   * points at a project — so choosing one here would be a second source of
-   * truth that can disagree with the project's own client. Shown rather than
-   * chosen is what keeps "Redesign" unambiguous when two clients both have
-   * one.
+   * Never a picker: a client owns projects and an entry points at a project —
+   * so choosing one here would be a second source of truth that can disagree
+   * with the project's own client. Shown rather than chosen is what keeps
+   * "Redesign" unambiguous when two clients both have one.
    *
    * How much room it earns depends on where it is. In the caller's grid it
    * owns a track that collapses to 0px on narrower viewports, so it must stay
@@ -168,10 +145,8 @@ export function ProjectTaskPicker({
 
   const task = (
     <TaskPicker
-      projectId={value.projectId}
       value={value.taskId}
       onChange={handleTask}
-      onProjectChange={handleTaskProject}
       disabled={disabled}
       size={size}
       className={cn(control, !contents && !bare && "flex-1", controlClassName)}

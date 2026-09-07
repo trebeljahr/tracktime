@@ -67,12 +67,9 @@ export const useTimesheetMutations = (
   const utils = trpc.useUtils();
 
   const shapeContext = React.useCallback(
-    (projectId: string | null): EntryShapeContext => ({
+    (): EntryShapeContext => ({
       projects: utils.projects.list.getData({}) ?? [],
-      tasks:
-        projectId === null
-          ? []
-          : utils.tasks.list.getData({ projectId }) ?? [],
+      tasks: utils.tasks.list.getData({}) ?? [],
       settings: utils.settings.get.getData() ?? null,
     }),
     [utils]
@@ -224,7 +221,7 @@ export const useTimesheetMutations = (
         timeZone: deviceTimeZone(),
         originId: ORIGIN_ID,
       };
-      const optimistic = buildOptimisticEntry(shapeContext(context.projectId), {
+      const optimistic = buildOptimisticEntry(shapeContext(), {
         id: tempId,
         description: "",
         projectId: context.projectId,
@@ -245,7 +242,7 @@ export const useTimesheetMutations = (
           patchList((entries) =>
             entries.map((entry) =>
               entry.id === tempId
-                ? decorateEntry(shapeContext(created.projectId), created)
+                ? decorateEntry(shapeContext(), created)
                 : entry
             )
           );

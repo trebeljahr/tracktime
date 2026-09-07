@@ -316,16 +316,12 @@ export function TimesheetScreen(): React.JSX.Element {
           >
             <ProjectPicker
               value={draftProject}
-              onChange={(projectId) => {
-                setDraftProject(projectId);
-                setDraftTask(null);
-              }}
+              onChange={setDraftProject}
               size="sm"
               className="w-56"
               testId="timesheet-row-project"
             />
             <TaskPicker
-              projectId={draftProject}
               value={draftTask}
               onChange={setDraftTask}
               size="sm"

@@ -195,11 +195,9 @@ export default function MenuBar(): React.JSX.Element | null {
   ): void => {
     void act(async () => {
       const api = await getTracktime();
-      await api.update({
-        id: entry.id,
-        projectId: project?.id ?? null,
-        taskId: null,
-      });
+      // The task is left alone: moving an entry to another project does not
+      // revise what the work was.
+      await api.update({ id: entry.id, projectId: project?.id ?? null });
       await showToast({
         style: Toast.Style.Success,
         title: project ? `Moved to ${project.name}` : "Project cleared",

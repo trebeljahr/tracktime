@@ -462,7 +462,6 @@ export type WorkspaceExportProject = {
 
 export type WorkspaceExportTask = {
   name: string;
-  projectName: string;
   done: boolean;
   archived: boolean;
 };

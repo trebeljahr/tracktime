@@ -1,7 +1,9 @@
 // IMPLEMENTED BY: catalog agent (clients / projects / tasks)
 //
-// Tasks always live under a project. `list` rolls up tracked seconds per task
-// in one aggregation so the projects screen never fires a query per row.
+// Tasks are a flat, workspace-wide catalog — an entry carries a task and a
+// project side by side, and the task belongs to neither the project nor the
+// client above it. `list` rolls up tracked seconds per task in one aggregation
+// so the Tasks screen never fires a query per row.
 import { TRPCError } from "@trpc/server";
 import {
   createTaskSchema,
@@ -10,7 +12,6 @@ import {
   updateTaskSchema,
   type Task as TaskWire,
 } from "@starter/shared";
-import { Project } from "../../models/Project.js";
 import { Task, toClientTask, type TaskDocLike } from "../../models/Task.js";
 import { publishSync } from "../../ws/sync.js";
 import { workspaceProcedure, router } from "../trpc.js";
@@ -20,49 +21,32 @@ import {
 } from "./catalog-cascade.js";
 import { archiveInputSchema, assertObjectId, exactNameRegExp } from "./clients.js";
 
-/** A task plus its owning project and rolled-up tracked time. */
+/** A task plus its rolled-up tracked time. */
 export type TaskWithStats = TaskWire & {
-  projectName: string | null;
-  projectColor: string | null;
   /** Sum of `durationSec` across entries booked on this task. */
   totalSec: number;
 };
 
 /** Raw shape produced by the `list` aggregation. */
 type TaskAggregateRow = TaskDocLike & {
-  projectDoc: { name: string; color: string }[];
   stats: { totalSec: number }[];
 };
 
 async function assertUniqueTaskName(
   workspaceId: string,
-  projectId: string,
   name: string,
   excludeId?: string,
 ): Promise<void> {
   const clash = await Task.exists({
     workspaceId,
-    projectId,
     name: exactNameRegExp(name),
     ...(excludeId ? { _id: { $ne: excludeId } } : {}),
   });
   if (clash) {
     throw new TRPCError({
       code: "CONFLICT",
-      message: `This project already has a task named "${name.trim()}".`,
+      message: `A task named "${name.trim()}" already exists.`,
     });
-  }
-}
-
-/** Throws NOT_FOUND when the project is missing or owned by somebody else. */
-async function assertProjectOwned(
-  workspaceId: string,
-  projectId: string,
-): Promise<void> {
-  assertObjectId(projectId);
-  const exists = await Project.exists({ _id: projectId, workspaceId });
-  if (!exists) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
   }
 }
 
@@ -81,26 +65,12 @@ export const tasksRouter = router({
     .input(taskListSchema)
     .query(async ({ ctx, input }): Promise<TaskWithStats[]> => {
       const workspaceId = ctx.workspaceId;
-      if (typeof input.projectId === "string") assertObjectId(input.projectId);
 
       const rows = await Task.aggregate<TaskAggregateRow>([
         {
           $match: {
             workspaceId,
-            ...(input.projectId ? { projectId: input.projectId } : {}),
             ...(input.includeArchived ? {} : { archived: false }),
-          },
-        },
-        {
-          // Archived projects must still resolve, so this joins by id only.
-          $lookup: {
-            from: "projects",
-            let: { pid: "$projectId" },
-            pipeline: [
-              { $match: { $expr: { $eq: [{ $toString: "$_id" }, "$$pid"] } } },
-              { $project: { _id: 0, name: 1, color: 1 } },
-            ],
-            as: "projectDoc",
           },
         },
         {
@@ -124,43 +94,25 @@ export const tasksRouter = router({
             as: "stats",
           },
         },
-        {
-          $addFields: {
-            sortName: { $toLower: "$name" },
-            // Unscoped listings group by project first; within one project the
-            // extra key is constant, so the same sort serves both callers.
-            sortProject: {
-              $toLower: {
-                $ifNull: [{ $first: "$projectDoc.name" }, ""],
-              },
-            },
-          },
-        },
-        { $sort: { sortProject: 1, sortName: 1 } },
+        { $addFields: { sortName: { $toLower: "$name" } } },
+        { $sort: { sortName: 1 } },
       ]);
 
-      return rows.map((row) => {
-        const project = row.projectDoc[0];
-        return {
-          ...toClientTask(row),
-          projectName: project?.name ?? null,
-          projectColor: project?.color ?? null,
-          totalSec: row.stats[0]?.totalSec ?? 0,
-        };
-      });
+      return rows.map((row) => ({
+        ...toClientTask(row),
+        totalSec: row.stats[0]?.totalSec ?? 0,
+      }));
     }),
 
   create: workspaceProcedure
     .input(createTaskSchema)
     .mutation(async ({ ctx, input }): Promise<TaskWire> => {
       const name = input.name.trim();
-      await assertProjectOwned(ctx.workspaceId, input.projectId);
-      await assertUniqueTaskName(ctx.workspaceId, input.projectId, name);
+      await assertUniqueTaskName(ctx.workspaceId, name);
 
       const created = await Task.create({
         workspaceId: ctx.workspaceId,
         createdBy: ctx.user.id,
-        projectId: input.projectId,
         name,
         done: false,
         archived: false,
@@ -177,14 +129,9 @@ export const tasksRouter = router({
   update: workspaceProcedure
     .input(updateTaskSchema)
     .mutation(async ({ ctx, input }): Promise<TaskWire> => {
-      const existing = await findOwnedTask(ctx.workspaceId, input.id);
+      await findOwnedTask(ctx.workspaceId, input.id);
       if (input.name !== undefined) {
-        await assertUniqueTaskName(
-          ctx.workspaceId,
-          existing.projectId,
-          input.name,
-          input.id,
-        );
+        await assertUniqueTaskName(ctx.workspaceId, input.name, input.id);
       }
 
       const updated = await Task.findOneAndUpdate(

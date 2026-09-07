@@ -116,7 +116,7 @@ export type UpdateProjectInput = CreateProjectInput & {
   archived?: boolean;
 };
 
-export type CreateTaskInput = { projectId: string; name: string };
+export type CreateTaskInput = { name: string };
 export type UpdateTaskInput = {
   id: string;
   name?: string;
@@ -174,12 +174,9 @@ export type Tracktime = {
     includeArchived?: boolean;
     clientId?: string | null;
   }): Promise<ProjectWithStats[]>;
-  /** Null lists every task in the workspace, not none of them. */
-  tasks(
-    projectId: string | null,
-    options?: { includeArchived?: boolean },
-  ): Promise<TaskWithStats[]>;
-  /** Tags are not scoped to a project, so this takes no project. */
+  /** Tasks are workspace-wide, so this takes no project. */
+  tasks(options?: { includeArchived?: boolean }): Promise<TaskWithStats[]>;
+  /** Tags are not scoped to a project, so this takes no project either. */
   tags(options?: { includeArchived?: boolean }): Promise<TagWithStats[]>;
   clients(options?: { includeArchived?: boolean }): Promise<Client[]>;
 
@@ -339,9 +336,8 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
       ...(options?.clientId === undefined ? {} : { clientId: options.clientId }),
     }),
 
-  tasks: (projectId, options) =>
+  tasks: (options) =>
     client.query<TaskWithStats[]>("tasks.list", {
-      projectId,
       includeArchived: options?.includeArchived ?? false,
     }),
 

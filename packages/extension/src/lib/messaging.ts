@@ -133,12 +133,10 @@ export type PopupToBackground =
   | { type: "favorite:remove"; id: string }
   /** The user's answer to the idle prompt the popup is showing. */
   | { type: "idle:answer"; answer: IdleAnswer }
-  /** Tasks are per-project, so they are fetched when a project is picked. */
-  | { type: "tasks:for-project"; projectId: string | null }
   | { type: "client:create"; name: string }
   | { type: "tag:create"; name: string }
   | { type: "project:create"; name: string; clientId: string | null }
-  | { type: "task:create"; projectId: string; name: string }
+  | { type: "task:create"; name: string }
   | { type: "config:set-api-url"; apiUrl: string }
   /**
    * Tell the worker which surface is showing.
@@ -273,10 +271,8 @@ export type BackgroundState = {
   clients: Client[];
   /** Every unarchived tag — tags are not scoped to a project. */
   tags: Tag[];
-  /** Tasks for whichever project the popup last asked about. */
+  /** Every unarchived task — tasks are workspace-wide, like tags. */
   tasks: Task[];
-  /** Which project `tasks` belongs to, so the popup can spot a stale list. */
-  tasksProjectId: string | null;
   /**
    * The quick-start row: pins first, then recents, already merged.
    *

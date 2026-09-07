@@ -210,16 +210,14 @@ export const updateProjectSchema = z.object({
 // ── tasks ────────────────────────────────────────────────────────────
 
 /**
- * `projectId` is optional so the Tasks screen can list every task the owner
- * has; the project row's inline panel still scopes itself to one project.
+ * Tasks are a flat, workspace-wide catalog — they are not scoped to a project,
+ * so there is nothing to filter this listing by beyond the archived flag.
  */
 export const taskListSchema = z.object({
-  projectId: idString.nullish(),
   includeArchived: z.boolean().optional(),
 });
 
 export const createTaskSchema = z.object({
-  projectId: idString,
   name: z.string().min(1, "Name is required").max(200),
   originId,
 });

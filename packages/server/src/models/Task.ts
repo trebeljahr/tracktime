@@ -4,7 +4,6 @@ import type { Task as TaskWire } from "@starter/shared";
 export interface ITask extends Document {
   workspaceId: string;
   createdBy: string;
-  projectId: string;
   name: string;
   done: boolean;
   archived: boolean;
@@ -20,7 +19,6 @@ export type TaskDocLike = {
   _id?: unknown;
   workspaceId: string;
   createdBy: string;
-  projectId: string;
   name: string;
   done: boolean;
   archived: boolean;
@@ -37,7 +35,6 @@ const taskSchema = new Schema<ITask>(
     // a seed, a backfill) fail with "Path `createdBy` is required".
     // Same trap as TimeEntry.description.
     createdBy: { type: String, default: "" },
-    projectId: { type: String, required: true },
     name: { type: String, required: true, maxlength: 200, trim: true },
     done: { type: Boolean, required: true, default: false },
     archived: { type: Boolean, required: true, default: false },
@@ -45,7 +42,11 @@ const taskSchema = new Schema<ITask>(
   { timestamps: true },
 );
 
-taskSchema.index({ workspaceId: 1, projectId: 1 });
+// Tasks are workspace-wide: an entry carries a task and a project side by
+// side, and the task belongs to neither the project nor the client above it.
+// Documents written before that was true may still carry a stray `projectId`;
+// the strict schema drops it on read, so nothing has to be backfilled.
+taskSchema.index({ workspaceId: 1, name: 1 });
 
 export const Task = mongoose.model<ITask>("Task", taskSchema);
 
@@ -55,7 +56,6 @@ export function toClientTask(doc: TaskDocLike): TaskWire {
     id: String(doc._id),
     workspaceId: doc.workspaceId,
     createdBy: doc.createdBy,
-    projectId: doc.projectId,
     name: doc.name,
     done: doc.done,
     archived: doc.archived,

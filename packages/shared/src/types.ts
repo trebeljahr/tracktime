@@ -161,7 +161,7 @@ export type Tag = {
 export type CatalogRemoveResult = {
   /** Time entries that kept their time but lost a project/task reference. */
   entriesDetached: number;
-  /** Tasks deleted along with their project. */
+  /** Tasks deleted outright — only an import undo deletes a task. */
   tasksDeleted: number;
   /** Projects that kept their time but lost their client reference. */
   projectsDetached: number;
@@ -242,13 +242,18 @@ export type Project = {
   updatedAt: string;
 };
 
-/** A unit of work inside a project. */
+/**
+ * A named unit of work, owned by the workspace rather than by a project.
+ *
+ * An entry carries a project and a task side by side; the task does not belong
+ * to the project. "Design review" is the same kind of work whichever project it
+ * happens on, so it stays one row instead of being re-created under each.
+ */
 export type Task = {
   id: string;
   workspaceId: string;
   /** Audit only — never used for scoping. */
   createdBy: string;
-  projectId: string;
   name: string;
   done: boolean;
   archived: boolean;

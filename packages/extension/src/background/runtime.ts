@@ -155,8 +155,8 @@ let cachedRecents: RecentEntry[] | null = null;
 let cachedSettings: ResolvedSettings | null = null;
 let settingsLookup: Promise<ResolvedSettings | null> | null = null;
 
-/** Tasks are per-project, so the cache has to remember which project's. */
-let cachedTasks: { projectId: string; tasks: Task[] } | null = null;
+/** Tasks are workspace-wide, so one list covers every project. */
+let cachedTasks: Task[] | null = null;
 
 /** Which popup surface is open. Reset on sign-out: a new session starts at the timer. */
 let activeView: PopupView = "tracker";
@@ -869,19 +869,11 @@ export const setCachedClients = (clients: Client[]): void => {
   cachedClients = clients;
 };
 
-export const getCachedTasks = (
-  projectId: string | null,
-): Task[] | null =>
-  projectId !== null && cachedTasks?.projectId === projectId
-    ? cachedTasks.tasks
-    : null;
+export const getCachedTasks = (): Task[] | null => cachedTasks;
 
-export const setCachedTasks = (projectId: string, tasks: Task[]): void => {
-  cachedTasks = { projectId, tasks };
+export const setCachedTasks = (tasks: Task[]): void => {
+  cachedTasks = tasks;
 };
-
-export const getCachedTasksProjectId = (): string | null =>
-  cachedTasks?.projectId ?? null;
 
 export const getCachedFavorites = (): DetailedFavorite[] | null =>
   cachedFavorites;

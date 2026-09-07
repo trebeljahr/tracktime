@@ -37,7 +37,6 @@ test("a project with no createdBy at all is valid", () => {
 test("a task with no createdBy at all is valid", () => {
   const task = new Task({
     workspaceId: "workspace-1",
-    projectId: "project-1",
     name: "Write the migration",
   });
 
@@ -59,7 +58,6 @@ test("an explicit createdBy is still kept", () => {
   const task = new Task({
     workspaceId: "workspace-1",
     createdBy: "user-1",
-    projectId: "project-1",
     name: "Write the migration",
   });
 

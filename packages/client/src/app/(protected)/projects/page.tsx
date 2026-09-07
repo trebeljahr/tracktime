@@ -142,7 +142,6 @@ export default function ProjectsPage(): React.JSX.Element {
         projects={visibleProjects}
         clients={allClients}
         isLoading={projectsQuery.isLoading}
-        showArchived={showArchived}
         isFiltered={needle !== "" || clientFilter !== null}
         onCreate={() => setCreating(true)}
       />

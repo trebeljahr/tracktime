@@ -35,10 +35,8 @@ export type ProjectRow = Project & {
 /** A bare client, as returned by `clients.list`. */
 export type ClientRow = Client;
 
-/** A task joined with its project, plus its tracked seconds. */
+/** A task plus its tracked seconds. */
 export type TaskRow = Task & {
-  projectName: string | null;
-  projectColor: string | null;
   totalSec: number;
 };
 
@@ -63,10 +61,7 @@ export type CreateProjectVars = Omit<CreateProjectInput, "originId">;
 export type UpdateProjectVars = Omit<UpdateProjectInput, "originId">;
 export type CreateClientVars = Omit<CreateClientInput, "originId">;
 export type UpdateClientVars = Omit<UpdateClientInput, "originId">;
-export type CreateTaskVars = Omit<CreateTaskInput, "originId" | "projectId"> & {
-  /** Required only when the mutation hook is unscoped (`projectId: null`). */
-  projectId?: string;
-};
+export type CreateTaskVars = Omit<CreateTaskInput, "originId">;
 export type UpdateTaskVars = Omit<UpdateTaskInput, "originId">;
 
 /**
@@ -84,22 +79,11 @@ export const CLIENT_LIST_INPUT: { includeArchived: boolean } = {
 };
 
 /**
- * `null` asks for every task the owner has — the Tasks screen's key. A
- * project id scopes it to one project row's inline panel. The two are
- * distinct cache entries, so a mutation settles both.
+ * Tasks are workspace-wide, so there is one listing and one cache key for it.
  */
-export const taskListInput = (
-  projectId: string | null,
-): { projectId: string | null; includeArchived: boolean } => ({
-  projectId,
+export const TASK_LIST_INPUT: { includeArchived: boolean } = {
   includeArchived: true,
-});
-
-/** Canonical key for the "every task" listing. */
-export const TASK_LIST_INPUT: {
-  projectId: string | null;
-  includeArchived: boolean;
-} = taskListInput(null);
+};
 
 /** Mirrors the server's case-insensitive name sort. */
 export function sortByName<T extends { name: string }>(rows: T[]): T[] {

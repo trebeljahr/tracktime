@@ -146,18 +146,20 @@ test.describe("Projects catalog", () => {
     );
 
     // ── task ────────────────────────────────────────────────────────
-    await page.getByTestId(`project-expand-${projectId}`).click();
-    await expect(page.getByTestId(`task-panel-${projectId}`)).toBeVisible();
-    await expect(page.getByTestId(`tasks-empty-${projectId}`)).toBeVisible();
+    // Tasks are their own catalog, not a project's children, so they are made
+    // on their own screen and carry no project.
+    await page.goto("/tasks");
+    await expect(page.getByTestId("tasks-empty")).toBeVisible();
 
-    await page.getByTestId(`task-new-input-${projectId}`).fill(TASK_NAME);
-    await page.getByTestId(`task-add-${projectId}`).click();
+    await page.getByTestId("new-task").click();
+    await page.getByTestId("task-name-input").fill(TASK_NAME);
+    await page.getByTestId("task-submit").click();
+    await expect(page.getByTestId("task-dialog")).toBeHidden();
 
     const taskRow = page
       .locator('[data-testid^="task-row-"]')
       .filter({ hasText: TASK_NAME });
     await expect(taskRow).toHaveCount(1);
-    await expect(page.getByTestId(`tasks-empty-${projectId}`)).toHaveCount(0);
 
     const taskId = await idFromTestId(taskRow, "task-row-");
     await expect(page.getByTestId(`task-name-${taskId}`)).toHaveText(TASK_NAME);
@@ -250,7 +252,7 @@ test.describe("Projects catalog", () => {
    * Deleting a catalog row is a real delete, not an archive — and it never
    * takes tracked time with it. The entry survives, minus its references.
    */
-  test("deleting a project keeps its time entries and drops its tasks", async ({
+  test("deleting a project keeps its time entries and its tasks", async ({
     page,
   }) => {
     await page.getByTestId("new-project").click();
@@ -263,9 +265,10 @@ test.describe("Projects catalog", () => {
       .filter({ hasText: PROJECT_NAME });
     const projectId = await idFromTestId(projectRow, "project-row-");
 
-    await page.getByTestId(`project-expand-${projectId}`).click();
-    await page.getByTestId(`task-new-input-${projectId}`).fill(TASK_NAME);
-    await page.getByTestId(`task-add-${projectId}`).click();
+    await page.goto("/tasks");
+    await page.getByTestId("new-task").click();
+    await page.getByTestId("task-name-input").fill(TASK_NAME);
+    await page.getByTestId("task-submit").click();
     await expect(
       page.locator('[data-testid^="task-row-"]').filter({ hasText: TASK_NAME }),
     ).toHaveCount(1);
@@ -308,10 +311,13 @@ test.describe("Projects catalog", () => {
     await page.getByTestId("catalog-show-archived").click();
     await expect(projectRow).toHaveCount(0);
 
-    // Its task went with it.
+    // The task did NOT go with it: a task names the kind of work, not the
+    // project it happened on, so it outlives the project.
     await page.goto("/tasks");
     await expect(page.getByTestId("tasks-page")).toBeVisible();
-    await expect(page.getByTestId("tasks-empty")).toBeVisible();
+    await expect(
+      page.locator('[data-testid^="task-row-"]').filter({ hasText: TASK_NAME }),
+    ).toHaveCount(1);
 
     // The entry survived, and simply has no project any more.
     await page.goto("/track");
@@ -323,11 +329,11 @@ test.describe("Projects catalog", () => {
   });
 
   /**
-   * The whole chain — client, project, task — reachable from the project
-   * dialog. A client is a property OF a project and a task belongs TO one, so
-   * both are made here rather than on separate screens.
+   * A client is a property OF a project, so it is made from the project dialog
+   * rather than on a separate screen. A task is not — it stands on its own, and
+   * is created from the task picker beside the project.
    */
-  test("creates a client and tasks from inside the project dialog", async ({
+  test("creates a client from the project dialog and a task from its picker", async ({
     page,
   }) => {
     await signUpViaUI(page, {
@@ -369,19 +375,16 @@ test.describe("Projects catalog", () => {
       "#22d3ee",
     );
 
-    // Tasks: one via Enter, one via the button — both paths must work.
-    await page.getByTestId("project-task-input").fill("Design");
-    await page.getByTestId("project-task-input").press("Enter");
-    await page.getByTestId("project-task-input").fill("Implementation");
-    await page.getByTestId("project-task-add").click();
-    await expect(page.getByTestId("project-task-pending")).toHaveCount(2);
-
     await page.getByTestId("project-submit").click();
-
-    // The project is selected, and the tasks queued alongside it now exist.
     await expect(page.getByTestId("tracker-project")).toContainText("Mobile App");
+
+    // The task picker is independent of the project: it opens whatever is
+    // selected beside it, and a task created here belongs to no project.
     await page.getByTestId("tracker-task").click();
-    await expect(page.getByText("Design", { exact: true })).toBeVisible();
-    await expect(page.getByText("Implementation", { exact: true })).toBeVisible();
+    await page.getByTestId("task-picker-new-task").click();
+    await page.getByTestId("task-name-input").fill("Design");
+    await page.getByTestId("task-submit").click();
+    await expect(page.getByTestId("task-dialog")).toBeHidden();
+    await expect(page.getByTestId("tracker-task")).toContainText("Design");
   });
 });

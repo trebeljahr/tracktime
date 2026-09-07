@@ -29,7 +29,6 @@ import {
 } from "@/components/reports/multi-select";
 import { TagFilter } from "@/components/tags/tag-filter";
 import {
-  REPORT_PARAM,
   type BillableFilter,
   type UseReportFiltersResult,
 } from "@/components/reports/use-report-filters";
@@ -159,7 +158,6 @@ export function ReportFiltersBar({
     isFiltered,
     setRange,
     setIds,
-    setParams,
     setBillable,
     setSearch,
     clearFilters,
@@ -167,12 +165,10 @@ export function ReportFiltersBar({
 
   const clientsQuery = trpc.clients.list.useQuery({});
   const projectsQuery = trpc.projects.list.useQuery({});
-
-  // `tasks.list` is scoped to one project, so the task filter only makes sense
-  // once at least one project is picked - and then it needs one query each.
-  const taskQueries = trpc.useQueries((t) =>
-    state.projectIds.map((projectId) => t.tasks.list({ projectId }))
-  );
+  // Tasks are workspace-wide, so this filter stands on its own: it lists every
+  // task whatever the project filter says, and picking one never depends on -
+  // or disturbs - the projects beside it.
+  const tasksQuery = trpc.tasks.list.useQuery({});
 
   const clientOptions = React.useMemo<MultiSelectOption[]>(
     () =>
@@ -195,31 +191,14 @@ export function ReportFiltersBar({
     [projectsQuery.data]
   );
 
-  const projectNames = React.useMemo(() => {
-    const names = new Map<string, string>();
-    for (const project of projectsQuery.data ?? []) {
-      names.set(project.id, project.name);
-    }
-    return names;
-  }, [projectsQuery.data]);
-
-  const taskOptions = React.useMemo<MultiSelectOption[]>(() => {
-    const options: MultiSelectOption[] = [];
-    taskQueries.forEach((query, index) => {
-      const projectId = state.projectIds[index];
-      const heading = projectId ? projectNames.get(projectId) : undefined;
-      for (const task of query.data ?? []) {
-        options.push({
-          value: task.id,
-          label: task.name,
-          group: heading ?? "Tasks",
-        });
-      }
-    });
-    return options;
-  }, [projectNames, state.projectIds, taskQueries]);
-
-  const hasProjectSelection = state.projectIds.length > 0;
+  const taskOptions = React.useMemo<MultiSelectOption[]>(
+    () =>
+      (tasksQuery.data ?? []).map((task) => ({
+        value: task.id,
+        label: task.name,
+      })),
+    [tasksQuery.data]
+  );
 
   // Every filter list doubles as the catalog surface for what it filters by:
   // the same create/edit dialogs the Clients, Projects and Tasks screens use,
@@ -233,13 +212,8 @@ export function ReportFiltersBar({
   const findProject = (id: string): ProjectRow | null =>
     (projectsQuery.data ?? []).find((project) => project.id === id) ?? null;
 
-  const findTask = (id: string): TaskRow | null => {
-    for (const query of taskQueries) {
-      const match = (query.data ?? []).find((task) => task.id === id);
-      if (match) return match;
-    }
-    return null;
-  };
+  const findTask = (id: string): TaskRow | null =>
+    (tasksQuery.data ?? []).find((task) => task.id === id) ?? null;
 
   return (
     <>
@@ -287,17 +261,7 @@ export function ReportFiltersBar({
           label="Projects"
           options={projectOptions}
           value={state.projectIds}
-          onChange={(ids) => {
-            // Written in one go: two `router.replace` calls in the same tick
-            // would both be computed from the pre-change query string, and the
-            // second would silently drop the first.
-            setParams({
-              [REPORT_PARAM.projects]: ids.length > 0 ? ids.join(",") : null,
-              // Tasks belong to projects - a task filter for a project that is
-              // no longer selected would silently match nothing.
-              [REPORT_PARAM.tasks]: null,
-            });
-          }}
+          onChange={(ids) => setIds("projectIds", ids)}
           emptyText="No projects yet."
           searchPlaceholder="Search projects..."
           className="w-[9.5rem]"
@@ -319,14 +283,13 @@ export function ReportFiltersBar({
         />
 
         <MultiSelect
-          label={hasProjectSelection ? "Tasks" : "Tasks (pick a project)"}
+          label="Tasks"
           options={taskOptions}
           value={state.taskIds}
           onChange={(ids) => setIds("taskIds", ids)}
-          disabled={!hasProjectSelection}
-          emptyText="No tasks in the selected projects."
+          emptyText="No tasks yet."
           searchPlaceholder="Search tasks..."
-          className={cn(hasProjectSelection ? "w-[9.5rem]" : "w-[11.5rem]")}
+          className="w-[9.5rem]"
           testId="filter-tasks"
           editLabel="Edit task"
           onEditOption={(option) =>
@@ -414,9 +377,6 @@ export function ReportFiltersBar({
           if (!next) setCatalogDialog(null);
         }}
         task={catalogDialog?.kind === "task" ? catalogDialog.row : null}
-        // The task filter only exists once a project is picked, so the first
-        // selected project is the only sensible default for a new task.
-        defaultProjectId={state.projectIds[0] ?? null}
       />
     </>
   );

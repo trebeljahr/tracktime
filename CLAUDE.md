@@ -240,11 +240,39 @@ the Raycast password store), never a plain config file. Clients send
 any of them can be signed out; revocation kills the HTTP and WebSocket paths
 at once. Device-flow client ids are allowlisted in `auth/client-label.ts`.
 
+### Catalog shape
+
+There is one hierarchy, and it is two levels deep: Client → Project. Tasks and
+tags sit beside it, not under it.
+
+A **task** is a workspace-wide name for a kind of work — "Design review",
+"Invoicing" — and an entry carries a task and a project as two independent
+references. Any combination is legal: both, either, neither. Nothing anywhere
+infers one from the other, and deleting a project detaches its entries without
+touching a single task. Folding tasks under projects meant re-creating
+"Design review" once per project and made every cross-project question about
+what the work WAS unanswerable.
+
+Three places this used to leak, each of which now deliberately does nothing:
+
+- `entries.start/create/update` validate `projectId` and `taskId`
+  independently. There is no "task does not belong to the given project".
+- `withProject` in `@starter/core` leaves the task alone. Changing a project
+  used to clear the task in the same write.
+- `cascadeDeleteProject` deletes no tasks. `CatalogRemoveResult.tasksDeleted`
+  survives only for an import undo, which does delete the tasks it created.
+
+Task documents written before this may still carry a stray `projectId`; the
+strict mongoose schema drops it on read, so there is nothing to backfill. Task
+names are unique per workspace rather than per project, which existing
+duplicates across projects are grandfathered past — they only block a new
+create or rename.
+
 ### Tags
 
-Tags are the one catalog dimension outside the Client → Project → Task
-hierarchy: many per entry, orthogonal to it, so "invoicing" or "deep work"
-can be reported on across every project. Entries carry `tagIds: string[]`.
+Tags are the other catalog dimension outside the client/project hierarchy:
+many per entry rather than one, so "invoicing" or "deep work" can be reported
+on across every project. Entries carry `tagIds: string[]`.
 
 Three rules that fail quietly if broken:
 

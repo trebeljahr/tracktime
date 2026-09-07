@@ -32,23 +32,10 @@ describe("entriesHref", () => {
     ).toBe("k1");
   });
 
-  // The report's task picker lists the tasks of the SELECTED projects, so a
-  // task filter arriving without its project renders as an empty control.
-  it("selects a task's project alongside the task", () => {
-    const href = entriesHref(
-      { dimension: "task", id: "k1", projectId: "p1" },
-      RANGE,
-    );
-
-    expect(params(href).get("tasks")).toBe("k1");
-    expect(params(href).get("projects")).toBe("p1");
-  });
-
-  it("leaves the project unset for a task that has none", () => {
-    const href = entriesHref(
-      { dimension: "task", id: "k1", projectId: null },
-      RANGE,
-    );
+  // Tasks are workspace-wide, so filtering by one must not narrow the report
+  // to a project the user never picked.
+  it("leaves the project filter alone when linking to a task", () => {
+    const href = entriesHref({ dimension: "task", id: "k1" }, RANGE);
 
     expect(params(href).get("tasks")).toBe("k1");
     expect(params(href).get("projects")).toBeNull();

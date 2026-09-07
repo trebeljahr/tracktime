@@ -4,8 +4,6 @@ import * as React from "react";
 import {
   Archive,
   ArchiveRestore,
-  ChevronDown,
-  ChevronRight,
   FolderKanban,
   MoreHorizontal,
   Pencil,
@@ -41,7 +39,6 @@ import { ClientFormDialog } from "./client-form-dialog";
 import { ConfirmDialog } from "./confirm-dialog";
 import { EntriesLink, ShowEntriesItem } from "./entries-link";
 import { ProjectFormDialog } from "./project-form-dialog";
-import { TaskPanel } from "./task-panel";
 import type { ClientRow, ProjectRow } from "./types";
 import { useProjectMutations } from "./use-catalog-mutations";
 
@@ -49,19 +46,15 @@ export type ProjectsTableProps = {
   projects: ProjectRow[];
   clients: ClientRow[];
   isLoading: boolean;
-  showArchived: boolean;
   /** True when filters are hiding rows, so the empty state can say so. */
   isFiltered: boolean;
   onCreate: () => void;
 };
 
-const COLUMN_COUNT = 9;
-
 export function ProjectsTable({
   projects,
   clients,
   isLoading,
-  showArchived,
   isFiltered,
   onCreate,
 }: ProjectsTableProps): React.JSX.Element {
@@ -82,7 +75,6 @@ export function ProjectsTable({
     [format.durationShort, format.currency],
   );
 
-  const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [editing, setEditing] = React.useState<ProjectRow | null>(null);
   /** The project row's client, opened for editing from the Client cell. */
   const [editingClient, setEditingClient] = React.useState<ClientRow | null>(
@@ -131,7 +123,6 @@ export function ProjectsTable({
         <Table data-testid="projects-table">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-8" />
               <TableHead>Project</TableHead>
               <TableHead>Client</TableHead>
               <TableHead>Billable</TableHead>
@@ -144,37 +135,12 @@ export function ProjectsTable({
           </TableHeader>
           <TableBody>
             {projects.map((project) => {
-              const expanded = expandedId === project.id;
               return (
                 <React.Fragment key={project.id}>
                   <TableRow
                     data-testid={`project-row-${project.id}`}
                     data-archived={project.archived ? "true" : "false"}
                   >
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        aria-label={expanded ? "Hide tasks" : "Show tasks"}
-                        aria-expanded={expanded}
-                        onClick={() =>
-                          setExpandedId(expanded ? null : project.id)
-                        }
-                        data-testid={`project-expand-${project.id}`}
-                      >
-                        {expanded ? (
-                          <ChevronDown className="size-4" />
-                        ) : (
-                          <ChevronRight className="size-4" />
-                        )}
-                      </Button>
-                    </TableCell>
-
-                    {/* The name opens the project rather than expanding the
-                        row: the chevron beside it already does that, and a
-                        rename or a colour change is the edit people reach for
-                        far more often than the task list. */}
                     <TableCell>
                       <CatalogName
                         name={project.name}
@@ -316,18 +282,6 @@ export function ProjectsTable({
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-
-                  {expanded ? (
-                    <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={COLUMN_COUNT} className="p-0">
-                        <TaskPanel
-                          projectId={project.id}
-                          projectName={project.name}
-                          showArchived={showArchived}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ) : null}
                 </React.Fragment>
               );
             })}
