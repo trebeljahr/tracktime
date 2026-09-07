@@ -97,17 +97,23 @@ committed so `pnpm typecheck` works on machines without Raycast installed.
 
 Raycast unloads a menu bar command as soon as its first render settles: a
 `setInterval` in the component fires once and never again, and the item then
-sits on whatever it last drew until the interval (30 seconds here) or an open
+sits on whatever it last drew until the interval (a minute here) or an open
 dropdown re-runs it. What keeps the process alive is an unfinished load, so the
 item passes `isLoading` for exactly as long as it has a second to count — a
 running timer ticks `m:ss` off its own clock, and an idle one stops claiming to
 load and is unloaded like any other command. The `tickSeconds` preference turns
 that off for anyone who would rather have the process gone.
 
-Alive, the command also re-reads the server every 20 seconds, which is how a
-timer started in the web app or on another machine reaches the menu bar.
-Commands that change the timer themselves call `refreshMenuBar()` instead of
-waiting for that, so a hotkey lands immediately.
+Staying loaded means owning its own freshness. `entries.current` is checked
+every 4 seconds while the clock ticks, because a timer stopped in the web app
+would otherwise leave this item counting up on an entry that ended — wrong,
+not merely stale — and the whole snapshot every 20 seconds for the rest of the
+dropdown. Commands that change the timer themselves call `refreshMenuBar()`
+rather than waiting for either.
+
+Idle, the title is today's total spelled `36m`, never `0:36`. The running clock
+is `m:ss`, so a colon means a timer is going; a total wearing the same shape
+was read as one.
 
 **Timer** remains the richer surface: a view command can push a form, which a
 menu bar item cannot. That is why **Edit Timer…** in the dropdown hands off to

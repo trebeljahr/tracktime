@@ -356,12 +356,16 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   `setInterval` in it fires once and stops. An unfinished load is the one thing
   that keeps the process alive: the item passes `isLoading` while a timer runs,
   which is what lets the clock tick `m:ss` every second, and drops it when the
-  timer stops so an idle item costs nothing. `interval` (30s) and the dropdown
-  opening cover the unloaded case; while alive it re-reads every 20s so a timer
-  started in another client shows up, and mutations call `refreshMenuBar()`
-  rather than waiting for either. The `Timer` view command is the surface that
-  can push forms, which a menu bar item cannot. Both read `lib/timer-data.ts`,
-  so the two surfaces cannot disagree about what is running.
+  timer stops so an idle item costs nothing. `interval` (1m) and the dropdown
+  opening cover the unloaded case. Staying loaded means owning freshness:
+  `entries.current` every 4s while ticking, because a stop made elsewhere would
+  leave a clock counting up on an ended entry, and the whole snapshot every
+  20s; mutations call `refreshMenuBar()` rather than waiting for either. The
+  idle title is `36m`, not `0:36` — the running clock owns the colon, and a
+  total that borrowed it was read as a timer still going. The `Timer` view
+  command is the surface that can push forms, which a menu bar item cannot.
+  Both read `lib/timer-data.ts`, so the two surfaces cannot disagree about what
+  is running.
 - Server origin and web origin come from extension preferences. Empty follows
   the build, the same convention as the browser extension's build targets:
   `ray build` → the deployed hosts, `ray develop` → `localhost:5159` /

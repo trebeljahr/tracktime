@@ -16,7 +16,7 @@
       "subtitle": "tracktime",
       "description": "Show the running timer in the macOS menu bar.",
       "mode": "menu-bar",
-      "interval": "30s",
+      "interval": "1m",
       "preferences": [
         {
           "name": "titleMode",

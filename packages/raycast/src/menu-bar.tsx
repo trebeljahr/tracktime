@@ -22,9 +22,9 @@ import {
   formatClock,
   formatDurationShort,
   formatMenuBarClock,
-  formatMenuBarDuration,
+  formatMenuBarTotal,
 } from "./lib/format.js";
-import { useApi, useNow, usePoll } from "./lib/hooks.js";
+import { useApi, useNow, usePoll, useWatchRunning } from "./lib/hooks.js";
 import { webLink } from "./lib/preferences.js";
 import {
   entryHint,
@@ -38,15 +38,24 @@ import { showFailureToast } from "./lib/ui.js";
 const RECENT_LIMIT = 6;
 
 /**
- * How often the item asks the server what is running.
+ * How often the item re-reads the whole snapshot.
  *
  * The clock itself does not need this — it counts up locally from the running
- * entry's start. This is only about noticing a timer that was started or
- * stopped somewhere else: the web app, the browser extension, another
- * machine. Twenty seconds is far below the `interval` in the manifest, which
- * exists for the case where this process is no longer alive at all.
+ * entry's start. This is about the rest of the dropdown: favorites, recents,
+ * today's total. Well below the `interval` in the manifest, which exists for
+ * the case where this process is no longer alive at all.
  */
 const POLL_MS = 20_000;
+
+/**
+ * How often a ticking item checks that its entry is still the running one.
+ *
+ * Tighter than the snapshot poll because this is the number on screen. A
+ * timer stopped from a hotkey, the web app or another machine leaves this
+ * item counting up on an entry that ended, and a clock that is confidently
+ * wrong is worse than one that is a few seconds behind.
+ */
+const WATCH_MS = 4_000;
 
 /** The live command, where the clock ticks and forms can be pushed. */
 const openTimer = (): void => {
@@ -80,6 +89,7 @@ export default function MenuBar(): React.JSX.Element | null {
   // started in the web app would otherwise go unnoticed.
   const now = useNow(ticking);
   usePoll(revalidate, POLL_MS);
+  useWatchRunning(running?.id ?? null, ticking, revalidate, WATCH_MS);
 
   if (signedOut) {
     return (
@@ -105,16 +115,17 @@ export default function MenuBar(): React.JSX.Element | null {
   const title = ((): string | undefined => {
     if (titleMode === "icon") return undefined;
 
-    // Idle used to render as a bare stopwatch glyph with no text at all,
-    // which is indistinguishable from the dozen other icons up there — the
-    // item was present and simply could not be found. Today's total is the
-    // number worth glancing at when nothing is running, and it keeps the
-    // item legible. "Description only" stays empty: there is no description
-    // to show, and that mode asked for nothing else.
+    // Idle used to render as a bare glyph with no text at all, which is
+    // indistinguishable from the dozen other icons up there — the item was
+    // present and simply could not be found. Today's total is the number
+    // worth glancing at when nothing is running, and it is spelled "36m"
+    // rather than "0:36" so it cannot be misread as a timer still going.
+    // "Description only" stays empty: there is no description to show, and
+    // that mode asked for nothing else.
     if (!running) {
       return titleMode === "description"
         ? undefined
-        : formatMenuBarDuration(data?.todaySec ?? 0);
+        : formatMenuBarTotal(data?.todaySec ?? 0);
     }
 
     if (titleMode === "duration") return clock;

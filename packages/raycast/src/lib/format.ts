@@ -14,16 +14,18 @@ export const elapsedSec = (entry: TimeEntry): number =>
   entryDurationSec(entry, Date.now());
 
 /**
- * Menu bar clock for a total that is not moving — today's tracked time while
- * nothing runs. `h:mm`, because a total nobody is adding to has no second
- * worth showing.
+ * Menu bar title for a total that is not moving — today's tracked time while
+ * nothing runs.
+ *
+ * "36m", never "0:36". The running clock counts in `m:ss`, so a colon in the
+ * menu bar means a timer is going, and a total that borrowed that shape read
+ * as one: 36 minutes tracked today and a timer 36 seconds in are the same
+ * four characters. Minutes are also all a total nobody is adding to needs.
+ * Seconds only appear below a minute, where "0m" would read as nothing
+ * tracked at all.
  */
-export const formatMenuBarDuration = (seconds: number): string => {
-  const total = Math.max(0, Math.round(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  return `${hours}:${String(minutes).padStart(2, "0")}`;
-};
+export const formatMenuBarTotal = (seconds: number): string =>
+  formatDurationShort(Math.max(0, seconds));
 
 /**
  * Menu bar clock for the running timer, ticking: `m:ss` under an hour and

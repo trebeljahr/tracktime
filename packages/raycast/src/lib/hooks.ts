@@ -63,6 +63,48 @@ export function usePoll(revalidate: () => void, intervalMs: number): void {
 }
 
 /**
+ * Watch for the running entry being replaced or stopped, and reload when it
+ * is.
+ *
+ * A surface that stays loaded to count seconds has to answer for those
+ * seconds: nothing re-runs it any more, so a timer stopped anywhere else
+ * leaves a clock ticking up on an entry that already ended — a wrong number,
+ * not merely a stale one. `entries.current` is one small query, so this can
+ * run far more often than the full snapshot and hand the reload to it only
+ * once the two disagree.
+ *
+ * Failures are swallowed. The menu bar has no good place to put a network
+ * blip, and the next tick asks again anyway.
+ */
+export function useWatchRunning(
+  runningId: string | null,
+  active: boolean,
+  revalidate: () => void,
+  intervalMs: number,
+): void {
+  useEffect(() => {
+    if (!active) return;
+
+    let cancelled = false;
+    const check = async (): Promise<void> => {
+      try {
+        const api = await getTracktime();
+        const current = await api.current();
+        if (!cancelled && (current?.id ?? null) !== runningId) revalidate();
+      } catch {
+        // Asked again on the next tick.
+      }
+    };
+
+    const id = setInterval(() => void check(), intervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [runningId, active, revalidate, intervalMs]);
+}
+
+/**
  * A clock that re-renders its caller, so an elapsed time on screen actually
  * moves.
  *
