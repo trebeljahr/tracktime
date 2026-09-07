@@ -1,15 +1,32 @@
+/**
+ * Log a block of work that was never timed.
+ *
+ * The web app has had this since the tracker bar grew its `+`; Raycast could
+ * only ever start a timer, which meant the one thing you reach for a launcher
+ * to do — record the meeting you forgot to time, without leaving what you are
+ * doing — was the one thing it could not. `entries.create` is the same
+ * endpoint the web dialog and the extension popup write through, so an entry
+ * logged here is indistinguishable from one logged there.
+ *
+ * The web dialog offers date, start, end and duration as four controls that
+ * drive one range. Raycast has no duration field and no way to lay four
+ * controls on one line, so this asks for the two instants instead — the same
+ * shape the edit form already uses, which is also the shape that cannot
+ * disagree with itself.
+ */
 import {
   Action,
   ActionPanel,
   Form,
   Icon,
   Toast,
-  popToRoot,
   showToast,
+  useNavigation,
 } from "@raycast/api";
+import { defaultManualRange } from "@starter/core";
 import { useState } from "react";
 import { getTracktime } from "../lib/api.js";
-import { webLink } from "../lib/preferences.js";
+import { formatDurationShort } from "../lib/format.js";
 import { refreshMenuBar, showFailureToast } from "../lib/ui.js";
 import { DescriptionPicker } from "./description-picker.js";
 import {
@@ -25,28 +42,38 @@ import {
 } from "./entry-fields.js";
 import { SignedOutView } from "./signed-out.js";
 
-type FormValues = {
-  description: string;
-  /** Undefined when the dropdown was not rendered — no projects to pick. */
-  projectId?: string;
-  taskId?: string;
-  /** Undefined when the picker was not rendered — no tags exist yet. */
-  tagIds?: string[];
-  billable: boolean;
+type Props = {
+  /** Called after a successful write, so the list behind this can revalidate. */
+  onSaved: () => void;
 };
 
-export function StartTimer(): React.JSX.Element {
+type FormValues = {
+  description: string;
+  projectId?: string;
+  taskId?: string;
+  tagIds?: string[];
+  billable: boolean;
+  start: Date | null;
+  end: Date | null;
+};
+
+export function LogTime({ onSaved }: Props): React.JSX.Element {
+  const { pop } = useNavigation();
+  // Frozen at mount: the defaults are what the pickers opened on, and
+  // recomputing them mid-edit would move a range the user is already reading.
+  const [range] = useState(defaultManualRange);
+
   const [description, setDescription] = useState("");
   const [projectId, setProjectId] = useState<string>(NONE);
-  const [billable, setBillable] = useState(false);
   const [taskId, setTaskId] = useState<string>(NONE);
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [billable, setBillable] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const catalog = useEntryCatalog(projectId);
 
-  // A project carries its own billable default; respect it until the user
-  // overrides the checkbox themselves.
+  // Same rule as starting a timer: a project's billable default applies until
+  // the user says otherwise.
   useProjectBillableDefault(catalog, projectId, setBillable);
 
   if (catalog.signedOut) return <SignedOutView />;
@@ -57,25 +84,51 @@ export function StartTimer(): React.JSX.Element {
   };
 
   const submit = async (values: FormValues): Promise<void> => {
+    if (!values.start || !values.end) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "A logged entry needs both a start and an end",
+      });
+      return;
+    }
+
+    // No midnight roll here, unlike the web dialog. That one's end field holds
+    // a time of day with the date taken from elsewhere, so 23:30 to 00:30 is an
+    // hour of work it would be wrong to clamp. These two pickers each carry
+    // their own date, so a backwards end is a date the user really typed —
+    // rolling it would rewrite their answer rather than complete it.
+    if (values.end.getTime() <= values.start.getTime()) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "End must be after start",
+      });
+      return;
+    }
+
     setSubmitting(true);
     try {
       const api = await getTracktime();
-      const entry = await api.start({
+      const entry = await api.create({
         description: values.description.trim(),
         projectId: orNull(values.projectId),
         taskId: orNull(values.taskId),
         tagIds: values.tagIds ?? [],
         billable: values.billable,
+        start: values.start.toISOString(),
+        end: values.end.toISOString(),
       });
+      // The running timer is untouched, but today's total is not — the menu
+      // bar can be showing it.
       await refreshMenuBar();
       await showToast({
         style: Toast.Style.Success,
-        title: "Timer started",
+        title: `Logged ${formatDurationShort(entry.durationSec)}`,
         message: entry.description || "No description",
       });
-      await popToRoot();
+      onSaved();
+      pop();
     } catch (error) {
-      await showFailureToast(error, "Could not start the timer");
+      await showFailureToast(error, "Could not log the entry");
     } finally {
       setSubmitting(false);
     }
@@ -87,14 +140,10 @@ export function StartTimer(): React.JSX.Element {
       actions={
         <ActionPanel>
           <Action.SubmitForm
-            title="Start Timer"
-            icon={Icon.Play}
+            title="Log Time"
+            icon={Icon.Plus}
             onSubmit={submit}
           />
-          {/* The completion for the description field. A form cannot offer one
-              inline, so it is a pushed list — and the shortcut matters more
-              than the row, because reaching for it means the name is already
-              half-typed. */}
           <Action.Push
             title="Pick a Past Description…"
             icon={Icon.MagnifyingGlass}
@@ -108,8 +157,6 @@ export function StartTimer(): React.JSX.Element {
                   setProjectId(orNone(suggestion.projectId));
                   setTaskId(orNone(suggestion.taskId));
                   setTagIds([...suggestion.tagIds]);
-                  // Set last: adopting a project fires the effect above, and
-                  // the entry's own flag is the more specific answer.
                   setBillable(suggestion.billable);
                 }}
               />
@@ -120,18 +167,13 @@ export function StartTimer(): React.JSX.Element {
             onTask: setTaskId,
             onTag: (id) => setTagIds((current) => [...current, id]),
           })}
-          <Action.OpenInBrowser
-            title="Open Web App"
-            url={webLink("/track")}
-            shortcut={{ modifiers: ["cmd"], key: "o" }}
-          />
         </ActionPanel>
       }
     >
       <Form.TextField
         id="description"
         title="Description"
-        placeholder="What are you working on?"
+        placeholder="What did you work on?"
         value={description}
         onChange={setDescription}
         info="⌘⇧D searches what you have tracked before."
@@ -145,13 +187,21 @@ export function StartTimer(): React.JSX.Element {
         value={billable}
         onChange={setBillable}
       />
-      <Form.Description
-        text={
-          (catalog.projects.data ?? []).length > 0
-            ? "Starting a timer stops whatever is already running — tracktime keeps one timer at a time."
-            : "No projects yet — this timer will be unassigned. Create projects in the web app to file time against them."
-        }
+      <Form.DatePicker
+        id="start"
+        title="Start"
+        type={Form.DatePicker.Type.DateTime}
+        // The hour that just ended — the block you are most likely logging is
+        // the one you have just finished doing.
+        defaultValue={new Date(range.start)}
       />
+      <Form.DatePicker
+        id="end"
+        title="End"
+        type={Form.DatePicker.Type.DateTime}
+        defaultValue={new Date(range.end)}
+      />
+      <Form.Description text="This logs finished work — it does not touch the running timer." />
     </Form>
   );
 }

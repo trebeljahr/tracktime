@@ -11,9 +11,9 @@ have to search inside of.
 
 | Command | Mode | What it does |
 | --- | --- | --- |
-| **Timer** | view | Start and stop. Running: the elapsed time ticking by the second, with stop, edit, refile, pin and discard. Idle: the start form, favorites and recent work. |
+| **Timer** | view | Start and stop. Running: the elapsed time ticking by the second, with stop, edit, refile, pin and discard. Idle: the start form, favorites and recent work. ⌘⇧N logs a block that was never timed. |
 | **Timer Menu Bar** | menu bar | The same picture at a glance, with the clock ticking by the second while a timer runs. Stop, edit, move to a project, pin, discard, continue recent work, today's total. |
-| **Show All Time** | view | Last 14 days grouped by day — continue, edit, delete. |
+| **Show All Time** | view | Last 14 days grouped by day — continue, edit, delete, and ⌘⇧N to log past work. |
 | **Open Dashboard** | no-view | Jumps to the web app. |
 
 Bind **Timer** to a hotkey (⌥T works well) and it is the whole loop: press it,
@@ -32,6 +32,40 @@ So the state lives where it can be true continuously — the menu bar — and
 **Timer** adapts on open: its primary action is Stop while a timer runs, and
 the start form when none does. `keywords` in the manifest keep it findable by
 typing "start" or "stop".
+
+### Describing an entry
+
+The three forms that compose an entry — start a timer, log past time, edit an
+entry — ask the same five questions, because those are [the five fields an
+entry is](../core/src/entry-fields.ts): description, project, task, tags and
+billable. They render from one place (`components/entry-fields.tsx`), so a
+project dropdown grouped under its client in one of them is grouped in all
+three.
+
+**⌘⇧D is the description autocomplete.** Raycast forms have no combo box — a
+text field cannot offer completions and a dropdown cannot accept a name that is
+not already in it — so the completion is a pushed, searchable list of what you
+have described work as before, scoped to the project you have picked and
+searched server-side across six months of entries. ⏎ fills the name; ⌘⇧⏎ fills
+the name *and* the project, task, tags and billable flag that work was last
+filed under, which is the shortest path from "the usual" to a running timer.
+
+Filling only the name is the default on purpose: overwriting a project you have
+already chosen is the destructive reading of "autofill the description".
+
+### Logging work that was never timed
+
+⌘⇧N in **Timer** and in **Show All Time** opens the same form with a start and
+an end instead of a running clock, defaulting to the hour that just passed. It
+writes through `entries.create`, the endpoint the web dialog and the browser
+extension popup use, so an entry logged from Raycast is indistinguishable from
+one logged anywhere else — and it never touches the running timer.
+
+Unlike the web dialog it does not roll a backwards end forward past midnight.
+That dialog's end field holds a time of day with the date coming from a
+separate control, so 23:30 → 00:30 is an hour of work; these two pickers each
+carry their own date, so a backwards end is a date you really typed, and moving
+it would rewrite your answer rather than complete it.
 
 ### Creating catalog rows
 
@@ -138,8 +172,9 @@ hosts, so a local-only setup has to be pointed at the dev ports.
 2. The **Idle** preference ("Hide the menu bar item when no timer runs") does
    exactly that — with nothing running there is nothing in the menu bar until
    the next start.
-3. With no timer running the item shows today's total rather than a clock, so
-   look for a small `0:00` next to the stopwatch, not a running time.
+3. Idle, the item is the bare mark by default — look for the stopwatch alone,
+   not for a time. The **When Nothing Runs** preference makes it say "Start
+   timer" or show today's total instead.
 
 **Seeing what went wrong** — the terminal running `pnpm dev:raycast` is the
 extension's console: `console.log` and stack traces print there. View commands

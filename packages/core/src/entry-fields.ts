@@ -116,3 +116,24 @@ export const sameEntryFields = (a: EntryFields, b: EntryFields): boolean =>
   a.taskId === b.taskId &&
   a.billable === b.billable &&
   sameTagIds(a.tagIds, b.tagIds);
+
+const HOUR_MS = 3_600_000;
+
+/**
+ * The block a freshly opened "log past work" form offers: the hour that just
+ * ended, rounded down to the minute.
+ *
+ * Here rather than in any one form because three surfaces open that form — the
+ * web dialog, the extension popup and the Raycast command — and a default that
+ * differed between them would silently change what "add an entry" means
+ * depending on where it was reached from. Seconds are dropped so the times
+ * read as times rather than as an instant the clock happened to be at.
+ */
+export const defaultManualRange = (): { start: string; end: string } => {
+  const end = new Date();
+  end.setSeconds(0, 0);
+  return {
+    start: new Date(end.getTime() - HOUR_MS).toISOString(),
+    end: end.toISOString(),
+  };
+};

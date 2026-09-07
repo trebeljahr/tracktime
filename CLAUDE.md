@@ -319,6 +319,14 @@ by the second and is *both* start and stop), `entries` ("Show All Time"), and
 curation — is web app work, reached in one keystroke rather than reimplemented
 as a launcher command.
 
+Composing an entry is one surface, not three. `components/entry-fields.tsx`
+renders the five fields an entry is, and the three forms that write one — start
+a timer, log past time (⌘⇧N), edit an entry — all call into it, which is what
+keeps a project dropdown grouped by client from being grouped in only one of
+them. Two of the three are composers and adopt a project's `billableDefault`;
+the editor deliberately does not, because the flag on an existing entry is an
+answer somebody already gave and a rate may already be snapshotted from it.
+
 ```bash
 pnpm dev:raycast                      # builds @starter/core, then `ray develop`
 pnpm build:raycast                    # `ray build -e dist`
@@ -354,6 +362,28 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   ⌘⇧A in `timer` reopens it to see the account or sign out. Keep the push —
   `SignIn` opens the approval page in a browser on mount, which is helpful when
   asked for and rude when a list merely failed to load.
+- **The description autocomplete is a pushed list, because Raycast has no combo
+  box.** A `Form.TextField` cannot offer completions and a `Form.Dropdown`
+  cannot accept a name that is not already in it, so ⌘⇧D pushes a searchable
+  list of what this person has described work as before — `entries.descriptions`,
+  the sibling of `entries.recent`. The two are keyed differently on purpose:
+  a recent is keyed on the whole (description, project, task, billable)
+  combination and answers "resume this job", a suggestion is keyed on the
+  case-folded description alone and answers "you have called work this before".
+  One list cannot do both without either repeating a name once per project it
+  was ever filed under, or hiding the project it usually belongs to. Searched
+  server-side rather than through Raycast's own filtering, because the rows on
+  screen are a page out of six months — filtering the page would answer "no
+  match" for a description that is certainly there. ⏎ takes the name alone;
+  ⌘⇧⏎ takes the project, task, tags and billable flag with it, and is the
+  secondary action because overwriting a project the user already picked is the
+  destructive reading of "autofill the description".
+- **`entries.create` is reachable from Raycast** (⌘⇧N, "Log Past Time"), so the
+  meeting you forgot to time no longer needs the web app. Unlike the web
+  dialog it does NOT roll a backwards end forward past midnight: that dialog's
+  end field holds a time of day with its date coming from a separate control,
+  where 23:30 → 00:30 is an hour of work; Raycast's two `DateTime` pickers each
+  carry their own date, so a backwards end is a date the user really typed.
 - Catalog forms live in `src/components/catalog/` and are pushed from the timer
   and edit forms (⌘⇧P/⌘⇧T/⌘⇧G), each calling back with the created row so the
   picker that opened it can select it. Creating a row mid-timer stays; browsing

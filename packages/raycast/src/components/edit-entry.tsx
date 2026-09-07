@@ -10,13 +10,19 @@ import {
 import type { DetailedEntry } from "@starter/core";
 import { useEffect, useState } from "react";
 import { getTracktime } from "../lib/api.js";
-import { ProjectForm } from "./catalog/project-form.js";
-import { TagForm } from "./catalog/tag-form.js";
-import { TaskForm } from "./catalog/task-form.js";
-import { useApi } from "../lib/hooks.js";
 import { refreshMenuBar, showFailureToast } from "../lib/ui.js";
-
-const NONE = "";
+import { DescriptionPicker } from "./description-picker.js";
+import {
+  NONE,
+  catalogActions,
+  orNone,
+  orNull,
+  projectField,
+  tagsField,
+  taskField,
+  useEntryCatalog,
+} from "./entry-fields.js";
+import { SignedOutView } from "./signed-out.js";
 
 type Props = {
   entry: DetailedEntry;
@@ -36,9 +42,6 @@ type FormValues = {
   end: Date | null;
 };
 
-const orNull = (value: string | undefined): string | null =>
-  value && value !== NONE ? value : null;
-
 /**
  * Edit one entry. A running entry keeps running: its end stays empty, and
  * clearing the end of a finished entry deliberately puts it back to running,
@@ -46,28 +49,26 @@ const orNull = (value: string | undefined): string | null =>
  */
 export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
   const { pop } = useNavigation();
-  const [projectId, setProjectId] = useState(entry.projectId ?? NONE);
-  const [taskId, setTaskId] = useState(entry.taskId ?? NONE);
+  const [description, setDescription] = useState(entry.description);
+  const [projectId, setProjectId] = useState(orNone(entry.projectId));
+  const [taskId, setTaskId] = useState(orNone(entry.taskId));
+  const [billable, setBillable] = useState(entry.billable);
   const [tagIds, setTagIds] = useState<string[]>(entry.tagIds);
   const [submitting, setSubmitting] = useState(false);
 
-  const projects = useApi("projects", (api) => api.projects());
-  const tags = useApi("tags", (api) => api.tags());
-  const tasks = useApi(
-    `tasks:${projectId}`,
-    (api) => (projectId === NONE ? Promise.resolve([]) : api.tasks(projectId)),
-    { execute: projectId !== NONE },
-  );
+  const catalog = useEntryCatalog(projectId);
 
   // Dropping the project orphans the task — a task only exists inside one.
   useEffect(() => {
     if (projectId === NONE && taskId !== NONE) setTaskId(NONE);
   }, [projectId, taskId]);
 
-  // Dropdowns render only when they have something to offer — see start-timer.
-  const hasProjects = (projects.data ?? []).length > 0;
-  const hasTasks = projectId !== NONE && (tasks.data ?? []).length > 0;
-  const hasTags = (tags.data ?? []).length > 0;
+  if (catalog.signedOut) return <SignedOutView />;
+
+  const pickProject = (value: string): void => {
+    setProjectId(value);
+    setTaskId(NONE);
+  };
 
   const submit = async (values: FormValues): Promise<void> => {
     if (values.start && values.end && values.end <= values.start) {
@@ -106,9 +107,7 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
 
   return (
     <Form
-      isLoading={
-        projects.isLoading || tasks.isLoading || tags.isLoading || submitting
-      }
+      isLoading={catalog.isLoading || submitting}
       actions={
         <ActionPanel>
           <Action.SubmitForm
@@ -116,51 +115,29 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
             icon={Icon.Check}
             onSubmit={submit}
           />
-          {/* Same reason as the start form: refiling an entry is exactly when
-              you discover the project it belongs to was never created. */}
           <Action.Push
-            title="New Project…"
-            icon={Icon.Folder}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
+            title="Pick a Past Description…"
+            icon={Icon.MagnifyingGlass}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
             target={
-              <ProjectForm
-                onSaved={(created) => {
-                  setProjectId(created.id);
-                  setTaskId(NONE);
-                  projects.revalidate();
+              <DescriptionPicker
+                projectId={projectId === NONE ? null : projectId}
+                onPick={setDescription}
+                onAdopt={(suggestion) => {
+                  setDescription(suggestion.description);
+                  setProjectId(orNone(suggestion.projectId));
+                  setTaskId(orNone(suggestion.taskId));
+                  setTagIds([...suggestion.tagIds]);
+                  setBillable(suggestion.billable);
                 }}
               />
             }
           />
-          {projectId !== NONE ? (
-            <Action.Push
-              title="New Task…"
-              icon={Icon.List}
-              shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
-              target={
-                <TaskForm
-                  projectId={projectId}
-                  onSaved={(created) => {
-                    setTaskId(created.id);
-                    tasks.revalidate();
-                  }}
-                />
-              }
-            />
-          ) : null}
-          <Action.Push
-            title="New Tag…"
-            icon={Icon.Tag}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "g" }}
-            target={
-              <TagForm
-                onSaved={(created) => {
-                  setTagIds((current) => [...current, created.id]);
-                  tags.revalidate();
-                }}
-              />
-            }
-          />
+          {catalogActions(catalog, projectId, {
+            onProject: pickProject,
+            onTask: setTaskId,
+            onTag: (id) => setTagIds((current) => [...current, id]),
+          })}
         </ActionPanel>
       }
     >
@@ -168,75 +145,18 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
         id="description"
         title="Description"
         placeholder="What did you work on?"
-        defaultValue={entry.description}
+        value={description}
+        onChange={setDescription}
+        info="⌘⇧D searches what you have tracked before."
       />
-      {hasProjects ? (
-        <Form.Dropdown
-          id="projectId"
-          title="Project"
-          value={projectId}
-          onChange={(value) => {
-            setProjectId(value);
-            setTaskId(NONE);
-          }}
-        >
-          <Form.Dropdown.Item
-            value={NONE}
-            title="No project"
-            icon={Icon.Circle}
-          />
-          {(projects.data ?? []).map((project) => (
-            <Form.Dropdown.Item
-              key={project.id}
-              value={project.id}
-              title={
-                project.clientName
-                  ? `${project.name} — ${project.clientName}`
-                  : project.name
-              }
-              icon={{ source: Icon.CircleFilled, tintColor: project.color }}
-            />
-          ))}
-        </Form.Dropdown>
-      ) : null}
-      {hasTasks ? (
-        <Form.Dropdown
-          id="taskId"
-          title="Task"
-          value={taskId}
-          onChange={setTaskId}
-        >
-          <Form.Dropdown.Item value={NONE} title="No task" icon={Icon.Circle} />
-          {(tasks.data ?? []).map((task) => (
-            <Form.Dropdown.Item
-              key={task.id}
-              value={task.id}
-              title={task.name}
-            />
-          ))}
-        </Form.Dropdown>
-      ) : null}
-      {hasTags ? (
-        <Form.TagPicker
-          id="tagIds"
-          title="Tags"
-          value={tagIds}
-          onChange={setTagIds}
-        >
-          {(tags.data ?? []).map((tag) => (
-            <Form.TagPicker.Item
-              key={tag.id}
-              value={tag.id}
-              title={tag.name}
-              icon={{ source: Icon.CircleFilled, tintColor: tag.color }}
-            />
-          ))}
-        </Form.TagPicker>
-      ) : null}
+      {projectField(catalog, projectId, pickProject)}
+      {taskField(catalog, projectId, taskId, setTaskId)}
+      {tagsField(catalog, tagIds, setTagIds)}
       <Form.Checkbox
         id="billable"
         label="Billable"
-        defaultValue={entry.billable}
+        value={billable}
+        onChange={setBillable}
       />
       <Form.DatePicker
         id="start"

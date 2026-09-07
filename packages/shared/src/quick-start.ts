@@ -80,6 +80,29 @@ export type RecentEntry = QuickStart &
     count: number;
   };
 
+/**
+ * A description this person has typed before, with the fields the newest entry
+ * carrying it was filed under.
+ *
+ * Deliberately keyed on the description alone, unlike {@link RecentEntry},
+ * which is keyed on the whole combination. The two answer different
+ * questions: a recent is "resume this exact job", a suggestion is "you have
+ * called work this before" — so the same name filed under three projects is
+ * three recents and one suggestion. Folding them into one list would make an
+ * autocomplete repeat itself.
+ */
+export type DescriptionSuggestion = QuickStart &
+  QuickStartLabels & {
+    /** Tags the newest entry with this description carried. */
+    tagIds: string[];
+    /** Start of that newest entry, ISO. */
+    lastStart: string;
+    /** Its id, so a picker can offer to open it. */
+    lastEntryId: string;
+    /** How many entries in the scanned window share the description. */
+    count: number;
+  };
+
 /** Either tier, as the quick-start surfaces render them. */
 export type QuickStartItem =
   | ({ kind: "favorite" } & DetailedFavorite)

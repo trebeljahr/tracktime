@@ -21,6 +21,7 @@ import { z } from "zod";
 import {
   createEntrySchema,
   entryAmount,
+  entryDescriptionsSchema,
   entryListSchema,
   continueEntrySchema,
   idInputSchema,
@@ -30,6 +31,7 @@ import {
   startTimerSchema,
   stopTimerSchema,
   updateEntrySchema,
+  type DescriptionSuggestion,
   type DetailedEntry,
   type EntrySource,
   type RecentEntry,
@@ -56,7 +58,12 @@ import { enforceMaxEntryDuration } from "../../services/runaway.js";
 import { publishSync } from "../../ws/sync.js";
 import { router, workspaceProcedure } from "../trpc.js";
 import { loadCatalogLookup } from "./catalog-lookup.js";
-import { collapseRecents, type RecentSourceEntry } from "./quick-start.js";
+import {
+  collapseDescriptions,
+  collapseRecents,
+  type DescriptionSourceEntry,
+  type RecentSourceEntry,
+} from "./quick-start.js";
 
 /** `discard` drops an entry without keeping it; defaults to the running one. */
 export const discardTimerSchema = z.object({
@@ -84,6 +91,20 @@ const DEFAULT_RECENT_DAYS = 30;
  * appear well inside it.
  */
 const RECENT_SCAN_LIMIT = 400;
+
+/** How many distinct descriptions `descriptions` answers with by default. */
+const DEFAULT_DESCRIPTION_LIMIT = 25;
+
+/**
+ * How far back `descriptions` looks by default.
+ *
+ * Much wider than `recent`'s window, and for the opposite reason. Recents are
+ * a shortlist of what you are doing *now*, so a stale row is noise. An
+ * autocomplete is a memory of what you have ever called this work, so a name
+ * from a quarter ago is exactly the one worth remembering for you — and it
+ * costs nothing, because the user is already typing to filter it.
+ */
+const DEFAULT_DESCRIPTION_DAYS = 180;
 
 const notFound = (message = "Entry not found"): TRPCError =>
   new TRPCError({ code: "NOT_FOUND", message });
@@ -664,6 +685,80 @@ export const entriesRouter = router({
 
       const catalog = await loadCatalogLookup(workspaceId, entries);
       return collapseRecents(entries, catalog, limit);
+    }),
+
+  /**
+   * Descriptions this person has used before — the autocomplete behind every
+   * client's description field.
+   *
+   * Sibling of `recent` rather than a mode of it: recents are keyed on the
+   * whole (description, project, task, billable) combination and answer
+   * "resume this job", while these are keyed on the description alone and
+   * answer "you have called work this before". One list cannot do both without
+   * either repeating a name once per project it was filed under, or hiding the
+   * project a name usually belongs to.
+   *
+   * Author-scoped for the same reason `recent` is: an autocomplete is a
+   * memory of your own phrasing, not of the workspace's.
+   */
+  descriptions: workspaceProcedure
+    .input(entryDescriptionsSchema)
+    .query(async ({ ctx, input }): Promise<DescriptionSuggestion[]> => {
+      const workspaceId = ctx.workspaceId;
+      const limit = input.limit ?? DEFAULT_DESCRIPTION_LIMIT;
+      const days = input.days ?? DEFAULT_DESCRIPTION_DAYS;
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+      const filter: Record<string, unknown> = {
+        workspaceId,
+        authorId: ctx.user.id,
+        start: { $gte: since },
+        end: { $ne: null },
+        // A blank description suggests nothing, so it is excluded in the
+        // query rather than scanned and thrown away — otherwise a day of
+        // unnamed timers eats the whole scan window.
+        description: { $nin: ["", null] },
+      };
+
+      // `undefined` is "every project"; `null` is "only unfiled entries".
+      // Mongo would treat both as `{ projectId: null }` if this compared
+      // loosely, which is why the check is against `undefined` by identity.
+      if (input.projectId !== undefined) filter.projectId = input.projectId;
+      if (input.taskId !== undefined) filter.taskId = input.taskId;
+
+      const search = input.search?.trim() ?? "";
+      if (search !== "") {
+        filter.description = new RegExp(escapeRegExp(search), "i");
+      }
+
+      const rows = await TimeEntry.find(filter)
+        .sort({ start: -1, _id: -1 })
+        .limit(RECENT_SCAN_LIMIT)
+        .select({
+          description: 1,
+          projectId: 1,
+          taskId: 1,
+          billable: 1,
+          start: 1,
+          end: 1,
+          tagIds: 1,
+        })
+        .lean();
+
+      const entries: DescriptionSourceEntry[] = rows.map((row) => ({
+        id: String(row._id),
+        description: row.description,
+        projectId: row.projectId ?? null,
+        taskId: row.taskId ?? null,
+        billable: row.billable,
+        start: row.start.toISOString(),
+        end: row.end === null ? null : row.end.toISOString(),
+        // Written before tags existed means the field is absent, not empty.
+        tagIds: row.tagIds ?? [],
+      }));
+
+      const catalog = await loadCatalogLookup(workspaceId, entries);
+      return collapseDescriptions(entries, catalog, limit);
     }),
 
   get: workspaceProcedure

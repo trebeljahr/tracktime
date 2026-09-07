@@ -2,7 +2,11 @@
 
 import * as React from "react";
 import { dayKeyInZone, rollEndAfterStart, withDayInZone } from "@starter/shared";
-import { deviceTimeZone, entryFieldsFrom } from "@starter/core";
+import {
+  defaultManualRange,
+  deviceTimeZone,
+  entryFieldsFrom,
+} from "@starter/core";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,18 +25,6 @@ import { useEntryFields } from "@/components/entry-fields/use-entry-fields";
 import { TimeField } from "@/components/tracker/time-field";
 import type { EntryMutations } from "@/components/tracker/use-entry-mutations";
 import { useFormatSettings } from "@/lib/format";
-
-const HOUR_MS = 3_600_000;
-
-/** The range a freshly opened dialog offers: the hour that just passed. */
-export const defaultManualRange = (): { start: string; end: string } => {
-  const end = new Date();
-  end.setSeconds(0, 0);
-  return {
-    start: new Date(end.getTime() - HOUR_MS).toISOString(),
-    end: end.toISOString(),
-  };
-};
 
 const clampEnd = (start: string, end: string): string =>
   Date.parse(end) > Date.parse(start)

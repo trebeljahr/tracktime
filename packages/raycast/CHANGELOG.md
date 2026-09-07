@@ -1,5 +1,16 @@
 # tracktime Changelog
 
+## [Unreleased]
+
+- **Log Past Time** (⌘⇧N in **Timer** and **Show All Time**) — record a block of
+  work that was never timed, which until now meant opening the web app.
+- **Description autocomplete** (⌘⇧D in every form that composes an entry) —
+  search what you have described work as before, scoped to the picked project.
+  ⏎ takes the name, ⌘⇧⏎ takes the project, task, tags and billable flag with it.
+- Project dropdowns group under their client, so two clients' "Redesign" can be
+  told apart, and typing the client name filters to it.
+- The three entry forms render from one set of fields, so they cannot drift.
+
 ## [Initial release]
 
 - Menu bar timer with live duration, stop, discard and continue.

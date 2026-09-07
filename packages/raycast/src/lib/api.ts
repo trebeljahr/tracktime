@@ -11,6 +11,7 @@ import {
   deviceTimeZone,
   type ApiClient,
   type Client,
+  type DescriptionSuggestion,
   type DetailedEntry,
   type DetailedFavorite,
   type Project,
@@ -52,6 +53,24 @@ export type StartInput = {
   taskId?: string | null;
   tagIds?: string[];
   billable?: boolean;
+};
+
+/** A block of work that was never timed — both ends are known up front. */
+export type CreateInput = StartInput & { start: string; end: string };
+
+/**
+ * What to offer as an autocomplete for the description field.
+ *
+ * `projectId` carries the same three-way meaning the server gives it: leave it
+ * out for every project, pass `null` while composing an explicitly unfiled
+ * entry, pass an id to see only what has been called that under that project.
+ */
+export type DescriptionsInput = {
+  projectId?: string | null;
+  taskId?: string | null;
+  search?: string;
+  limit?: number;
+  days?: number;
 };
 
 export type UpdateInput = {
@@ -125,6 +144,8 @@ export type Tracktime = {
   /** The running entry, or null when the timer is stopped. */
   current(): Promise<TimeEntry | null>;
   start(input: StartInput): Promise<TimeEntry>;
+  /** Log past work: an entry that is finished the moment it is written. */
+  create(input: CreateInput): Promise<TimeEntry>;
   stop(id?: string): Promise<TimeEntry>;
   /** Throw the running entry away instead of keeping it. */
   discard(id?: string): Promise<{ success: true; id: string }>;
@@ -145,6 +166,8 @@ export type Tracktime = {
     entries: DetailedEntry[];
     nextCursor?: string;
   }>;
+  /** Descriptions this person has used before, newest first. */
+  descriptions(input?: DescriptionsInput): Promise<DescriptionSuggestion[]>;
   update(input: UpdateInput): Promise<TimeEntry>;
   remove(id: string): Promise<{ success: true; id: string }>;
   projects(options?: {
@@ -259,6 +282,17 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
       (entry) => entry.id,
     ),
 
+  // No echo: a manual entry is already finished, so it says nothing about
+  // what is running — and the server does not touch the running timer to
+  // write one. Clearing the echo here would blank a menu bar that is right.
+  create: (input) =>
+    client.mutate<TimeEntry>("entries.create", {
+      ...input,
+      source: SOURCE,
+      timeZone: deviceTimeZone(),
+      originId,
+    }),
+
   favorites: () => client.query<DetailedFavorite[]>("favorites.list"),
 
   addFavorite: (quick) =>
@@ -279,6 +313,9 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
   // An edit can end the running entry, and deleting one certainly does. Both
   // echo only when the entry they touched is the one this install last saw
   // running — an edit to last Tuesday must not clear today's menu bar.
+  descriptions: (input) =>
+    client.query<DescriptionSuggestion[]>("entries.descriptions", input ?? {}),
+
   update: (input) =>
     echoing(
       client.mutate<TimeEntry>("entries.update", { ...input, originId }),

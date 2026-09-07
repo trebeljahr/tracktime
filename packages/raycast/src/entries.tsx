@@ -22,6 +22,7 @@ import { useApi } from "./lib/hooks.js";
 import { webLink } from "./lib/preferences.js";
 import { refreshMenuBar, showFailureToast } from "./lib/ui.js";
 import { EditEntry } from "./components/edit-entry.js";
+import { LogTime } from "./components/log-time.js";
 import { SignedOutView } from "./components/signed-out.js";
 
 /** Window the list covers. Anything older belongs in the web app's reports. */
@@ -167,12 +168,24 @@ export default function Entries(): React.JSX.Element {
     }, "Could not delete the entry");
   };
 
+  /* The one entry this list cannot otherwise produce: a block of work that
+     was never timed. Same form the Timer command opens. */
+  const logTime = (
+    <Action.Push
+      title="Log Past Time…"
+      icon={Icon.Plus}
+      shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+      target={<LogTime onSaved={revalidate} />}
+    />
+  );
+
   return (
     <List
       isLoading={isLoading}
       searchBarPlaceholder="Search recent entries…"
       actions={
         <ActionPanel>
+          {logTime}
           <Action.OpenInBrowser title="Open Web App" url={webLink("/track")} />
         </ActionPanel>
       }
@@ -242,6 +255,7 @@ export default function Entries(): React.JSX.Element {
                     </ActionPanel.Section>
 
                     <ActionPanel.Section>
+                      {logTime}
                       <Action.CopyToClipboard
                         title="Copy Description"
                         content={label(entry)}

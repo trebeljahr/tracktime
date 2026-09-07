@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 
 import { quickStartKey, quickStartHint } from "@starter/shared";
 import {
+  collapseDescriptions,
   collapseRecents,
   emptyCatalog,
   resolveQuickStartLabels,
   type CatalogLookup,
+  type DescriptionSourceEntry,
   type RecentSourceEntry,
 } from "../trpc/routers/quick-start.js";
 
@@ -345,5 +347,112 @@ describe("collapseRecents — archived and deleted projects", () => {
         [false, true],
       ],
     );
+  });
+});
+
+/** The same defaults, plus the tags a suggestion carries back. */
+const described = (
+  overrides: Partial<DescriptionSourceEntry> &
+    Pick<DescriptionSourceEntry, "id">,
+): DescriptionSourceEntry => ({ ...entry(overrides), tagIds: [], ...overrides });
+
+describe("collapseDescriptions", () => {
+  it("folds one description filed under several projects into one row", () => {
+    const rows = collapseDescriptions(
+      [
+        described({
+          id: "1",
+          description: "Standup",
+          projectId: ACME,
+          start: "2026-08-03T09:00:00.000Z",
+          end: "2026-08-03T09:15:00.000Z",
+        }),
+        described({
+          id: "2",
+          description: "Standup",
+          projectId: RETIRED,
+          start: "2026-08-01T09:00:00.000Z",
+          end: "2026-08-01T09:15:00.000Z",
+        }),
+      ],
+      catalog,
+      10,
+    );
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.count, 2);
+    // The newest one supplies the fields, so accepting the whole suggestion
+    // files the new timer where the work most recently lived.
+    assert.equal(rows[0]?.projectId, ACME);
+    assert.equal(rows[0]?.projectName, "Acme");
+    assert.equal(rows[0]?.lastEntryId, "1");
+  });
+
+  it("folds case variants together and keeps the newest spelling", () => {
+    const rows = collapseDescriptions(
+      [
+        described({
+          id: "1",
+          description: "Client call",
+          start: "2026-08-03T09:00:00.000Z",
+          end: "2026-08-03T10:00:00.000Z",
+        }),
+        described({
+          id: "2",
+          description: "client CALL",
+          start: "2026-08-01T09:00:00.000Z",
+          end: "2026-08-01T10:00:00.000Z",
+        }),
+      ],
+      emptyCatalog(),
+      10,
+    );
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.description, "Client call");
+    assert.equal(rows[0]?.count, 2);
+  });
+
+  it("skips blank descriptions and the running entry", () => {
+    const rows = collapseDescriptions(
+      [
+        described({ id: "1", description: "   " }),
+        described({ id: "2", description: "Running", end: null }),
+        described({ id: "3", description: "Kept" }),
+      ],
+      emptyCatalog(),
+      10,
+    );
+
+    assert.deepEqual(
+      rows.map((row) => row.description),
+      ["Kept"],
+    );
+  });
+
+  it("carries the newest entry's tags, trimmed description and limit", () => {
+    const rows = collapseDescriptions(
+      [
+        described({
+          id: "1",
+          description: "  Deep work  ",
+          tagIds: ["t1", "t2"],
+          start: "2026-08-03T09:00:00.000Z",
+          end: "2026-08-03T10:00:00.000Z",
+        }),
+        described({
+          id: "2",
+          description: "Email",
+          start: "2026-08-02T09:00:00.000Z",
+          end: "2026-08-02T10:00:00.000Z",
+        }),
+      ],
+      emptyCatalog(),
+      1,
+    );
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.description, "Deep work");
+    assert.deepEqual(rows[0]?.tagIds, ["t1", "t2"]);
   });
 });

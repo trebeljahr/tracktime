@@ -20,6 +20,7 @@ import {
   type DetailedFavorite,
 } from "@starter/core";
 import { EditEntry } from "./components/edit-entry.js";
+import { LogTime } from "./components/log-time.js";
 import { SignedOutView } from "./components/signed-out.js";
 import { SignIn } from "./components/sign-in.js";
 import { StartTimer } from "./components/start-timer.js";
@@ -198,6 +199,18 @@ export default function Timer(): React.JSX.Element {
     />
   );
 
+  /* Work that was never timed. Alongside Start rather than hidden behind the
+     web app, because remembering a meeting you forgot to time is exactly the
+     errand a launcher is open for. */
+  const logForm = (
+    <Action.Push
+      title="Log Past Time…"
+      icon={Icon.Clock}
+      shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+      target={<LogTime onSaved={onSaved} />}
+    />
+  );
+
   const runningAccessories = (
     entry: DetailedEntry,
   ): List.Item.Accessory[] => {
@@ -227,6 +240,7 @@ export default function Timer(): React.JSX.Element {
       actions={
         <ActionPanel>
           {startForm}
+          {logForm}
           {commonActions}
         </ActionPanel>
       }
@@ -238,6 +252,7 @@ export default function Timer(): React.JSX.Element {
         actions={
           <ActionPanel>
             {startForm}
+            {logForm}
             {commonActions}
           </ActionPanel>
         }
@@ -306,6 +321,7 @@ export default function Timer(): React.JSX.Element {
 
                 <ActionPanel.Section>
                   {startForm}
+                  {logForm}
                   <Action.CopyToClipboard
                     title="Copy Description"
                     content={entryLabel(running)}
@@ -340,6 +356,7 @@ export default function Timer(): React.JSX.Element {
             actions={
               <ActionPanel>
                 {startForm}
+                {logForm}
                 {commonActions}
               </ActionPanel>
             }

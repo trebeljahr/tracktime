@@ -7,6 +7,7 @@
 import {
   emptyQuickStartLabels,
   quickStartKey,
+  type DescriptionSuggestion,
   type QuickStartLabels,
   type RecentEntry,
 } from "@starter/shared";
@@ -154,5 +155,67 @@ export const collapseRecents = (
   }
 
   // Map iteration is insertion order, which is already the sorted order above.
+  return [...byKey.values()].slice(0, Math.max(0, limit));
+};
+
+/** The entry fields {@link collapseDescriptions} reads. */
+export type DescriptionSourceEntry = RecentSourceEntry & {
+  tagIds: readonly string[];
+};
+
+/**
+ * Fold a page of entries into the distinct descriptions worth suggesting.
+ *
+ * Keyed on the case-folded description, so "Client call" and "client call"
+ * are one suggestion rather than two rows a user cannot tell apart — the
+ * opposite of {@link quickStartKey}, which keeps casing because a recent is
+ * restarted verbatim. The newest spelling wins, so the list shows a
+ * description the user really typed, and most recently.
+ *
+ * Blank descriptions are skipped: an autocomplete row that fills in nothing is
+ * a row that only costs a keystroke to dismiss. The running entry is skipped
+ * for the same reason it is skipped from recents — it is the one job the user
+ * is demonstrably not about to name a new timer after.
+ */
+export const collapseDescriptions = (
+  entries: readonly DescriptionSourceEntry[],
+  catalog: CatalogLookup,
+  limit: number,
+): DescriptionSuggestion[] => {
+  const byKey = new Map<string, DescriptionSuggestion>();
+
+  for (const entry of [...entries].sort(byRecency)) {
+    if (entry.end === null) continue;
+    if (!Number.isFinite(Date.parse(entry.start))) continue;
+
+    const description = entry.description.trim();
+    if (description === "") continue;
+
+    const key = description.toLowerCase();
+    const seen = byKey.get(key);
+    if (seen !== undefined) {
+      // Insertion order is already newest-first, so the first win supplies
+      // both the spelling and the fields; the rest only add to the count.
+      seen.count += 1;
+      continue;
+    }
+
+    const quick = {
+      description,
+      projectId: entry.projectId,
+      taskId: entry.taskId,
+      billable: entry.billable,
+    };
+
+    byKey.set(key, {
+      ...quick,
+      ...resolveQuickStartLabels(quick, catalog),
+      tagIds: [...entry.tagIds],
+      lastStart: entry.start,
+      lastEntryId: entry.id,
+      count: 1,
+    });
+  }
+
   return [...byKey.values()].slice(0, Math.max(0, limit));
 };

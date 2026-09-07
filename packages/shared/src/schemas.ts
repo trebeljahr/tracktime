@@ -361,6 +361,23 @@ export const recentEntriesSchema = z.object({
   days: z.number().int().min(1).max(365).optional(),
 });
 
+/**
+ * Descriptions this person has used before, for an autocomplete.
+ *
+ * `projectId` distinguishes three cases on purpose, which is why it is
+ * `nullish` rather than `optional`: absent means "every project", `null` means
+ * "only entries filed under no project", and an id means that project. An
+ * autocomplete that quietly ignored `null` would offer the whole workspace's
+ * names while the user was composing an explicitly unfiled entry.
+ */
+export const entryDescriptionsSchema = z.object({
+  projectId: idString.nullish(),
+  taskId: idString.nullish(),
+  search: z.string().max(200).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  days: z.number().int().min(1).max(365).optional(),
+});
+
 // ── reports ──────────────────────────────────────────────────────────
 
 export const reportFiltersSchema = z.object({
@@ -558,6 +575,7 @@ export type EntryListInput = z.infer<typeof entryListSchema>;
 export type CreateFavoriteInput = z.infer<typeof createFavoriteSchema>;
 export type ReorderFavoritesInput = z.infer<typeof reorderFavoritesSchema>;
 export type RecentEntriesInput = z.infer<typeof recentEntriesSchema>;
+export type EntryDescriptionsInput = z.infer<typeof entryDescriptionsSchema>;
 export type ReportFiltersInput = z.infer<typeof reportFiltersSchema>;
 export type SummaryReportSchemaInput = z.infer<typeof summaryReportSchema>;
 export type DetailedReportSchemaInput = z.infer<typeof detailedReportSchema>;
