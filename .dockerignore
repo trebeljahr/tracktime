@@ -1,0 +1,52 @@
+# Build-context excludes for every image built from this repo.
+#
+# Added for the self-host path, where `docker compose -f
+# docker-compose.selfhost.yml build` runs against a working checkout rather
+# than a clean CI clone. Two things break without it, and both are silent:
+#
+#   - node_modules is ~1.5 GB and packages/*/node_modules are pnpm symlink
+#     farms pointing into it. `COPY packages/client packages/client` in a
+#     Dockerfile lands those dangling symlinks ON TOP of the node_modules the
+#     image's own `pnpm install` just created, so the build fails with
+#     missing modules that are plainly present on the host.
+#   - packages/client/.next is another ~370 MB of cache from local `next
+#     dev`, uploaded to the daemon on every build for nothing.
+#
+# Nothing here changes what the existing CI images contain. Every path below
+# is either absent in a fresh clone (node_modules, .next, dist, out) or never
+# copied by a Dockerfile — the images build these artifacts themselves.
+
+# Dependencies and build output — reinstalled/rebuilt inside the image.
+**/node_modules
+**/.next
+**/dist
+**/out
+**/.turbo
+.pnpm-store
+
+# Local secrets. Not needed by any image, and a copied layer keeps whatever it
+# was given even when a later stage does not ship it.
+**/.env
+**/.env.local
+**/.env.development
+**/.env.production
+**/.env.keys
+
+# Native shells and their toolchain output.
+ios
+android
+src-tauri/target
+
+# Test and tooling artifacts.
+playwright-report
+test-results
+coverage
+.git
+.github
+.claude
+.vscode
+.idea
+
+# OS noise.
+.DS_Store
+**/*.log

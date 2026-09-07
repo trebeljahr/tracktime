@@ -1,0 +1,78 @@
+# Reverse proxy for the SELF-HOST stack — see docker-compose.selfhost.yml.
+#
+# ONE domain, three upstreams behind it:
+#
+#   https://{$APP_DOMAIN}/api/*   ->  server:5159   (tRPC, better-auth, health)
+#   https://{$APP_DOMAIN}/ws      ->  server:5159   (the sync WebSocket)
+#   https://{$APP_DOMAIN}/*       ->  client:8080   (the static web app)
+#
+# Everything the browser loads and everything it calls therefore share one
+# origin. That is what lets the client image be built with an EMPTY
+# NEXT_PUBLIC_API_URL and still work on anybody's domain: with no API URL
+# baked in, tRPC posts to the relative /api/trpc, better-auth uses
+# window.location.origin, and the sync socket resolves to wss://<host>/ws.
+# The alternative — a second api.<domain> and an API URL compiled into the
+# bundle — makes the image domain-specific and adds a DNS record, a second
+# certificate and a CORS/cookie surface to get wrong.
+#
+# This file is NOT part of the owner's production deploy. That one is the
+# two-app Coolify split in docker-compose.server.yml / docker-compose.client.yml,
+# where Traefik terminates TLS and the two hosts are genuinely different.
+
+{$APP_DOMAIN} {
+	# Automatic HTTPS. Caddy provisions and renews a certificate for
+	# {$APP_DOMAIN} on first request, which needs the A/AAAA record to point
+	# here and ports 80 and 443 to be reachable from the internet — port 80
+	# is not decoration, the ACME HTTP challenge is answered on it.
+	#
+	# No ACME contact email is configured, so the CA cannot mail an
+	# expiry warning if renewals ever stop. Caddy renews on its own well
+	# before expiry; add `email you@example.com` in a global options block
+	# at the top of this file if you want the safety net.
+	#
+	# A local trial over plain HTTP: set APP_DOMAIN to `localhost` (or
+	# `http://localhost`) and APP_URL to the matching http:// origin — Caddy
+	# skips ACME for localhost and issues its own internal certificate.
+
+	encode zstd gzip
+
+	# ── The API ──────────────────────────────────────────────────────────
+	# Matched BEFORE the catch-all below. Order matters more than it looks:
+	# a static handler that swallows /api/auth/get-session answers it with
+	# index.html and a 200, which reaches the browser as a bizarre auth
+	# failure rather than as the routing bug it is.
+	#
+	# reverse_proxy sets X-Forwarded-For / -Proto / -Host by default, and the
+	# server sets `trust proxy` — without that header better-auth cannot
+	# determine a client IP and silently disables its own rate limiting on
+	# sign-in and password reset, announcing it in one easily-missed log line.
+	#
+	# No request body limit is imposed here on purpose: the data importer
+	# posts a whole exported file to data.analyze / data.commit, and the
+	# server already caps it per-procedure.
+	handle /api/* {
+		reverse_proxy server:5159
+	}
+
+	# ── The sync WebSocket ───────────────────────────────────────────────
+	# `handle`, never `handle_path`: the server's upgrade handler compares the
+	# path LITERALLY against "/ws" and "/api/ws" and destroys the socket on
+	# anything else, so a rule that stripped the prefix would produce a
+	# connection that dies with no error the browser can explain.
+	#
+	# Caddy proxies the Upgrade natively and passes Cookie and
+	# Sec-WebSocket-Protocol through — the first is how the web app
+	# authenticates, the second is how the browser extension and the Raycast
+	# extension carry their bearer token. The server pings every 10s, which
+	# keeps the stream well inside any idle window.
+	handle /ws {
+		reverse_proxy server:5159
+	}
+
+	# ── The web app ──────────────────────────────────────────────────────
+	# A static export served by the client container. Least specific, so it
+	# runs only when neither rule above matched.
+	handle {
+		reverse_proxy client:8080
+	}
+}
