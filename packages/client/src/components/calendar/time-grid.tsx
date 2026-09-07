@@ -605,19 +605,29 @@ export function TimeGrid({
               setDrag(null);
             }}
           >
-            {/* Hour gutter. */}
+            {/* Hour gutter — sub-hour marks read as minutes of the hour above. */}
             <div className="border-border relative border-r">
-              {majorMinutes.map((minute) => (
-                <span
-                  key={minute}
-                  className="text-muted-foreground absolute right-1 -translate-y-1/2 text-[0.7rem] tabular-nums"
-                  style={{
-                    top: offsetFromMinutes(minute, pxPerMinute, visible),
-                  }}
-                >
-                  {formatMinuteOfDay(minute, format.timeFormat)}
-                </span>
-              ))}
+              {majorMinutes.map((minute) => {
+                const onHour = minute % 60 === 0;
+                return (
+                  <span
+                    key={minute}
+                    className={cn(
+                      "absolute right-1 -translate-y-1/2 tabular-nums",
+                      onHour
+                        ? "text-muted-foreground text-[0.7rem]"
+                        : "text-muted-foreground/60 text-[0.62rem]"
+                    )}
+                    style={{
+                      top: offsetFromMinutes(minute, pxPerMinute, visible),
+                    }}
+                  >
+                    {onHour
+                      ? formatMinuteOfDay(minute, format.timeFormat)
+                      : `:${String(minute % 60).padStart(2, "0")}`}
+                  </span>
+                );
+              })}
             </div>
 
             {columns.map((column, dayIndex) => {
@@ -646,7 +656,12 @@ export function TimeGrid({
                     <div
                       key={minute}
                       aria-hidden
-                      className="border-border/70 pointer-events-none absolute inset-x-0 border-t"
+                      className={cn(
+                        "pointer-events-none absolute inset-x-0 border-t",
+                        minute % 60 === 0
+                          ? "border-border/70"
+                          : "border-border/40"
+                      )}
                       style={{
                         top: offsetFromMinutes(minute, pxPerMinute, visible),
                       }}

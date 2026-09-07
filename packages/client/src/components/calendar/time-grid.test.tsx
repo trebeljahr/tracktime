@@ -150,4 +150,21 @@ describe("TimeGrid zoom", () => {
 
     expect(sparse).toBeLessThan(dense);
   });
+
+  it("subdivides the gutter into minutes of the hour when zoomed in", () => {
+    const atOne = renderGrid(1);
+    expect(screen.queryByText(":30")).not.toBeInTheDocument();
+    atOne.unmount();
+
+    // 90px per hour — half hours are marked, quarters are not yet.
+    const atOneAndAHalf = renderGrid(1.5);
+    expect(screen.getAllByText(":30").length).toBeGreaterThan(0);
+    expect(screen.queryByText(":15")).not.toBeInTheDocument();
+    atOneAndAHalf.unmount();
+
+    // 360px per hour — every five minutes, the hour label still whole.
+    renderGrid(6);
+    expect(screen.getAllByText(":05").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/^\d\d:00$/).length).toBeGreaterThan(0);
+  });
 });

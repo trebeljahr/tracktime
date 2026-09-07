@@ -297,11 +297,30 @@ describe("zoom ladder", () => {
 
 describe("gridTicks", () => {
   it("thins the rules out as the grid shrinks", () => {
-    expect(gridTicks(3)).toEqual({ labelStepMin: 60, minorStepMin: 15 });
     expect(gridTicks(1)).toEqual({ labelStepMin: 60, minorStepMin: 30 });
     expect(gridTicks(0.6)).toEqual({ labelStepMin: 60, minorStepMin: null });
     expect(gridTicks(0.5)).toEqual({ labelStepMin: 120, minorStepMin: 60 });
     expect(gridTicks(0.3)).toEqual({ labelStepMin: 180, minorStepMin: 60 });
+  });
+
+  it("subdivides the hour as the grid grows", () => {
+    expect(gridTicks(1.5)).toEqual({ labelStepMin: 30, minorStepMin: 15 });
+    expect(gridTicks(2)).toEqual({ labelStepMin: 30, minorStepMin: 15 });
+    expect(gridTicks(3)).toEqual({ labelStepMin: 15, minorStepMin: 5 });
+    expect(gridTicks(4)).toEqual({ labelStepMin: 10, minorStepMin: 5 });
+    expect(gridTicks(6)).toEqual({ labelStepMin: 5, minorStepMin: null });
+  });
+
+  it("keeps labels legible and every hour on a labelled line", () => {
+    for (const pxPerMinute of ZOOM_LEVELS) {
+      const { labelStepMin, minorStepMin } = gridTicks(pxPerMinute);
+      expect(labelStepMin * pxPerMinute).toBeGreaterThanOrEqual(30);
+      if (labelStepMin < 60) expect(60 % labelStepMin).toBe(0);
+      if (minorStepMin !== null) {
+        expect(minorStepMin * pxPerMinute).toBeGreaterThanOrEqual(15);
+        expect(labelStepMin % minorStepMin).toBe(0);
+      }
+    }
   });
 });
 

@@ -399,13 +399,23 @@ export type GridTicks = {
 };
 
 /**
- * Thin out the rules as the grid shrinks: hour labels collide below roughly
- * 34px per hour, and half-hour guides stop helping long before that. Zoomed
- * right in there is room for quarter-hour guides instead.
+ * The rules follow the scale in both directions: they thin out as the grid
+ * shrinks — hour labels collide below roughly 34px per hour, and half-hour
+ * guides stop helping long before that — and they subdivide as it grows, so
+ * the gutter reads 30, 15, 10 and finally 5 minute marks rather than staying
+ * on the hour while blocks get taller.
+ *
+ * Each tier keeps labels at least ~30px apart and minor guides at least
+ * ~15px apart, which is what stops the gutter turning into a grey band. The
+ * hour lines stay emphasised at every tier, so a sub-hour label reads as a
+ * subdivision of the hour above it rather than as another hour.
  */
 export const gridTicks = (pxPerMinute: number): GridTicks => {
   const hourPx = pxPerMinute * 60;
-  if (hourPx >= 150) return { labelStepMin: 60, minorStepMin: 15 };
+  if (hourPx >= 300) return { labelStepMin: 5, minorStepMin: null };
+  if (hourPx >= 200) return { labelStepMin: 10, minorStepMin: 5 };
+  if (hourPx >= 140) return { labelStepMin: 15, minorStepMin: 5 };
+  if (hourPx >= 84) return { labelStepMin: 30, minorStepMin: 15 };
   if (hourPx >= 46) return { labelStepMin: 60, minorStepMin: 30 };
   if (hourPx >= 34) return { labelStepMin: 60, minorStepMin: null };
   if (hourPx >= 20) return { labelStepMin: 120, minorStepMin: 60 };
