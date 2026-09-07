@@ -20,7 +20,9 @@ import {
   type DetailedFavorite,
 } from "@starter/core";
 import { EditEntry } from "./components/edit-entry.js";
-import StartTimer from "./start-timer.js";
+import { SignedOutView } from "./components/signed-out.js";
+import { SignIn } from "./components/sign-in.js";
+import { StartTimer } from "./components/start-timer.js";
 import { getTracktime, type ProjectWithStats } from "./lib/api.js";
 import { formatClock, formatDurationShort, projectIcon } from "./lib/format.js";
 import { useApi, useNow } from "./lib/hooks.js";
@@ -32,7 +34,7 @@ import {
   favoriteFor,
   loadTimerSnapshot,
 } from "./lib/timer-data.js";
-import { SignedOutView, refreshMenuBar, showFailureToast } from "./lib/ui.js";
+import { refreshMenuBar, showFailureToast } from "./lib/ui.js";
 
 /** Long enough to cover a normal week of work without a scroll marathon. */
 const RECENT_LIMIT = 8;
@@ -152,6 +154,15 @@ export default function Timer(): React.JSX.Element {
         icon={Icon.ArrowClockwise}
         shortcut={{ modifiers: ["cmd"], key: "r" }}
         onAction={revalidate}
+      />
+      {/* The only way to see or drop this Mac's session now that pairing has
+          no command of its own. Signed in, `SignIn` opens on its paired
+          screen and pairs nothing. */}
+      <Action.Push
+        title="Account and Session…"
+        icon={Icon.Person}
+        shortcut={{ modifiers: ["cmd", "shift"], key: "a" }}
+        target={<SignIn />}
       />
     </ActionPanel.Section>
   );

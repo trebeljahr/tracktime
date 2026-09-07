@@ -47,71 +47,25 @@
       "name": "timer",
       "title": "Timer",
       "subtitle": "tracktime",
-      "description": "Watch the running timer tick, and stop, edit, refile or swap it.",
-      "mode": "view"
-    },
-    {
-      "name": "start-timer",
-      "title": "Start Timer",
-      "subtitle": "tracktime",
-      "description": "Start a new timer, optionally on a project and task.",
-      "mode": "view"
-    },
-    {
-      "name": "start-favorite",
-      "title": "Start a Favorite",
-      "subtitle": "tracktime",
-      "description": "Start a pinned favorite or something you tracked recently.",
-      "mode": "view"
-    },
-    {
-      "name": "stop-timer",
-      "title": "Stop Timer",
-      "subtitle": "tracktime",
-      "description": "Stop the running timer and keep the entry.",
-      "mode": "no-view"
-    },
-    {
-      "name": "toggle-timer",
-      "title": "Toggle Timer",
-      "subtitle": "tracktime",
-      "description": "Stop the running timer, or resume the most recent entry.",
-      "mode": "no-view"
+      "description": "Start or stop tracking — the running timer, favorites and recent work.",
+      "mode": "view",
+      "keywords": ["start", "stop", "toggle", "track", "resume", "pause"]
     },
     {
       "name": "entries",
-      "title": "Time Entries",
+      "title": "Show All Time",
       "subtitle": "tracktime",
       "description": "Browse, continue, edit and delete recent time entries.",
-      "mode": "view"
+      "mode": "view",
+      "keywords": ["entries", "history", "log", "today", "week"]
     },
     {
-      "name": "projects",
-      "title": "Projects",
+      "name": "open-dashboard",
+      "title": "Open Dashboard",
       "subtitle": "tracktime",
-      "description": "Browse projects and their tasks — create, edit, archive and delete.",
-      "mode": "view"
-    },
-    {
-      "name": "clients",
-      "title": "Clients",
-      "subtitle": "tracktime",
-      "description": "Browse clients — create, edit, archive and delete.",
-      "mode": "view"
-    },
-    {
-      "name": "tags",
-      "title": "Tags",
-      "subtitle": "tracktime",
-      "description": "Browse tags — create, edit, archive and delete.",
-      "mode": "view"
-    },
-    {
-      "name": "sign-in",
-      "title": "Sign in to tracktime",
-      "subtitle": "tracktime",
-      "description": "Pair Raycast with your tracktime account using a device code.",
-      "mode": "view"
+      "description": "Open the tracktime web app, where reports, invoices and catalog editing live.",
+      "mode": "no-view",
+      "keywords": ["web", "reports", "invoices", "projects", "clients", "tags"]
     }
   ],
   "preferences": [

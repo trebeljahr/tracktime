@@ -8,14 +8,15 @@ import {
   showToast,
 } from "@raycast/api";
 import { useEffect, useState } from "react";
-import { ProjectForm } from "./components/catalog/project-form.js";
-import { TagForm } from "./components/catalog/tag-form.js";
-import { TaskForm } from "./components/catalog/task-form.js";
-import { getTracktime } from "./lib/api.js";
-import { formatDurationShort } from "./lib/format.js";
-import { useApi } from "./lib/hooks.js";
-import { webLink } from "./lib/preferences.js";
-import { SignedOutView, refreshMenuBar, showFailureToast } from "./lib/ui.js";
+import { ProjectForm } from "./catalog/project-form.js";
+import { TagForm } from "./catalog/tag-form.js";
+import { TaskForm } from "./catalog/task-form.js";
+import { getTracktime } from "../lib/api.js";
+import { formatDurationShort } from "../lib/format.js";
+import { useApi } from "../lib/hooks.js";
+import { webLink } from "../lib/preferences.js";
+import { refreshMenuBar, showFailureToast } from "../lib/ui.js";
+import { SignedOutView } from "./signed-out.js";
 
 /** `""` is the dropdown's stand-in for "no project"/"no task". */
 const NONE = "";
@@ -34,7 +35,7 @@ type FormValues = {
 const orNull = (value: string | undefined): string | null =>
   value && value !== NONE ? value : null;
 
-export default function StartTimer(): React.JSX.Element {
+export function StartTimer(): React.JSX.Element {
   const [description, setDescription] = useState("");
   const [projectId, setProjectId] = useState<string>(NONE);
   const [billable, setBillable] = useState(false);

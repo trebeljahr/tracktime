@@ -54,12 +54,7 @@ export default function MenuBar(): React.JSX.Element | null {
         <MenuBarExtra.Item
           title="Sign in to tracktime"
           icon={Icon.Key}
-          onAction={() => {
-            void launchCommand({
-              name: "sign-in",
-              type: LaunchType.UserInitiated,
-            });
-          }}
+          onAction={openTimer}
         />
       </MenuBarExtra>
     );
@@ -245,23 +240,7 @@ export default function MenuBar(): React.JSX.Element | null {
             title="Start Timer…"
             icon={Icon.Play}
             shortcut={{ modifiers: ["cmd"], key: "n" }}
-            onAction={() => {
-              void launchCommand({
-                name: "start-timer",
-                type: LaunchType.UserInitiated,
-              });
-            }}
-          />
-          <MenuBarExtra.Item
-            title="Start a Favorite…"
-            icon={Icon.Star}
-            shortcut={{ modifiers: ["cmd"], key: "f" }}
-            onAction={() => {
-              void launchCommand({
-                name: "start-favorite",
-                type: LaunchType.UserInitiated,
-              });
-            }}
+            onAction={openTimer}
           />
         </MenuBarExtra.Section>
       )}
@@ -327,7 +306,7 @@ export default function MenuBar(): React.JSX.Element | null {
           onAction={openTimer}
         />
         <MenuBarExtra.Item
-          title="Time Entries…"
+          title="Show All Time…"
           icon={Icon.List}
           onAction={() => {
             void launchCommand({
@@ -337,7 +316,7 @@ export default function MenuBar(): React.JSX.Element | null {
           }}
         />
         <MenuBarExtra.Item
-          title="Open Web App"
+          title="Open Dashboard"
           icon={Icon.Globe}
           onAction={() => {
             void open(webLink("/track"));

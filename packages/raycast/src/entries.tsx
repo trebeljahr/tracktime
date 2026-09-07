@@ -20,8 +20,9 @@ import {
 } from "./lib/format.js";
 import { useApi } from "./lib/hooks.js";
 import { webLink } from "./lib/preferences.js";
-import { SignedOutView, refreshMenuBar, showFailureToast } from "./lib/ui.js";
+import { refreshMenuBar, showFailureToast } from "./lib/ui.js";
 import { EditEntry } from "./components/edit-entry.js";
+import { SignedOutView } from "./components/signed-out.js";
 
 /** Window the list covers. Anything older belongs in the web app's reports. */
 const HISTORY_DAYS = 14;

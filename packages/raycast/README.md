@@ -5,49 +5,55 @@ timer in the macOS menu bar.
 
 ## Commands
 
+Four, on purpose. Everything else tracktime can do is better done in the web
+app, and a launcher that lists twelve of its own commands is a launcher you
+have to search inside of.
+
 | Command | Mode | What it does |
 | --- | --- | --- |
-| **Timer** | view | The live one: elapsed time ticking by the second, with stop, edit, refile, pin, discard, favorites and recent work all one keystroke away. |
+| **Timer** | view | Start and stop. Running: the elapsed time ticking by the second, with stop, edit, refile, pin and discard. Idle: the start form, favorites and recent work. |
 | **Timer Menu Bar** | menu bar | The same picture at a glance. Stop, edit, move to a project, pin, discard, continue recent work, today's total. |
-| **Start Timer** | view | Form for description, project, task and billable. Accepts a description straight from the root search. |
-| **Stop Timer** | no-view | Stops the running timer. Made for a global hotkey. |
-| **Toggle Timer** | no-view | Stops what is running, or resumes the most recent entry. One hotkey for the whole loop. |
-| **Time Entries** | view | Last 14 days grouped by day — continue, edit, delete. |
-| **Projects** | view | Projects and their tasks — create, edit, archive, delete, start a timer on one. |
-| **Clients** | view | Clients — create, edit, archive, delete, add a project. |
-| **Tags** | view | Tags — create, edit, archive, delete. |
-| **Sign in to tracktime** | view | Pairs this Mac with your account. |
+| **Show All Time** | view | Last 14 days grouped by day — continue, edit, delete. |
+| **Open Dashboard** | no-view | Jumps to the web app. |
 
-Worth binding to hotkeys: **Toggle Timer** (⌥T works well), **Timer** and
-**Start Timer**.
+Bind **Timer** to a hotkey (⌥T works well) and it is the whole loop: press it,
+and ⏎ either stops what is running or opens the start form.
+
+### Why start and stop are not two commands
+
+Raycast cannot hide a command based on state. `updateCommandMetadata` reaches
+only the subtitle of the command that is currently running, and background
+launches are limited to `no-view` and menu bar commands, so nothing can keep a
+view command's root-search row in sync with a timer that started elsewhere. A
+**Stop Timer** row that is listed while nothing runs is not a smaller surface
+than one command that knows which it is.
+
+So the state lives where it can be true continuously — the menu bar — and
+**Timer** adapts on open: its primary action is Stop while a timer runs, and
+the start form when none does. `keywords` in the manifest keep it findable by
+typing "start" or "stop".
 
 ### Creating catalog rows
 
-Clients, projects, tasks and tags are all creatable and editable here, not just
-selectable. Two ways in:
+Clients, projects, tasks and tags are creatable and editable here, but only
+where you are already standing: the start form and **Edit Entry** carry ⌘⇧P
+(new project), ⌘⇧T (new task) and ⌘⇧G (new tag), and come back with the new row
+already selected; the project form has ⌘⇧C for a new client. Nothing typed is
+lost on the detour.
 
-- The **Projects**, **Clients** and **Tags** commands, each with ⌘N for a new
-  row, ⌘E to edit, ⌘⇧A to archive and ⌃X to delete. Archived rows are hidden
-  behind the dropdown in the search bar rather than gone.
-- Inline, from the forms that need them: **Start Timer** and **Edit Entry**
-  both carry ⌘⇧P (new project), ⌘⇧T (new task) and ⌘⇧G (new tag), and come
-  back with the new row already selected. The project form has ⌘⇧C for a new
-  client. Nothing typed is lost on the detour.
-
-Deletes report what they cost — "Project deleted — 2 tasks deleted · 14 entries
-kept, unfiled" — because deleting a catalog row never deletes tracked time. A
-tag that is still on tracked time is archived instead of deleted, and the
-confirmation says so before you commit to it.
-
-Three things stay in the web app on purpose: per-project idle behaviour and
-recurring budgets (both need more explanation than a launcher form can carry),
-and colors outside the twelve-hue catalog palette (Raycast has no color well,
-so a hex nobody can see while typing is not worth the validation).
+There is deliberately no Projects, Clients or Tags command. Browsing and
+curating a catalog — renaming, archiving, deleting, reordering, colors, rates,
+budgets — is web app work, and **Open Dashboard** is one keystroke away.
+Creating a row mid-timer is not: stopping to go to the browser is exactly the
+interruption the extension exists to avoid.
 
 ## Setup
 
-1. Run **Sign in to tracktime**. It shows a short code and opens the approval
-   page in your browser; confirm the code there while signed in to the web app.
+1. Run **Timer**. Signed out it offers **Sign in to tracktime**: ⏎ shows a
+   short code and opens the approval page in your browser; confirm the code
+   there while signed in to the web app. (Pairing has no command of its own —
+   it is the wall every command hits, so it lives where you hit it. ⌘⇧A in
+   **Timer** reopens it later to see the account or sign out.)
 2. Set **API URL** and **Web App URL** in the extension preferences only if you
    are not on the default deployment. Leaving them empty follows the build: a
    `ray build` bundle talks to the deployed hosts, a `ray develop` one talks to
@@ -80,7 +86,7 @@ domain should be reimplemented here — if a helper is missing, add it to
 `raycast-env.d.ts` is generated from `package.json` by `ray build`, and is
 committed so `pnpm typecheck` works on machines without Raycast installed.
 
-### Menu bar refresh, and why there are two Timer commands
+### Menu bar refresh, and why the menu bar is a second surface
 
 Raycast only re-runs a menu bar command on its interval (1 minute here) and when
 its dropdown opens, so the clock shows `h:mm` rather than a second-by-second

@@ -1,9 +1,5 @@
 import {
-  Action,
-  ActionPanel,
-  Icon,
   LaunchType,
-  List,
   Toast,
   launchCommand,
   openExtensionPreferences,
@@ -11,7 +7,7 @@ import {
 } from "@raycast/api";
 import { ApiError, AuthError } from "@starter/core";
 import { NotSignedInError } from "./api.js";
-import { apiUrl, webLink } from "./preferences.js";
+import { apiUrl } from "./preferences.js";
 
 /**
  * Nudge the menu bar to re-read the timer.
@@ -68,11 +64,11 @@ export async function showFailureToast(
     await showToast({
       style: Toast.Style.Failure,
       title: "Not signed in",
-      message: "Run “Sign in to tracktime” to pair this Mac.",
+      message: "Open the Timer command to pair this Mac.",
       primaryAction: {
-        title: "Sign In",
+        title: "Open Timer",
         onAction: () => {
-          void launchCommand({ name: "sign-in", type: LaunchType.UserInitiated });
+          void launchCommand({ name: "timer", type: LaunchType.UserInitiated });
         },
       },
     });
@@ -90,40 +86,4 @@ export async function showFailureToast(
       },
     },
   });
-}
-
-/** Empty state shown by every view command when there is no session yet. */
-export function SignedOutView(): React.JSX.Element {
-  return (
-    <List>
-      <List.EmptyView
-        icon={Icon.Key}
-        title="Not signed in"
-        description="Pair this Mac with your tracktime account to start tracking from Raycast."
-        actions={
-          <ActionPanel>
-            <Action
-              title="Sign in to Tracktime"
-              icon={Icon.Key}
-              onAction={() => {
-                void launchCommand({
-                  name: "sign-in",
-                  type: LaunchType.UserInitiated,
-                });
-              }}
-            />
-            <Action.OpenInBrowser
-              title="Open Web App"
-              url={webLink("/track")}
-            />
-            <Action
-              title="Open Extension Preferences"
-              icon={Icon.Gear}
-              onAction={openExtensionPreferences}
-            />
-          </ActionPanel>
-        }
-      />
-    </List>
-  );
 }

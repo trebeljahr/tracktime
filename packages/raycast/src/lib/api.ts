@@ -10,15 +10,12 @@ import {
   createApiClient,
   deviceTimeZone,
   type ApiClient,
-  type CatalogRemoveResult,
   type Client,
   type DetailedEntry,
   type DetailedFavorite,
   type Project,
   type QuickStart,
-  type RecentEntry,
   type Tag,
-  type TagRemoveResult,
   type Task,
   type TimeEntry,
   type ResolvedSettings,
@@ -141,7 +138,6 @@ export type Tracktime = {
    */
   startQuick(quick: QuickStart): Promise<TimeEntry>;
   favorites(): Promise<DetailedFavorite[]>;
-  recents(input?: { limit?: number; days?: number }): Promise<RecentEntry[]>;
   addFavorite(quick: QuickStart): Promise<DetailedFavorite>;
   removeFavorite(id: string): Promise<{ success: true; id: string }>;
   list(input: ListInput): Promise<{
@@ -163,28 +159,23 @@ export type Tracktime = {
   tags(options?: { includeArchived?: boolean }): Promise<TagWithStats[]>;
   clients(options?: { includeArchived?: boolean }): Promise<Client[]>;
 
+  /**
+   * Catalog rows are created and renamed from the pickers that need them, and
+   * nothing else. Archiving, deleting and reordering are web app work — see
+   * the extension's README — so the wrappers for them are deliberately absent
+   * rather than dead.
+   */
   createClient(input: CreateClientInput): Promise<Client>;
   updateClient(input: UpdateClientInput): Promise<Client>;
-  /** Omitting `archived` archives; pass false to bring one back. */
-  archiveClient(id: string, archived?: boolean): Promise<Client>;
-  /** Deletes. Projects keep their time and lose the client reference. */
-  removeClient(id: string): Promise<CatalogRemoveResult>;
 
   createProject(input: CreateProjectInput): Promise<Project>;
   updateProject(input: UpdateProjectInput): Promise<Project>;
-  archiveProject(id: string, archived?: boolean): Promise<Project>;
-  /** Deletes, taking its tasks with it. Entries keep their time. */
-  removeProject(id: string): Promise<CatalogRemoveResult>;
 
   createTask(input: CreateTaskInput): Promise<Task>;
   updateTask(input: UpdateTaskInput): Promise<Task>;
-  archiveTask(id: string, archived?: boolean): Promise<Task>;
-  removeTask(id: string): Promise<CatalogRemoveResult>;
 
   createTag(input: CreateTagInput): Promise<Tag>;
   updateTag(input: UpdateTagInput): Promise<Tag>;
-  /** Archives instead of deleting when the tag is still on tracked time. */
-  removeTag(id: string): Promise<TagRemoveResult>;
 
   settings(): Promise<ResolvedSettings>;
 };
@@ -221,9 +212,6 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
     ),
 
   favorites: () => client.query<DetailedFavorite[]>("favorites.list"),
-
-  recents: (input) =>
-    client.query<RecentEntry[]>("entries.recent", input ?? {}),
 
   addFavorite: (quick) =>
     client.mutate<DetailedFavorite>("favorites.create", { ...quick, originId }),
@@ -275,35 +263,21 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
     client.mutate<Client>("clients.create", { ...input, originId }),
   updateClient: (input) =>
     client.mutate<Client>("clients.update", { ...input, originId }),
-  archiveClient: (id, archived) =>
-    client.mutate<Client>("clients.archive", { id, archived, originId }),
-  removeClient: (id) =>
-    client.mutate<CatalogRemoveResult>("clients.remove", { id, originId }),
 
   createProject: (input) =>
     client.mutate<Project>("projects.create", { ...input, originId }),
   updateProject: (input) =>
     client.mutate<Project>("projects.update", { ...input, originId }),
-  archiveProject: (id, archived) =>
-    client.mutate<Project>("projects.archive", { id, archived, originId }),
-  removeProject: (id) =>
-    client.mutate<CatalogRemoveResult>("projects.remove", { id, originId }),
 
   createTask: (input) =>
     client.mutate<Task>("tasks.create", { ...input, originId }),
   updateTask: (input) =>
     client.mutate<Task>("tasks.update", { ...input, originId }),
-  archiveTask: (id, archived) =>
-    client.mutate<Task>("tasks.archive", { id, archived, originId }),
-  removeTask: (id) =>
-    client.mutate<CatalogRemoveResult>("tasks.remove", { id, originId }),
 
   createTag: (input) =>
     client.mutate<Tag>("tags.create", { ...input, originId }),
   updateTag: (input) =>
     client.mutate<Tag>("tags.update", { ...input, originId }),
-  removeTag: (id) =>
-    client.mutate<TagRemoveResult>("tags.remove", { id, originId }),
 
   settings: () => client.query<ResolvedSettings>("settings.get"),
 });

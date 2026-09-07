@@ -311,10 +311,12 @@ into an empty one after the database it came from is gone.
 
 ### Raycast extension
 
-`packages/raycast` is a Raycast extension: a macOS menu bar timer, a live
-`Timer` view that ticks by the second, commands to start, stop, toggle, browse
-and edit entries, and full catalog CRUD (`projects`, `clients`, `tags`, with
-tasks inside a project).
+`packages/raycast` is a Raycast extension with a deliberately small surface —
+**four** commands: `menu-bar` (the macOS menu bar timer), `timer` (the live view
+that ticks by the second and is *both* start and stop), `entries` ("Show All
+Time"), and `open-dashboard`. Everything else — reports, invoices, the calendar,
+catalog curation — is web app work, reached in one keystroke rather than
+reimplemented as a launcher command.
 
 ```bash
 pnpm dev:raycast                      # builds @starter/core, then `ray develop`
@@ -330,9 +332,23 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   `Authorization: Bearer <token>` with `x-tracktime-client: tracktime-raycast`.
 - `raycast-env.d.ts` is generated from `package.json` by `ray build` and is
   committed, so `pnpm typecheck` works without Raycast installed.
-- Catalog forms live in `src/components/catalog/` and are pushed from both the
-  management commands and the timer forms (⌘⇧P/⌘⇧T/⌘⇧G), each calling back with
-  the created row so the picker that opened it can select it. The color palette
+- Adding a command is the change to argue about, not adding a feature to one.
+  Raycast has no runtime visibility control — `updateCommandMetadata` reaches
+  only the *running* command's own subtitle, and background launches are limited
+  to `no-view` and menu bar modes — so a "Stop Timer" command is listed whether
+  or not anything is running. `timer` therefore adapts on open (Stop is the
+  primary action while a timer runs, the start form when none does) and carries
+  `keywords` so "start" and "stop" still find it. Continuous state belongs in
+  the menu bar, which is the one surface that can hold it.
+- Pairing has no command: `components/signed-out.tsx` pushes `components/
+  sign-in.tsx` from the empty state every view shows while signed out, and
+  ⌘⇧A in `timer` reopens it to see the account or sign out. Keep the push —
+  `SignIn` opens the approval page in a browser on mount, which is helpful when
+  asked for and rude when a list merely failed to load.
+- Catalog forms live in `src/components/catalog/` and are pushed from the timer
+  and edit forms (⌘⇧P/⌘⇧T/⌘⇧G), each calling back with the created row so the
+  picker that opened it can select it. Creating a row mid-timer stays; browsing
+  and curating one does not. The color palette
   is `CATALOG_COLORS` in `@starter/shared` — the same list the server assigns
   from and the web picker renders, so a color picked in one client is a color
   the next one can name.

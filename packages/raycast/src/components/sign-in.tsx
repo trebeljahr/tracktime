@@ -20,15 +20,15 @@ import {
   getStoredSession,
   signOut,
   storeSession,
-} from "./lib/auth.js";
+} from "../lib/auth.js";
 import {
   apiUrl,
   hostLabel,
   isDevBuild,
   webLink,
   webUrl,
-} from "./lib/preferences.js";
-import { describeFailure, refreshMenuBar } from "./lib/ui.js";
+} from "../lib/preferences.js";
+import { describeFailure, refreshMenuBar } from "../lib/ui.js";
 
 /**
  * RFC 8628 device flow.
@@ -44,7 +44,7 @@ type Phase =
   | { kind: "pairing"; authorization: DeviceAuthorization }
   | { kind: "failed"; message: string };
 
-export default function SignIn(): React.JSX.Element {
+export function SignIn(): React.JSX.Element {
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
   const [attempt, setAttempt] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -133,8 +133,8 @@ export default function SignIn(): React.JSX.Element {
           "",
           "Raycast can start, stop and edit your timers.",
           "",
-          "Run **Timer** once to put the clock in the menu bar, and give",
-          "**Toggle Timer** a hotkey in Raycast Settings → Extensions.",
+          "Run **Timer Menu Bar** once to put the clock in the menu bar, and",
+          "give **Timer** a hotkey in Raycast Settings → Extensions.",
           "",
           "This session appears as **Raycast** under Settings → Devices in the",
           "web app — sign it out there to revoke it.",

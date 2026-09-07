@@ -27,24 +27,10 @@ declare namespace Preferences {
 }
   /** Preferences accessible in the `timer` command */
   export type Timer = ExtensionPreferences & {}
-  /** Preferences accessible in the `start-timer` command */
-  export type StartTimer = ExtensionPreferences & {}
-  /** Preferences accessible in the `start-favorite` command */
-  export type StartFavorite = ExtensionPreferences & {}
-  /** Preferences accessible in the `stop-timer` command */
-  export type StopTimer = ExtensionPreferences & {}
-  /** Preferences accessible in the `toggle-timer` command */
-  export type ToggleTimer = ExtensionPreferences & {}
   /** Preferences accessible in the `entries` command */
   export type Entries = ExtensionPreferences & {}
-  /** Preferences accessible in the `projects` command */
-  export type Projects = ExtensionPreferences & {}
-  /** Preferences accessible in the `clients` command */
-  export type Clients = ExtensionPreferences & {}
-  /** Preferences accessible in the `tags` command */
-  export type Tags = ExtensionPreferences & {}
-  /** Preferences accessible in the `sign-in` command */
-  export type SignIn = ExtensionPreferences & {}
+  /** Preferences accessible in the `open-dashboard` command */
+  export type OpenDashboard = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -52,23 +38,9 @@ declare namespace Arguments {
   export type MenuBar = {}
   /** Arguments passed to the `timer` command */
   export type Timer = {}
-  /** Arguments passed to the `start-timer` command */
-  export type StartTimer = {}
-  /** Arguments passed to the `start-favorite` command */
-  export type StartFavorite = {}
-  /** Arguments passed to the `stop-timer` command */
-  export type StopTimer = {}
-  /** Arguments passed to the `toggle-timer` command */
-  export type ToggleTimer = {}
   /** Arguments passed to the `entries` command */
   export type Entries = {}
-  /** Arguments passed to the `projects` command */
-  export type Projects = {}
-  /** Arguments passed to the `clients` command */
-  export type Clients = {}
-  /** Arguments passed to the `tags` command */
-  export type Tags = {}
-  /** Arguments passed to the `sign-in` command */
-  export type SignIn = {}
+  /** Arguments passed to the `open-dashboard` command */
+  export type OpenDashboard = {}
 }
 
