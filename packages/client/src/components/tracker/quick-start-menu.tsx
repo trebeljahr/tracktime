@@ -223,13 +223,16 @@ export function QuickStartMenu({
         <Button
           type="button"
           variant="ghost"
-          className="h-10 shrink-0 gap-1.5 px-2 text-muted-foreground"
+          className="h-8 shrink-0 gap-1.5 px-2 text-muted-foreground"
           aria-label="Quick start"
           title="Start something you tracked before"
           data-testid="quick-start-trigger"
         >
           <Zap className="size-4" />
-          <span className="hidden sm:inline">Quick start</span>
+          {/* On its own line the label is never the thing competing for room,
+              so it stays even on a phone, where an unlabelled bolt was the
+              least guessable control on the bar. */}
+          <span>Quick start</span>
         </Button>
       </DropdownMenuTrigger>
 

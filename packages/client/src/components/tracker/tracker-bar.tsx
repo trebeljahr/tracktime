@@ -219,11 +219,19 @@ export function TrackerBar(): React.JSX.Element {
       data-testid="tracker-bar"
       data-running={isRunning ? "true" : "false"}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        {/* Was a rail of chips above this row. Hidden while a timer runs,
-            where it would only offer to stop this one and start another. */}
-        {isRunning ? null : <QuickStartMenu mutations={mutations} />}
+      {/* Its own line above the composer. Sharing the row meant it was the
+          first thing before the description field and shifted every control
+          after it by its own width; on a line of its own the composer row
+          starts at the same place whether or not there is anything to quick
+          start. Hidden while a timer runs, where it would only offer to stop
+          this one and start another. */}
+      {isRunning ? null : (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <QuickStartMenu mutations={mutations} />
+        </div>
+      )}
 
+      <div className="flex flex-wrap items-center gap-2">
         <Input
           value={description}
           autoFocus
