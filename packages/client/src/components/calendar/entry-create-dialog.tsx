@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { emptyEntryFields } from "@starter/core";
 import { parseTimeOfDay } from "@starter/shared";
 
 import { Button } from "@/components/ui/button";
@@ -14,8 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { ProjectPicker } from "@/components/project-picker";
+import { EntryFieldsEditor } from "@/components/entry-fields/entry-fields-editor";
+import { useEntryFields } from "@/components/entry-fields/use-entry-fields";
 import { toast } from "@/components/ui/sonner";
 import { formatDayLabel, useFormatSettings } from "@/lib/format";
 import type { CalendarActions } from "./use-calendar-entries";
@@ -43,19 +44,14 @@ export function EntryCreateDialog({
 }: EntryCreateDialogProps): React.JSX.Element {
   const format = useFormatSettings();
 
-  const [description, setDescription] = React.useState("");
-  const [projectId, setProjectId] = React.useState<string | null>(null);
-  const [billable, setBillable] = React.useState(false);
+  const { fields, setFields } = useEntryFields(emptyEntryFields, draft);
   const [start, setStart] = React.useState("");
   const [end, setEnd] = React.useState("");
 
-  // A fresh draft resets the form; editing mid-draft is never clobbered.
+  // A fresh draft resets the times too; editing mid-draft is never clobbered.
   const [lastDraft, setLastDraft] = React.useState<CreateDraft | null>(null);
   if (draft !== null && lastDraft !== draft) {
     setLastDraft(draft);
-    setDescription("");
-    setProjectId(null);
-    setBillable(false);
     setStart(format.clock(draft.start));
     setEnd(format.clock(draft.end));
   }
@@ -74,10 +70,7 @@ export function EntryCreateDialog({
     }
 
     actions.create({
-      description,
-      projectId,
-      taskId: null,
-      billable,
+      ...fields,
       start: startIso,
       end: endIso,
     });
@@ -100,35 +93,15 @@ export function EntryCreateDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="calendar-create-description">Description</Label>
-            <Input
-              id="calendar-create-description"
-              data-testid="calendar-create-description"
-              autoFocus
-              value={description}
-              placeholder="What are you working on?"
-              onChange={(event) => {
-                setDescription(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  submit();
-                }
-              }}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Project</Label>
-            <ProjectPicker
-              value={projectId}
-              onChange={setProjectId}
-              className="w-full"
-              testId="calendar-create-project"
-            />
-          </div>
+          <EntryFieldsEditor
+            value={fields}
+            onChange={setFields}
+            autoFocus
+            descriptionPlaceholder="What are you working on?"
+            onSubmit={submit}
+            idPrefix="calendar-create"
+            testIdPrefix="calendar-create"
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -155,16 +128,6 @@ export function EntryCreateDialog({
                 }}
               />
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Switch
-              id="calendar-create-billable"
-              data-testid="calendar-create-billable"
-              checked={billable}
-              onCheckedChange={setBillable}
-            />
-            <Label htmlFor="calendar-create-billable">Billable</Label>
           </div>
         </div>
 

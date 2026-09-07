@@ -242,6 +242,22 @@ describe("inverting a patch", () => {
     expect(isNoopPatch(entry(), {})).toBe(true);
   });
 
+  // Tag sets are arrays, so identity comparison would call every re-pick a
+  // change and fill the undo stack with steps that reverse nothing.
+  it("compares tag sets by value", () => {
+    expect(isNoopPatch(entry(), { tagIds: ["tag-1"] })).toBe(true);
+    expect(isNoopPatch(entry(), { tagIds: ["tag-2"] })).toBe(false);
+    expect(isNoopPatch(entry(), { tagIds: [] })).toBe(false);
+  });
+
+  it("inverts a tag change back to the set the entry carried", () => {
+    const before = entry({ tagIds: ["tag-1", "tag-2"] });
+    const undo = inversePatch(before, { tagIds: ["tag-3"] });
+    expect(undo).toEqual({ tagIds: ["tag-1", "tag-2"] });
+    // Copied, not aliased: the step outlives the cached entry it was read from.
+    expect(undo.tagIds).not.toBe(before.tagIds);
+  });
+
   it("treats an edit that stops a running timer as irreversible", () => {
     const running = entry({ end: null });
     expect(restartsTimer(running, { end: "2026-09-02T10:00:00.000Z" })).toBe(
@@ -264,6 +280,7 @@ describe("inverting a patch", () => {
     expect(patchLabel({ description: "x" })).toBe("description change");
     expect(patchLabel({ projectId: null })).toBe("project change");
     expect(patchLabel({ billable: false })).toBe("billable change");
+    expect(patchLabel({ tagIds: ["tag-2"] })).toBe("tag change");
   });
 });
 

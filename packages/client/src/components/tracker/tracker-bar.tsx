@@ -1,15 +1,15 @@
 "use client";
 
 import * as React from "react";
-import { Building2, CloudOff, Play, Plus, Square, WifiOff } from "lucide-react";
+import { CloudOff, Play, Plus, Square, WifiOff } from "lucide-react";
+import type { EntryFields } from "@starter/core";
 import { formatDuration } from "@starter/shared";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { ProjectPicker } from "@/components/project-picker";
-import { TaskPicker } from "@/components/task-picker";
+import { ProjectTaskPicker } from "@/components/entry-fields/project-task-picker";
 import { TagPicker } from "@/components/tags/tag-picker";
 import { BillableGlyph } from "@/components/tracker/billable-glyph";
 import { ManualEntryDialog } from "@/components/tracker/manual-entry-dialog";
@@ -106,12 +106,6 @@ export function TrackerBar(): React.JSX.Element {
     };
   }, [running, elapsedSec]);
 
-  // Read off the picked project rather than stored: a client is never chosen
-  // on the bar, so there is no second copy of it that could drift.
-  const clientName =
-    projects.data?.find((candidate) => candidate.id === projectId)?.clientName ??
-    null;
-
   const projectBillableDefault = React.useCallback(
     (nextProjectId: string | null): boolean => {
       if (nextProjectId === null) return false;
@@ -123,33 +117,32 @@ export function TrackerBar(): React.JSX.Element {
     [projects.data]
   );
 
-  const handleProjectChange = React.useCallback(
-    (nextProjectId: string | null): void => {
-      const projectChanged = nextProjectId !== projectId;
-      setProjectId(nextProjectId);
-      // A task belongs to one project, so it cannot survive a project change.
-      if (projectChanged) setTaskId(null);
-      if (isRunning && running) {
-        mutations.updateEntry({
-          id: running.id,
-          projectId: nextProjectId,
-          ...(projectChanged ? { taskId: null } : {}),
-        });
-        return;
-      }
-      setBillable(projectBillableDefault(nextProjectId));
-    },
-    [isRunning, mutations, projectBillableDefault, projectId, running]
+  // What the shared control reads and writes. The bar keeps the five values
+  // in separate state because the description and the billable flag have
+  // behaviour of their own here (Escape restores, the project default decides
+  // the flag), so this assembles the view rather than owning it.
+  const fields: EntryFields = React.useMemo(
+    () => ({ description, projectId, taskId, billable, tagIds }),
+    [billable, description, projectId, tagIds, taskId]
   );
 
-  const handleTaskChange = React.useCallback(
-    (nextTaskId: string | null): void => {
-      setTaskId(nextTaskId);
+  const applyFields = React.useCallback(
+    (next: EntryFields, patch: Partial<EntryFields>): void => {
+      setProjectId(next.projectId);
+      setTaskId(next.taskId);
+
+      // A running timer is edited in place; the composer is only prepared.
       if (isRunning && running) {
-        mutations.updateEntry({ id: running.id, taskId: nextTaskId });
+        mutations.updateEntry({ id: running.id, ...patch });
+        return;
+      }
+      // Picking a project adopts its billable default — but only for a timer
+      // that has not started, where nothing has been decided yet.
+      if (patch.projectId !== undefined) {
+        setBillable(projectBillableDefault(next.projectId));
       }
     },
-    [isRunning, mutations, running]
+    [isRunning, mutations, projectBillableDefault, running]
   );
 
   const handleTagsChange = React.useCallback(
@@ -257,35 +250,16 @@ export function TrackerBar(): React.JSX.Element {
           data-testid="tracker-description"
         />
 
-        <ProjectPicker
-          value={projectId}
-          onChange={handleProjectChange}
-          className="h-10 border-0 shadow-none"
-          testId="tracker-project"
-        />
-
         {/* The client is a property of the project, not a field of its own —
-            showing it read-only is what stops "Redesign" from being ambiguous
-            when two clients both have one, without adding a fourth picker to
-            a bar that is already wide. */}
-        {clientName === null ? null : (
-          <span
-            className="hidden max-w-32 shrink items-center gap-1 truncate text-xs text-muted-foreground lg:inline-flex"
-            title={`Client: ${clientName}`}
-            data-testid="tracker-client"
-          >
-            <Building2 className="size-3 shrink-0" />
-            <span className="truncate">{clientName}</span>
-          </span>
-        )}
-
-        <TaskPicker
-          projectId={projectId}
-          value={taskId}
-          onChange={handleTaskChange}
-          onProjectChange={handleProjectChange}
-          className="h-10 border-0 shadow-none"
-          testId="tracker-task"
+            it rides along inside this control, shown read-only, which is what
+            stops "Redesign" from being ambiguous when two clients both have
+            one without adding a picker to a bar that is already wide. */}
+        <ProjectTaskPicker
+          value={fields}
+          onChange={applyFields}
+          bare
+          controlClassName="h-10"
+          testIdPrefix="tracker"
         />
 
         <TagPicker

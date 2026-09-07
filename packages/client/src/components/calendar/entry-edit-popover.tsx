@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Trash2 } from "lucide-react";
+import type { EntryFields } from "@starter/core";
 import { parseTimeOfDay, type DetailedEntry } from "@starter/shared";
 
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { PopoverContent } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { ProjectPicker } from "@/components/project-picker";
+import { EntryFieldsEditor } from "@/components/entry-fields/entry-fields-editor";
+import { useWriteThroughEntryFields } from "@/components/entry-fields/use-entry-fields";
 import { toast } from "@/components/ui/sonner";
 import { useFormatSettings } from "@/lib/format";
 import type { CalendarActions } from "./use-calendar-entries";
@@ -37,7 +39,17 @@ export function EntryEditPopover({
   const isRunning = entry.end === null;
   const endIso = entry.end ?? new Date(nowMs).toISOString();
 
-  const [description, setDescription] = React.useState(entry.description);
+  const commitFields = React.useCallback(
+    (patch: Partial<EntryFields>): void => {
+      actions.update(entry.id, patch);
+    },
+    [actions, entry.id]
+  );
+  const { fields, onChange, commitDescription } = useWriteThroughEntryFields(
+    entry,
+    commitFields
+  );
+
   const [start, setStart] = React.useState(() => format.clock(entry.start));
   const [end, setEnd] = React.useState(() => format.clock(endIso));
 
@@ -45,17 +57,11 @@ export function EntryEditPopover({
   const [lastEntry, setLastEntry] = React.useState(entry);
   if (lastEntry !== entry) {
     setLastEntry(entry);
-    setDescription(entry.description);
     setStart(format.clock(entry.start));
     setEnd(format.clock(endIso));
   }
 
   const durationSec = format.entryDuration(entry, nowMs);
-
-  const commitDescription = (): void => {
-    if (description === entry.description) return;
-    actions.update(entry.id, { description });
-  };
 
   const commitTime = (field: "start" | "end", raw: string): void => {
     const anchor = field === "start" ? entry.start : endIso;
@@ -102,39 +108,17 @@ export function EntryEditPopover({
         event.preventDefault();
       }}
     >
-      <div className="space-y-1.5">
-        <Label htmlFor={`calendar-edit-description-${entry.id}`}>
-          Description
-        </Label>
-        <Input
-          id={`calendar-edit-description-${entry.id}`}
-          data-testid="calendar-edit-description"
-          value={description}
-          placeholder="What are you working on?"
-          onChange={(event) => {
-            setDescription(event.target.value);
-          }}
-          onBlur={commitDescription}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commitDescription();
-            }
-          }}
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <Label>Project</Label>
-        <ProjectPicker
-          value={entry.projectId}
-          onChange={(projectId) => {
-            actions.update(entry.id, { projectId });
-          }}
-          className="w-full"
-          testId="calendar-edit-project"
-        />
-      </div>
+      {/* Billable lives with the duration below, next to the money it
+          decides, so it is excluded here rather than rendered twice. */}
+      <EntryFieldsEditor
+        value={fields}
+        onChange={onChange}
+        fields={["description", "projectTask", "tags"]}
+        descriptionPlaceholder="What are you working on?"
+        onDescriptionCommit={commitDescription}
+        idPrefix={`calendar-edit-${entry.id}`}
+        testIdPrefix="calendar-edit"
+      />
 
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1.5">

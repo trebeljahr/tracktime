@@ -9,7 +9,11 @@ import {
   zoneLabel,
   type DetailedEntry,
 } from "@starter/shared";
-import { deviceTimeZone } from "@starter/core";
+import {
+  deviceTimeZone,
+  emptyEntryFields,
+  entryFieldsFrom,
+} from "@starter/core";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,10 +26,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { DurationInput } from "@/components/duration-input";
-import { ProjectPicker } from "@/components/project-picker";
-import { TagPicker } from "@/components/tags/tag-picker";
+import { EntryFieldsEditor } from "@/components/entry-fields/entry-fields-editor";
+import { useEntryFields } from "@/components/entry-fields/use-entry-fields";
 import { TimeField } from "@/components/tracker/time-field";
 import type { EntryMutations } from "@/components/tracker/use-entry-mutations";
 import { useFormatSettings } from "@/lib/format";
@@ -54,10 +57,10 @@ export function EntryEditDialog({
 }: EntryEditDialogProps): React.JSX.Element {
   const format = useFormatSettings();
 
-  const [description, setDescription] = React.useState("");
-  const [projectId, setProjectId] = React.useState<string | null>(null);
-  const [billable, setBillable] = React.useState(false);
-  const [tagIds, setTagIds] = React.useState<string[]>([]);
+  const { fields, setFields } = useEntryFields(
+    () => (entry === null ? emptyEntryFields() : entryFieldsFrom(entry)),
+    entry?.id ?? null
+  );
   const [start, setStart] = React.useState<string>(() =>
     new Date().toISOString()
   );
@@ -71,16 +74,13 @@ export function EntryEditDialog({
     entry !== null &&
     !isSameZone(entryZone, deviceTimeZone(), Date.parse(entry.start));
 
-  // Reseed whenever a different entry is opened.
+  // Reseed the times whenever a different entry is opened. The fields do the
+  // same, keyed on the id, inside `useEntryFields`.
   const entryId = entry?.id ?? null;
   const [lastEntryId, setLastEntryId] = React.useState<string | null>(null);
   if (lastEntryId !== entryId) {
     setLastEntryId(entryId);
     if (entry !== null) {
-      setDescription(entry.description);
-      setProjectId(entry.projectId);
-      setBillable(entry.billable);
-      setTagIds(entry.tagIds);
       setStart(entry.start);
       setEnd(entry.end ?? new Date().toISOString());
     }
@@ -99,26 +99,13 @@ export function EntryEditDialog({
 
     mutations.updateEntry({
       id: entry.id,
-      description,
-      projectId,
-      billable,
-      tagIds,
+      ...fields,
       start,
       // A running entry keeps running unless it already had an end.
       end: entry.end === null ? null : safeEnd,
     });
     onClose();
-  }, [
-    billable,
-    description,
-    end,
-    entry,
-    mutations,
-    onClose,
-    projectId,
-    start,
-    tagIds,
-  ]);
+  }, [end, entry, fields, mutations, onClose, start]);
 
   return (
     <Dialog
@@ -136,48 +123,12 @@ export function EntryEditDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="entry-edit-description">Description</Label>
-            <Input
-              id="entry-edit-description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="What did you work on?"
-              data-testid="entry-edit-description"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Project</Label>
-            <ProjectPicker
-              value={projectId}
-              onChange={setProjectId}
-              className="w-full"
-              testId="entry-edit-project"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Tags</Label>
-            <TagPicker
-              value={tagIds}
-              onChange={setTagIds}
-              variant="count"
-              maxChips={4}
-              className="w-full"
-              testId="entry-edit-tags"
-            />
-          </div>
-
-          <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-            <Label htmlFor="entry-edit-billable">Billable</Label>
-            <Switch
-              id="entry-edit-billable"
-              checked={billable}
-              onCheckedChange={setBillable}
-              data-testid="entry-edit-billable"
-            />
-          </div>
+          <EntryFieldsEditor
+            value={fields}
+            onChange={setFields}
+            idPrefix="entry-edit"
+            testIdPrefix="entry-edit"
+          />
 
           {foreignZone ? (
             <p

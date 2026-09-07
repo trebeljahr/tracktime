@@ -20,7 +20,11 @@ import {
   zoneLabel,
   type DetailedEntry,
 } from "@starter/shared";
-import { deviceTimeZone } from "@starter/core";
+import {
+  deviceTimeZone,
+  entryFieldsFrom,
+  type EntryFields,
+} from "@starter/core";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -31,7 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { DurationInput } from "@/components/duration-input";
-import { ProjectPicker } from "@/components/project-picker";
+import { ProjectTaskPicker } from "@/components/entry-fields/project-task-picker";
 import { TagPicker } from "@/components/tags/tag-picker";
 import { BillableGlyph } from "@/components/tracker/billable-glyph";
 import { LiveDuration } from "@/components/tracker/live-duration";
@@ -77,6 +81,17 @@ function EntryRowImpl({
   const syncing = isTempId(entry.id);
 
   const [editingDescription, setEditingDescription] = React.useState(false);
+  // The row is already write-through and re-renders straight off the query
+  // cache, so the pickers read the entry itself rather than a local copy —
+  // there is nothing to buffer between a pick and the optimistic update.
+  const fields = React.useMemo(() => entryFieldsFrom(entry), [entry]);
+  const applyFields = React.useCallback(
+    (_next: EntryFields, patch: Partial<EntryFields>): void => {
+      mutations.updateEntry({ id: entry.id, ...patch });
+    },
+    [entry.id, mutations]
+  );
+
   const [draft, setDraft] = React.useState(entry.description);
 
   const commitDescription = React.useCallback((): void => {
@@ -152,12 +167,12 @@ function EntryRowImpl({
       className={cn(
         "flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 last:border-b-0 hover:bg-muted/40",
         // Every row shares ONE column template, so description, project,
-        // client, tags and the times line up down the list instead of each
-        // row packing its own width. Track sizes are `fr` or fixed — never
-        // `auto`/`min-content`, which resolve against a single row's content
-        // and would bring the ragged columns straight back.
+        // client, task, tags and the times line up down the list instead of
+        // each row packing its own width. Track sizes are `fr` or fixed —
+        // never `auto`/`min-content`, which resolve against a single row's
+        // content and would bring the ragged columns straight back.
         //
-        // Two templates for the same TEN items: the fixed part of the row
+        // Two templates for the same ELEVEN items: the fixed part of the row
         // (times, duration, amount) costs ~23rem whatever the viewport, so
         // below `xl` the client and the amount collapse to zero-width tracks
         // rather than being hidden — `display: none` would drop a grid item
@@ -165,8 +180,8 @@ function EntryRowImpl({
         // 1140px rather than `lg`, because at 1024 what is left over is so
         // thin the project reads "A…"; below it the row stays a wrapping flex
         // line, ragged but legible.
-        "min-[1140px]:grid min-[1140px]:grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_0px_minmax(5.5rem,1.1fr)_2rem_12.5rem_5.5rem_0px_2rem_2rem]",
-        "xl:grid-cols-[minmax(0,2fr)_minmax(0,1.7fr)_minmax(0,0.8fr)_minmax(5.5rem,1fr)_2rem_13rem_5.5rem_4.5rem_2rem_2rem]",
+        "min-[1140px]:grid min-[1140px]:grid-cols-[minmax(0,1.8fr)_minmax(0,1.4fr)_0px_minmax(0,1.2fr)_minmax(5rem,1fr)_2rem_12.5rem_5.5rem_0px_2rem_2rem]",
+        "xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1.5fr)_minmax(0,0.8fr)_minmax(0,1.2fr)_minmax(5.5rem,1fr)_2rem_13rem_5.5rem_4.5rem_2rem_2rem]",
         nested && "pl-10",
         // The one row that is still happening. A 5% tint was not enough to
         // find it in a day of twelve rows, so it also gets an accent edge and
@@ -179,7 +194,7 @@ function EntryRowImpl({
         //
         // The edge is a pseudo-element rather than a border, and the badge
         // lives INSIDE the description cell: both column templates above name
-        // exactly ten tracks, so an eleventh grid item — or four pixels of
+        // exactly eleven tracks, so a twelfth grid item — or four pixels of
         // border — would knock this row's columns out of line with the rest.
         running &&
           "relative bg-destructive/[0.06] hover:bg-destructive/10 before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-destructive"
@@ -246,27 +261,22 @@ function EntryRowImpl({
         )}
       </div>
 
-      {/* Same picker as the tracker bar, create surfaces and all: filing a
-          past entry under a project that does not exist yet is exactly when
-          you need to make one, and sending that trip to the Projects screen
-          loses the row you were fixing. */}
-      <ProjectPicker
-        value={entry.projectId}
+      {/* Same coupled control as the tracker bar, the dialogs and the
+          calendar: filing a past entry under a project that does not exist
+          yet is exactly when you need to make one, and sending that trip to
+          the Projects screen loses the row you were fixing. `contents` keeps
+          project, client and task as three grid items of THIS row, so they
+          stay in the shared column template. */}
+      <ProjectTaskPicker
+        value={fields}
+        onChange={applyFields}
         disabled={syncing}
         size="sm"
-        className="h-8 w-full min-w-0 max-w-48 border-0 shadow-none min-[1140px]:max-w-none"
-        placeholder="No project"
-        testId="entry-project"
-        onChange={(projectId) =>
-          mutations.updateEntry({ id: entry.id, projectId })
-        }
+        bare
+        layout="contents"
+        controlClassName="h-8 w-full min-w-0 max-w-48 min-[1140px]:max-w-none"
+        testIdPrefix="entry"
       />
-
-      {/* Rendered even when empty: `display: none` removes a grid item, and a
-          client-less row would pull every later column one track left. */}
-      <span className="hidden min-w-0 truncate text-xs text-muted-foreground min-[1140px]:block">
-        {entry.clientName ?? ""}
-      </span>
 
       {/* The chips ARE the trigger, so tagging costs one click and the row
           keeps its height however many tags it carries — the overflow

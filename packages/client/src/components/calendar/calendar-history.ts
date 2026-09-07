@@ -1,3 +1,4 @@
+import { sameTagIds } from "@starter/core";
 import type { DetailedEntry } from "@starter/shared";
 
 import type { EntryDraft, EntryPatch } from "./use-calendar-entries";
@@ -187,6 +188,7 @@ const PATCH_FIELDS = [
   "projectId",
   "taskId",
   "billable",
+  "tagIds",
   "start",
   "end",
 ] as const;
@@ -220,6 +222,11 @@ export const inversePatch = (
       case "billable":
         before.billable = entry.billable;
         break;
+      case "tagIds":
+        // Copied, not aliased: the step outlives the cache entry it was read
+        // from, and undo must restore the set as it was at this moment.
+        before.tagIds = [...entry.tagIds];
+        break;
       case "start":
         before.start = entry.start;
         break;
@@ -239,6 +246,9 @@ export const isNoopPatch = (
   PATCH_FIELDS.every((field) => {
     const next = patch[field];
     if (next === undefined) return true;
+    // Tag sets are arrays, so `===` would call every re-pick a change and fill
+    // the undo stack with steps that reverse nothing.
+    if (field === "tagIds") return sameTagIds(patch.tagIds ?? [], entry.tagIds);
     return next === entry[field];
   });
 
@@ -261,6 +271,7 @@ export const patchLabel = (patch: EntryPatch): string => {
   if (patch.projectId !== undefined || patch.taskId !== undefined) {
     return "project change";
   }
+  if (patch.tagIds !== undefined) return "tag change";
   if (patch.billable !== undefined) return "billable change";
   return "edit";
 };

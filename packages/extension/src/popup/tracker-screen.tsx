@@ -3,7 +3,10 @@ import {
   createId,
   deviceTimeZone,
   formatDuration,
+  withProject,
+  withTask,
   type Client,
+  type EntryFields,
   type IdleAnswer,
   type Project,
   type QuickStart,
@@ -289,25 +292,41 @@ export function TrackerScreen({
     void onUpdateRunning(patch);
   };
 
+  /**
+   * The five fields as `@starter/core` sees them, so the popup answers the
+   * project/task coupling with the same rules the web app does rather than a
+   * second implementation of them that can drift.
+   */
+  const fields: EntryFields = {
+    description,
+    projectId,
+    taskId,
+    billable,
+    tagIds,
+  };
+
   const selectProject = (next: string | null): void => {
-    const changed = next !== projectId;
-    setProjectId(next);
-    if (!changed) return;
-    // A task from the old project would be silently wrong against the new one.
-    setTaskId(null);
+    const updated = withProject(fields, next);
+    if (updated === fields) return;
+    setProjectId(updated.projectId);
+    // A task from the old project would be silently wrong against the new one,
+    // so `withProject` clears it and the patch carries both.
+    setTaskId(updated.taskId);
 
     if (running !== null) {
-      patchRunning({ projectId: next, taskId: null });
+      patchRunning({ projectId: updated.projectId, taskId: updated.taskId });
       return;
     }
     // Only a draft follows the project's default. Changing the project under a
     // running entry must not silently re-decide whether that time is billable.
-    setBillable(billableDefaultFor(state.projects, next));
+    setBillable(billableDefaultFor(state.projects, updated.projectId));
   };
 
   const selectTask = (next: string | null): void => {
-    setTaskId(next);
-    patchRunning({ taskId: next });
+    const updated = withTask(fields, next);
+    setTaskId(updated.taskId);
+    if (updated.projectId !== projectId) setProjectId(updated.projectId);
+    patchRunning({ taskId: updated.taskId, projectId: updated.projectId });
   };
 
   const selectTags = (next: string[]): void => {

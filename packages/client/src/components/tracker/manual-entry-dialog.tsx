@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { dayKeyInZone, rollEndAfterStart, withDayInZone } from "@starter/shared";
-import { deviceTimeZone } from "@starter/core";
+import { deviceTimeZone, entryFieldsFrom } from "@starter/core";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -15,11 +15,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { DurationInput } from "@/components/duration-input";
-import { ProjectPicker } from "@/components/project-picker";
-import { TaskPicker } from "@/components/task-picker";
-import { TagPicker } from "@/components/tags/tag-picker";
+import { EntryFieldsEditor } from "@/components/entry-fields/entry-fields-editor";
+import { useEntryFields } from "@/components/entry-fields/use-entry-fields";
 import { TimeField } from "@/components/tracker/time-field";
 import type { EntryMutations } from "@/components/tracker/use-entry-mutations";
 import { useFormatSettings } from "@/lib/format";
@@ -76,26 +74,20 @@ export function ManualEntryDialog({
   const format = useFormatSettings();
   const zone = deviceTimeZone();
 
-  const [description, setDescription] = React.useState(seed.description);
-  const [projectId, setProjectId] = React.useState(seed.projectId);
-  const [taskId, setTaskId] = React.useState(seed.taskId);
-  const [billable, setBillable] = React.useState(seed.billable);
-  const [tagIds, setTagIds] = React.useState(seed.tagIds);
-  const [range, setRange] = React.useState(defaultManualRange);
-
   // Reseed on each open rather than in an effect, so the very first paint
   // already shows the composer's values instead of the previous block's.
+  const seedRef = React.useRef(seed);
+  seedRef.current = seed;
+  const { fields, setFields } = useEntryFields(
+    () => entryFieldsFrom(seedRef.current),
+    open
+  );
+
+  const [range, setRange] = React.useState(defaultManualRange);
   const [wasOpen, setWasOpen] = React.useState(false);
   if (wasOpen !== open) {
     setWasOpen(open);
-    if (open) {
-      setDescription(seed.description);
-      setProjectId(seed.projectId);
-      setTaskId(seed.taskId);
-      setBillable(seed.billable);
-      setTagIds(seed.tagIds);
-      setRange(defaultManualRange());
-    }
+    if (open) setRange(defaultManualRange());
   }
 
   const seconds = Math.max(
@@ -103,38 +95,16 @@ export function ManualEntryDialog({
     Math.round((Date.parse(range.end) - Date.parse(range.start)) / 1000)
   );
 
-  const handleProjectChange = React.useCallback(
-    (nextProjectId: string | null): void => {
-      // A task belongs to one project, so it cannot survive a change.
-      if (nextProjectId !== projectId) setTaskId(null);
-      setProjectId(nextProjectId);
-    },
-    [projectId]
-  );
-
   const add = React.useCallback((): void => {
     // Roll a midnight-crossing end forward rather than clamping it: 23:30 to
     // 00:30 is an hour of work, and clamping would throw that away.
     mutations.createManualEntry({
-      description,
-      projectId,
-      taskId,
-      billable,
-      tagIds,
+      ...fields,
       start: range.start,
       end: rollEndAfterStart(range.start, range.end),
     });
     onOpenChange(false);
-  }, [
-    billable,
-    description,
-    mutations,
-    onOpenChange,
-    projectId,
-    range,
-    tagIds,
-    taskId,
-  ]);
+  }, [fields, mutations, onOpenChange, range]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -147,67 +117,14 @@ export function ManualEntryDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="manual-entry-description">Description</Label>
-            <Input
-              id="manual-entry-description"
-              value={description}
-              autoFocus
-              placeholder="What did you work on?"
-              onChange={(event) => setDescription(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  add();
-                }
-              }}
-              data-testid="manual-entry-description"
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <div className="flex-1 space-y-2">
-              <Label>Project</Label>
-              <ProjectPicker
-                value={projectId}
-                onChange={handleProjectChange}
-                className="w-full"
-                testId="manual-entry-project"
-              />
-            </div>
-            <div className="flex-1 space-y-2">
-              <Label>Task</Label>
-              <TaskPicker
-                projectId={projectId}
-                value={taskId}
-                onChange={setTaskId}
-                className="w-full"
-                testId="manual-entry-task"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Tags</Label>
-            <TagPicker
-              value={tagIds}
-              onChange={setTagIds}
-              variant="count"
-              maxChips={4}
-              className="w-full"
-              testId="manual-entry-tags"
-            />
-          </div>
-
-          <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-            <Label htmlFor="manual-entry-billable">Billable</Label>
-            <Switch
-              id="manual-entry-billable"
-              checked={billable}
-              onCheckedChange={setBillable}
-              data-testid="manual-entry-billable"
-            />
-          </div>
+          <EntryFieldsEditor
+            value={fields}
+            onChange={setFields}
+            autoFocus
+            onSubmit={add}
+            idPrefix="manual-entry"
+            testIdPrefix="manual-entry"
+          />
 
           <div className="space-y-2">
             <Label htmlFor="manual-entry-date">Date</Label>

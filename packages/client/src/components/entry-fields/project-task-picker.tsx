@@ -1,0 +1,223 @@
+"use client";
+
+import * as React from "react";
+import { Building2 } from "lucide-react";
+import { withProject, withTask, type EntryFields } from "@starter/core";
+
+import { ProjectPicker } from "@/components/project-picker";
+import { Label } from "@/components/ui/label";
+import { TaskPicker } from "@/components/task-picker";
+import { trpc } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
+
+/**
+ * The client of a project, or null when there is no project or no client.
+ *
+ * Read off the picked project rather than stored anywhere: a client is never
+ * chosen for an entry, so there is no second copy of it that could drift.
+ */
+export const useProjectClientName = (projectId: string | null): string | null => {
+  const projects = trpc.projects.list.useQuery({});
+  if (projectId === null) return null;
+  return (
+    projects.data?.find((candidate) => candidate.id === projectId)
+      ?.clientName ?? null
+  );
+};
+
+export type ProjectTaskPickerProps = {
+  value: EntryFields;
+  /**
+   * `patch` is exactly the fields that changed, ready to send to
+   * `entries.update` — which is why a project change arrives as
+   * `{ projectId, taskId: null }` rather than as two separate writes.
+   */
+  onChange: (next: EntryFields, patch: Partial<EntryFields>) => void;
+  /**
+   * "row" lays the three out inline. "contents" dissolves the wrapper with
+   * `display: contents`, so project, client and task become items of the
+   * CALLER's grid rather than of a box inside one cell of it. The entry list
+   * needs that: its rows share one column template so the columns line up
+   * down the whole list, which only works if each field is a grid item in its
+   * own right.
+   */
+  layout?: "row" | "contents";
+  /** Give each picker a visible label — the dialog form, not the bar. */
+  labelled?: boolean;
+  disabled?: boolean;
+  size?: "default" | "sm" | "lg";
+  /** Borderless controls, for the tracker bar and entry rows. */
+  bare?: boolean;
+  /**
+   * Extra classes for the two pickers themselves — height and width, when the
+   * caller's layout decides those. `contents` callers need it: their tracks
+   * are sized by the caller's grid, not by this component.
+   */
+  controlClassName?: string;
+  testIdPrefix: string;
+  className?: string;
+};
+
+/**
+ * Project and task, as one control rather than two that happen to sit
+ * together.
+ *
+ * They are coupled in both directions and neither coupling is optional:
+ *
+ *  - a task belongs to exactly one project, so changing the project CLEARS the
+ *    task in the same write. Sending the project alone is what made re-filing
+ *    a tasked entry fail with "Task does not belong to the given project" —
+ *    the server checks the pair, and every surface that shipped only a project
+ *    picker was quietly relying on the entry not having a task.
+ *  - creating a task from the picker can hand back a task filed under a
+ *    DIFFERENT project (the task dialog carries a project picker of its own),
+ *    so the project follows the task.
+ *
+ * Both rules live in `@starter/core` so the browser extension and the Raycast
+ * forms answer them the same way.
+ */
+export function ProjectTaskPicker({
+  value,
+  onChange,
+  layout = "row",
+  labelled = false,
+  disabled = false,
+  size = "default",
+  bare = false,
+  controlClassName,
+  testIdPrefix,
+  className,
+}: ProjectTaskPickerProps): React.JSX.Element {
+  const clientName = useProjectClientName(value.projectId);
+
+  const handleProject = React.useCallback(
+    (projectId: string | null): void => {
+      const next = withProject(value, projectId);
+      if (next === value) return;
+      onChange(next, { projectId: next.projectId, taskId: next.taskId });
+    },
+    [onChange, value]
+  );
+
+  const handleTask = React.useCallback(
+    (taskId: string | null): void => {
+      const next = withTask(value, taskId);
+      onChange(next, { taskId: next.taskId });
+    },
+    [onChange, value]
+  );
+
+  // A task created for another project drags the project with it, so the pair
+  // stays valid rather than being refused on save.
+  const handleTaskProject = React.useCallback(
+    (projectId: string): void => {
+      const next = { ...value, projectId };
+      onChange(next, { projectId });
+    },
+    [onChange, value]
+  );
+
+  const contents = layout === "contents";
+  const control = bare ? "border-0 shadow-none" : "w-full";
+
+  /**
+   * The client, read-only.
+   *
+   * Never a picker: a client owns projects, a project owns tasks, and an entry
+   * points at a project — so choosing one here would be a second source of
+   * truth that can disagree with the project's own client. Shown rather than
+   * chosen is what keeps "Redesign" unambiguous when two clients both have
+   * one.
+   *
+   * How much room it earns depends on where it is. In the caller's grid it
+   * owns a track that collapses to 0px on narrower viewports, so it must stay
+   * a rendered item whatever it says — `display: none` would drop it and slide
+   * every later column one track left. In the labelled form it sits under the
+   * project and says "No client" when there is none, which is information. On
+   * a bar competing for width it is neither, so it goes away entirely.
+   */
+  const client =
+    !contents && !labelled && clientName === null ? null : (
+      <span
+        className={cn(
+          "min-w-0 items-center gap-1 truncate text-xs text-muted-foreground",
+          contents
+            ? "hidden min-[1140px]:flex"
+            : labelled
+              ? "flex"
+              : "hidden max-w-32 shrink lg:inline-flex"
+        )}
+        title={clientName === null ? "No client" : `Client: ${clientName}`}
+        data-testid={`${testIdPrefix}-client`}
+      >
+        <Building2 className="size-3 shrink-0" aria-hidden />
+        <span className="truncate">{clientName ?? "No client"}</span>
+      </span>
+    );
+
+  const project = (
+    <ProjectPicker
+      value={value.projectId}
+      onChange={handleProject}
+      disabled={disabled}
+      size={size}
+      className={cn(control, !contents && !bare && "flex-1", controlClassName)}
+      testId={`${testIdPrefix}-project`}
+    />
+  );
+
+  const task = (
+    <TaskPicker
+      projectId={value.projectId}
+      value={value.taskId}
+      onChange={handleTask}
+      onProjectChange={handleTaskProject}
+      disabled={disabled}
+      size={size}
+      className={cn(control, !contents && !bare && "flex-1", controlClassName)}
+      testId={`${testIdPrefix}-task`}
+    />
+  );
+
+  // `display: contents` is the whole point: the caller laid out the tracks,
+  // and this component only decides what goes in them and how the three stay
+  // consistent with each other.
+  if (contents) {
+    return (
+      <>
+        {project}
+        {client}
+        {task}
+      </>
+    );
+  }
+
+  // The labelled form keeps the client under the project it belongs to, which
+  // is the only placement that reads as "this project's client" rather than as
+  // a third thing to pick.
+  if (labelled) {
+    return (
+      <div className={cn("flex flex-wrap gap-3", className)}>
+        <div className="min-w-48 flex-1 space-y-2">
+          <Label>Project</Label>
+          {project}
+          {client}
+        </div>
+        <div className="min-w-48 flex-1 space-y-2">
+          <Label>Task</Label>
+          {task}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn("flex min-w-0 flex-wrap items-center gap-2", className)}
+    >
+      {project}
+      {client}
+      {task}
+    </div>
+  );
+}

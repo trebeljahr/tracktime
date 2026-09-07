@@ -44,6 +44,8 @@ export type EntryPatch = {
   projectId?: string | null;
   taskId?: string | null;
   billable?: boolean;
+  /** Replaces the whole set, as `entries.update` does — omit to leave alone. */
+  tagIds?: string[];
   start?: string;
   end?: string | null;
 };
@@ -204,6 +206,7 @@ export const useCalendarActions = (
                     ? entry.taskId
                     : variables.taskId ?? null,
                 billable: variables.billable ?? entry.billable,
+                tagIds: variables.tagIds ?? entry.tagIds,
                 start,
                 end,
                 durationSec,
