@@ -21,7 +21,9 @@ import {
   OFFLINE_QUEUE_STORAGE_KEY,
   type ApiClient,
   type Client,
+  type DetailedEntry,
   type DetailedFavorite,
+  type DeviceSession,
   type KeyValueStorage,
   type OfflineOp,
   type OfflinePayloadMap,
@@ -38,7 +40,7 @@ import {
   type ResolvedSettings,
 } from "@starter/core";
 import { chromeStorage, localStorageArea } from "../lib/chrome-storage";
-import type { SessionSource } from "../lib/messaging";
+import type { PopupView, SessionSource } from "../lib/messaging";
 import { EXTENSION_CLIENT_ID, loadApiUrl, syncUrlFrom } from "../lib/config";
 import {
   clearSession,
@@ -122,6 +124,15 @@ let runningLookup: Promise<TimeEntry | null> | null = null;
  */
 const RUNNING_CACHE_TTL_MS = 10_000;
 
+/**
+ * How long a fetched entry window may be reused.
+ *
+ * The popup re-reads the snapshot every three seconds; without this the
+ * entries screen would issue twenty `entries.list` calls a minute for a list
+ * nobody is changing.
+ */
+const ENTRIES_CACHE_TTL_MS = 15_000;
+
 const rememberRunning = (entry: TimeEntry | null): void => {
   cachedRunning = { entry };
   cachedRunningAt = Date.now();
@@ -146,6 +157,30 @@ let settingsLookup: Promise<ResolvedSettings | null> | null = null;
 
 /** Tasks are per-project, so the cache has to remember which project's. */
 let cachedTasks: { projectId: string; tasks: Task[] } | null = null;
+
+/** Which popup surface is open. Reset on sign-out: a new session starts at the timer. */
+let activeView: PopupView = "tracker";
+
+/**
+ * The fetched window, before the offline overlay is applied over it.
+ *
+ * `pages` is how deep "Load older" has taken it. A refetch that ignored it
+ * would replace an extended window with page one, so a list somebody had just
+ * paged would collapse back to a single page on the next poll — the depth is
+ * remembered here so the refetch can restore it.
+ */
+let cachedEntries: {
+  entries: DetailedEntry[];
+  cursor: string | null;
+  hasMore: boolean;
+  fetchedAt: number;
+  pages: number;
+} | null = null;
+
+/** Set by a foreign entry event; forces the next read to refetch. */
+let entriesStale = false;
+
+let cachedDevices: DeviceSession[] | null = null;
 
 /** Discovered once per API URL from /api/health; null until then. */
 let cachedWebUrl: string | null = null;
@@ -254,6 +289,137 @@ const rehydrateOptimisticRunning = async (): Promise<void> => {
   if (stored !== null) rememberRunning(stored.entry);
 };
 
+// ── the optimistic past entries ──────────────────────────────────────
+
+/**
+ * What queued edits, creates and deletes imply about past entries.
+ *
+ * {@link rememberOptimisticRunning} models exactly one entry — the running one
+ * — because until now that was the only entry the extension could change. A
+ * queued edit of a past row outlives this worker on disk, so the row it implies
+ * has to as well, or a revived worker repaints the pre-edit values while the
+ * mutation is still waiting to be sent.
+ *
+ * Cleared wholesale, never row by row: the overlay exists only to represent
+ * queued work, so "the queue is empty" is a sound and total clear condition and
+ * removes any need to reconcile a replayed row against a temp id.
+ */
+const OPTIMISTIC_ENTRIES_KEY = "tracktime.optimistic-entries";
+
+export type OptimisticEntries = { upserts: TimeEntry[]; deletes: string[] };
+
+const EMPTY_OPTIMISTIC: OptimisticEntries = { upserts: [], deletes: [] };
+
+/**
+ * Whether a stored row is still shaped like an entry this build can render.
+ *
+ * The same defence the `deletes` list gets, and for the same reason: these rows
+ * were written by whatever build was installed at the time, and one that is
+ * missing a field goes straight through `applyOverlay` into the rendered list,
+ * where `entry.description.trim()` throws and blanks the whole screen. Only the
+ * fields the overlay and the row actually read are checked — a stricter guard
+ * would throw away rows that render perfectly well.
+ */
+const isOptimisticRow = (value: unknown): value is TimeEntry => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Partial<TimeEntry>;
+  return (
+    typeof row.id === "string" &&
+    typeof row.description === "string" &&
+    typeof row.start === "string" &&
+    (row.end === null || typeof row.end === "string") &&
+    (row.projectId === null || typeof row.projectId === "string") &&
+    (row.taskId === null || typeof row.taskId === "string") &&
+    typeof row.durationSec === "number" &&
+    Array.isArray(row.tagIds)
+  );
+};
+
+export async function loadOptimisticEntries(): Promise<OptimisticEntries> {
+  const raw = await getOptimisticStore().getItem(OPTIMISTIC_ENTRIES_KEY);
+  if (raw === null) return EMPTY_OPTIMISTIC;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return EMPTY_OPTIMISTIC;
+    const { upserts, deletes } = parsed as {
+      upserts?: unknown;
+      deletes?: unknown;
+    };
+    return {
+      upserts: Array.isArray(upserts) ? upserts.filter(isOptimisticRow) : [],
+      deletes: Array.isArray(deletes)
+        ? deletes.filter((id): id is string => typeof id === "string")
+        : [],
+    };
+  } catch {
+    // A row from an older build is not worth wedging a cold start over.
+    return EMPTY_OPTIMISTIC;
+  }
+}
+
+const writeOptimisticEntries = async (
+  value: OptimisticEntries,
+): Promise<void> => {
+  if (value.upserts.length === 0 && value.deletes.length === 0) {
+    await getOptimisticStore().removeItem(OPTIMISTIC_ENTRIES_KEY);
+    return;
+  }
+  await getOptimisticStore().setItem(
+    OPTIMISTIC_ENTRIES_KEY,
+    JSON.stringify(value),
+  );
+};
+
+export async function upsertOptimisticEntry(entry: TimeEntry): Promise<void> {
+  const current = await loadOptimisticEntries();
+  await writeOptimisticEntries({
+    upserts: [
+      ...current.upserts.filter((it) => it.id !== entry.id),
+      entry,
+    ],
+    // An entry being written again is no longer deleted — the two lists must
+    // not both claim the same id, or the render order decides the outcome.
+    deletes: current.deletes.filter((id) => id !== entry.id),
+  });
+}
+
+export async function deleteOptimisticEntry(id: string): Promise<void> {
+  const current = await loadOptimisticEntries();
+  await writeOptimisticEntries({
+    upserts: current.upserts.filter((it) => it.id !== id),
+    deletes: current.deletes.includes(id)
+      ? current.deletes
+      : [...current.deletes, id],
+  });
+}
+
+export async function clearOptimisticEntries(): Promise<void> {
+  await getOptimisticStore().removeItem(OPTIMISTIC_ENTRIES_KEY);
+}
+
+/**
+ * Drop everything queued for an entry that only ever existed locally.
+ *
+ * Deleting an offline-created row has to remove its own `entries.create` too,
+ * or the replay resurrects the entry the user just deleted. Ported from the web
+ * client's `cancelQueuedForTemp`, matching on the queue row's `tempId` — the
+ * only link between a temp id and the mutation that invented it.
+ */
+export async function cancelQueuedForTemp(tempId: string): Promise<boolean> {
+  const offline = getOfflineQueue();
+  const rows = await offline.list();
+  let removed = false;
+
+  for (const row of rows) {
+    const decoded = decodeOfflineMutation(row);
+    if (decoded?.tempId !== tempId) continue;
+    await offline.remove(row.id);
+    removed = true;
+  }
+
+  return removed;
+}
+
 // ── rebuilding ───────────────────────────────────────────────────────
 
 const buildRuntime = async (): Promise<Runtime> => {
@@ -351,6 +517,13 @@ export async function reload(): Promise<Runtime> {
   settingsLookup = null;
   cachedWebUrl = null;
   cachedEmail = null;
+  cachedEntries = null;
+  entriesStale = false;
+  cachedDevices = null;
+  // A retarget or a new token is a new account as far as the popup is
+  // concerned, and the timer is the only screen that makes sense to land on
+  // before anything has been read.
+  activeView = "tracker";
   return ensureReady();
 }
 
@@ -377,6 +550,9 @@ const setSyncStatus = (next: SyncStatus): void => {
   cachedRecents = null;
   cachedSettings = null;
   settingsLookup = null;
+  cachedEntries = null;
+  entriesStale = false;
+  cachedDevices = null;
 
   // A socket that just came up is the first reliable sign the network is back.
   // Nothing awaits this, so it must swallow its own failure — the next
@@ -403,12 +579,20 @@ const applyEvent = (event: SyncEvent): void => {
       rememberRunning(event.entry);
       // What "recent" means changes with every entry another device closes.
       cachedRecents = null;
+      // A start closes whatever was running, which adds a finished row to the
+      // window the entries screen is showing.
+      entriesStale = true;
       return;
     case "timer.stopped":
       rememberRunning(null);
       cachedRecents = null;
+      entriesStale = true;
       return;
     case "entry.upserted":
+      // Marked before the running-entry branches below, not inside them: any
+      // upsert can land inside the browsed window, whether or not it happens to
+      // be the entry this device thinks is running.
+      entriesStale = true;
       if (event.entry.end === null) {
         rememberRunning(event.entry);
         return;
@@ -419,6 +603,7 @@ const applyEvent = (event: SyncEvent): void => {
       }
       return;
     case "entry.deleted":
+      entriesStale = true;
       if (cachedRunning?.entry?.id === event.id) rememberRunning(null);
       return;
     case "catalog.changed":
@@ -436,6 +621,10 @@ const applyEvent = (event: SyncEvent): void => {
     case "settings.changed":
       cachedSettings = null;
       settingsLookup = null;
+      // `devices.revoke` and `devices.revokeOthers` publish exactly this event
+      // and nothing else, so a device list signed out from the web app would
+      // otherwise keep listing sessions that no longer exist.
+      cachedDevices = null;
       return;
   }
 };
@@ -531,6 +720,106 @@ export const setCachedProjects = (projects: Project[]): void => {
 };
 
 export const getCachedSettings = (): ResolvedSettings | null => cachedSettings;
+
+/**
+ * Install settings the server just returned.
+ *
+ * Only a successful `settings.update` calls this, and that is what makes a
+ * refusal cost nothing: the cache still holds the server's truth, so the next
+ * snapshot re-renders the value that was actually rejected with no popup-side
+ * rollback anywhere. Nulling instead would be worse than useless here — the
+ * `settings.changed` echo of our own write is dropped by origin id, so nothing
+ * else would refill the cache and the very next snapshot would pay for a
+ * `settings.get`.
+ */
+export const setCachedSettings = (settings: ResolvedSettings): void => {
+  cachedSettings = settings;
+};
+
+export const getActiveView = (): PopupView => activeView;
+
+/**
+ * Record which surface the popup is on, so `buildState` fetches only what is
+ * being looked at.
+ *
+ * Arriving at the entries list is exactly the moment its window should be true
+ * rather than up to {@link ENTRIES_CACHE_TTL_MS} old, so the move marks it
+ * stale — a refetch on arrival, not on every poll while it sits there.
+ */
+export const setActiveView = (view: PopupView): void => {
+  if (activeView === view) return;
+  activeView = view;
+  if (view === "entries") entriesStale = true;
+};
+
+export const getCachedEntries = (): {
+  entries: DetailedEntry[];
+  cursor: string | null;
+  hasMore: boolean;
+  fetchedAt: number;
+  pages: number;
+} | null => cachedEntries;
+
+export const setCachedEntries = (
+  entries: DetailedEntry[],
+  cursor: string | null,
+  hasMore: boolean,
+  pages: number = 1,
+): void => {
+  cachedEntries = { entries, cursor, hasMore, fetchedAt: Date.now(), pages };
+};
+
+/**
+ * Append a page onto the window. `fetchedAt` is deliberately left where page
+ * one put it: paging deeper is not evidence that the rows above are any
+ * fresher, and moving it would keep an endlessly-paged list from ever
+ * refetching. What the append does record is the new depth, so the refetch it
+ * is still due restores this many pages rather than dropping back to one.
+ */
+export const appendCachedEntries = (
+  entries: DetailedEntry[],
+  cursor: string | null,
+  hasMore: boolean,
+): void => {
+  if (cachedEntries === null) {
+    setCachedEntries(entries, cursor, hasMore);
+    return;
+  }
+  cachedEntries = {
+    entries: [...cachedEntries.entries, ...entries],
+    cursor,
+    hasMore,
+    fetchedAt: cachedEntries.fetchedAt,
+    pages: cachedEntries.pages + 1,
+  };
+};
+
+export const entriesAreStale = (): boolean => entriesStale;
+
+export const markEntriesStale = (): void => {
+  entriesStale = true;
+};
+
+export const clearEntriesStale = (): void => {
+  entriesStale = false;
+};
+
+/**
+ * Whether the window may be served without a round trip. Unlike the running
+ * entry there is no queue exception: the offline overlay is applied *over* a
+ * fetched page rather than instead of it, so a refetch cannot undo queued work.
+ */
+export const entriesCacheIsFresh = (): boolean => {
+  if (cachedEntries === null) return false;
+  if (entriesStale) return false;
+  return Date.now() - cachedEntries.fetchedAt < ENTRIES_CACHE_TTL_MS;
+};
+
+export const getCachedDevices = (): DeviceSession[] | null => cachedDevices;
+
+export const setCachedDevices = (devices: DeviceSession[]): void => {
+  cachedDevices = devices;
+};
 
 /**
  * Workspace settings, fetched once per worker and kept until a
@@ -792,6 +1081,10 @@ export async function forgetSession(
   // and on every socket reconnect — so the rows must not outlive the token.
   await getOfflineQueue().clear();
   await forgetOptimisticRunning();
+  // For the same reason as the queue itself: the overlay only ever describes
+  // rows in the account being left, and a leftover row would paint over the
+  // next account's entry window.
+  await clearOptimisticEntries();
   // The watcher's ownership claim names an entry in the account being left.
   await resetIdleWatcher();
 
@@ -875,7 +1168,16 @@ export async function flushQueue(): Promise<number> {
   });
 
   // Drained: the server now holds everything the optimistic entry stood in for.
-  if (result.remaining === 0) await forgetOptimisticRunning();
+  if (result.remaining === 0) {
+    await forgetOptimisticRunning();
+    // Wholesale, and only on a fully drained queue: the past-entry overlay
+    // exists purely to stand in for queued work, so an empty queue is the one
+    // clear condition that needs no per-row reconciliation against a temp id.
+    // Marking the window stale is the other half — server truth is now
+    // strictly better than what the overlay was claiming.
+    await clearOptimisticEntries();
+    markEntriesStale();
+  }
 
   if (result.flushed > 0) {
     // Replay moved the server on in ways we never modelled locally; re-read

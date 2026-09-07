@@ -14,12 +14,17 @@
 import { mergeQuickStarts, type ApiClient, type TimeEntry } from "@starter/core";
 import type { BackgroundState } from "../lib/messaging";
 import { fetchClients, fetchProjects, fetchTags, fetchTasks } from "./catalog";
+import { cachedEntryPage, resolveEntryPage } from "./entries";
 import { fetchFavorites, fetchRecents } from "./favorites";
 import { pendingIdle } from "./idle-state";
 import {
   ensureReady,
   ensureSyncConnected,
+  entriesAreStale,
   forgetSession,
+  getActiveView,
+  getCachedDevices,
+  getCachedSettings,
   isServerReachable,
   getCachedClients,
   getCachedFavorites,
@@ -37,6 +42,7 @@ import {
   peekRunning,
   resolveEmail,
   resolveRunning,
+  resolveSettings,
   resolveWebUrl,
   setCachedTodaySec,
 } from "./runtime";
@@ -74,6 +80,11 @@ const signedOutState = (
   serverReachable: isServerReachable(),
   pendingSync: 0,
   pendingIdle: null,
+  view: "tracker",
+  settings: null,
+  entries: null,
+  entriesStale: false,
+  devices: null,
 });
 
 /**
@@ -179,6 +190,18 @@ export async function buildState(): Promise<BackgroundState> {
   // rebuild of the snapshot does not silently empty the task picker under it.
   const tasksProjectId = getCachedTasksProjectId();
 
+  // Which surface the popup declared it is on. The whole snapshot is still
+  // whole; the view only decides which of its expensive halves is worth
+  // fetching, and `null` for the rest means "not loaded for this view" rather
+  // than "empty".
+  const view = getActiveView();
+
+  // Resolved before the parallel reads rather than inside them: a failed
+  // refetch has to fall back to the OVERLAID cache, because a failed fetch is
+  // the offline case and the queued edits it stands for are the only version of
+  // the list the user has seen.
+  const entriesFallback = view === "entries" ? await cachedEntryPage() : null;
+
   // `resolveRunning` reports its own reachability from inside the runtime,
   // where it can tell a real request apart from a cache hit.
   const running = await localRead(resolveRunning, peekRunning());
@@ -208,6 +231,18 @@ export async function buildState(): Promise<BackgroundState> {
     softRead(() => fetchRecents(current.api), getCachedRecents() ?? []),
     localRead(pendingIdle, null),
   ]);
+
+  // `localRead`, not `softRead`: `resolveSettings` swallows its own failure and
+  // answers null, so wrapping it in the reachability probe would report the
+  // server as answering on every failure.
+  const settings = await localRead(resolveSettings, getCachedSettings());
+
+  // `softRead`, because this one genuinely hits the network once the window's
+  // TTL has expired.
+  const entries =
+    view === "entries"
+      ? await softRead(resolveEntryPage, entriesFallback)
+      : null;
 
   // One read answering is enough to call the server reachable; only a snapshot
   // where nothing got through and something failed in transport is "offline".
@@ -253,5 +288,11 @@ export async function buildState(): Promise<BackgroundState> {
     // question "what were those 40 minutes?" is meaningless against an entry
     // somebody has since stopped, and answering it would edit the wrong row.
     pendingIdle: idle !== null && idle.entryId === running?.id ? idle : null,
+    view,
+    settings,
+    entries,
+    entriesStale: entriesAreStale(),
+    // Never fetched here — the Devices section asks for it when it is opened.
+    devices: getCachedDevices(),
   };
 }

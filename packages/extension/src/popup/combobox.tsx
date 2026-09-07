@@ -67,6 +67,8 @@ export function Combobox({
   const [active, setActive] = useState(0);
   const [creating, setCreating] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const [flipped, setFlipped] = useState(false);
   const listId = useId();
 
   const selected = options.find((option) => option.id === value) ?? null;
@@ -108,6 +110,32 @@ export function Combobox({
   useEffect(() => {
     setActive((current) => Math.min(current, Math.max(0, rows.length - 1)));
   }, [rows.length]);
+
+  /**
+   * Open upward when the list would run off the bottom of the popup.
+   *
+   * Chrome clips an extension popup instead of growing it, so a dropdown that
+   * does not flip is simply unreachable — and the settings screen and the entry
+   * form both put pickers far lower in the page than the tracker ever did.
+   *
+   * Measured only while the list is still hanging downward: once flipped, its
+   * own rect no longer answers "would this clip below", and re-reading it would
+   * flip the list back on the next render, forever.
+   */
+  useEffect(() => {
+    if (!open) {
+      setFlipped(false);
+      return;
+    }
+    const list = listRef.current;
+    if (list === null) return;
+    setFlipped(
+      (current) =>
+        current ||
+        list.getBoundingClientRect().bottom >
+          document.documentElement.clientHeight,
+    );
+  }, [open, rows.length]);
 
   const close = (): void => {
     setOpen(false);
@@ -208,7 +236,14 @@ export function Combobox({
         />
 
         {open && (
-          <ul className="combobox__list" id={listId} role="listbox">
+          <ul
+            ref={listRef}
+            className={
+              flipped ? "combobox__list combobox__list--up" : "combobox__list"
+            }
+            id={listId}
+            role="listbox"
+          >
             {rows.length === 0 && (
               <li className="combobox__none">No matches</li>
             )}

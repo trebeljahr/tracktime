@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type JSX } from "react";
+import { useEffect, useRef, useState, type FormEvent, type JSX } from "react";
 import {
   createId,
   deviceTimeZone,
@@ -6,20 +6,23 @@ import {
   withProject,
   withTask,
   type Client,
+  type DurationFormat,
   type EntryFields,
   type IdleAnswer,
   type Project,
   type QuickStart,
-  type SyncStatus,
   type TimeEntry,
 } from "@starter/core";
 import type { BackgroundState } from "../lib/messaging";
-import { ApiUrlEditor } from "./api-url-editor";
 import { Combobox, type ComboboxOption } from "./combobox";
+import { formatElapsed } from "./entry-format";
+import { Header } from "./header";
 import { TagPicker } from "./tag-picker";
 import { IdlePanel } from "./idle-panel";
 import { Menu } from "./menu";
 import { QuickStartList } from "./quick-start-list";
+import { Switch } from "./switch";
+import { describeSync } from "./sync-label";
 import { useElapsedSec } from "./use-elapsed";
 
 /** An edit to the running entry. Absent fields are left alone. */
@@ -50,8 +53,16 @@ export type TrackerScreenProps = {
   onUnpinFavorite: (id: string) => Promise<boolean>;
   /** Resolves the idle span the worker parked while the popup was closed. */
   onAnswerIdle: (answer: IdleAnswer) => Promise<boolean>;
-  onSignOut: () => Promise<boolean>;
-  onSaveApiUrl: (apiUrl: string) => Promise<boolean>;
+  /**
+   * Pushes the in-popup settings screen.
+   *
+   * The cog is the popup's top-right button, and everything that used to hang
+   * off the overflow menu — the API URL, signing out, the settings the web app
+   * owns — now lives behind it. The menu is left with the two things the popup
+   * genuinely cannot do: reports and the calendar, which need width.
+   */
+  onOpenSettings: () => void;
+  onOpenEntries: () => void;
   /** Loads the task list for a project into the worker's snapshot. */
   onSelectProject: (projectId: string | null) => Promise<boolean>;
   onCreateClient: (name: string) => Promise<boolean>;
@@ -60,76 +71,10 @@ export type TrackerScreenProps = {
   onCreateTask: (projectId: string, name: string) => Promise<boolean>;
 };
 
-/**
- * The shared formatter always emits H:MM:SS. At 360px the leading "0:" is
- * noise for the first hour, which is where most entries live, so it is
- * trimmed — the formatting itself still comes from @starter/shared.
- */
-const formatElapsed = (seconds: number): string => {
-  const hms = formatDuration(seconds, "hms");
-  return hms.startsWith("0:") ? hms.slice(2) : hms;
-};
-
 /** Local-clock seconds elapsed today, the ceiling on a running entry's share. */
 const secondsSinceMidnight = (nowMs: number = Date.now()): number => {
   const now = new Date(nowMs);
   return now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-};
-
-/**
- * What the footer says about sync.
- *
- * "Offline" is reserved for the one case where it is true: the server did not
- * answer. A socket that is down while HTTP is fine is a real but much smaller
- * problem — other devices' changes arrive on the next poll instead of
- * instantly — and labelling it "Offline" while the toolbar was signed in and
- * saving happily was simply wrong, and unnerving with it.
- *
- * Queued work outranks both, because it is the only state where something the
- * user did has not reached the server yet.
- */
-const describeSync = (
-  status: SyncStatus,
-  serverReachable: boolean,
-  pending: number,
-): { label: string; tone: string; title: string } => {
-  if (!serverReachable) {
-    return {
-      label: pending > 0 ? `Offline · ${pending} queued` : "Offline",
-      tone: "closed",
-      title:
-        pending > 0
-          ? `The server is not answering. ${pending} change${pending === 1 ? "" : "s"} will be sent when it does.`
-          : "The server is not answering. Timers still start and stop, and are sent when it comes back.",
-    };
-  }
-  if (pending > 0) {
-    return {
-      label: `${pending} queued`,
-      tone: "pending",
-      title: `${pending} change${pending === 1 ? "" : "s"} still to send.`,
-    };
-  }
-  if (status === "open") {
-    return {
-      label: "Synced",
-      tone: "open",
-      title: "Live updates from your other devices are connected.",
-    };
-  }
-  if (status === "connecting") {
-    return {
-      label: "Connecting…",
-      tone: "connecting",
-      title: "Connecting to live updates.",
-    };
-  }
-  return {
-    label: "Polling",
-    tone: "polling",
-    title:
-      "Live updates are unavailable, so changes made elsewhere show up on a short delay. Everything you do here is saved normally.",
-  };
 };
 
 /**
@@ -214,8 +159,8 @@ export function TrackerScreen({
   onPinFavorite,
   onUnpinFavorite,
   onAnswerIdle,
-  onSignOut,
-  onSaveApiUrl,
+  onOpenSettings,
+  onOpenEntries,
   onSelectProject,
   onCreateClient,
   onCreateTag,
@@ -228,7 +173,6 @@ export function TrackerScreen({
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [billable, setBillable] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [showApiUrl, setShowApiUrl] = useState(false);
 
   /** Set while a new project is being named, holding the client to file it under. */
   const [pendingProject, setPendingProject] = useState<string | null>(null);
@@ -341,8 +285,22 @@ export function TrackerScreen({
     patchRunning({ billable: next });
   };
 
+  /**
+   * Set for the length of an Escape, and read by the blur it causes.
+   *
+   * `blur()` dispatches React's `onBlur` synchronously inside the key handler,
+   * before the `setDescription` above it has been applied — so without this the
+   * commit runs against the abandoned text and Escape SAVES the edit it was
+   * pressed to throw away.
+   */
+  const reverting = useRef(false);
+
   /** Save a typed description against the running entry, if it changed. */
   const commitDescription = (): void => {
+    if (reverting.current) {
+      reverting.current = false;
+      return;
+    }
     if (running === null) return;
     const next = description.trim();
     if (next === running.description) return;
@@ -470,12 +428,6 @@ export function TrackerScreen({
     else void stop();
   };
 
-  const signOut = async (): Promise<void> => {
-    setBusy(true);
-    await onSignOut();
-    setBusy(false);
-  };
-
   // `state.todaySec` counts finished entries only, so the running one is added
   // here — clamped to the part of it that falls inside today, or an overnight
   // timer would credit the whole night to this morning.
@@ -493,8 +445,17 @@ export function TrackerScreen({
     state.pendingSync,
   );
 
+  // The same setting the entries list and the entry forms read, so a user who
+  // asked for decimal is not shown two spellings of a duration at once.
+  const durationFormat: DurationFormat = state.settings?.durationFormat ?? "hms";
+
   return (
-    <div className="tracker" data-testid="tracker-screen">
+    <div className="screen" data-testid="tracker-screen">
+      {/* No back and no title: the elapsed clock below is the title, and that
+          is exactly what pays for a header on the one screen where every pixel
+          is already spoken for. */}
+      <Header onOpenEntries={onOpenEntries} onOpenSettings={onOpenSettings} />
+
       <div className="popup__body">
         {/* Above everything else: it is a question about the time already on
             the clock below, and answering it changes what that clock says. */}
@@ -536,7 +497,7 @@ export function TrackerScreen({
         >
           {running !== null ? (
             <span className="elapsed" data-testid="tracker-elapsed">
-              {formatElapsed(elapsedSec)}
+              {formatElapsed(elapsedSec, durationFormat)}
             </span>
           ) : null}
 
@@ -560,6 +521,7 @@ export function TrackerScreen({
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
                   event.preventDefault();
+                  reverting.current = true;
                   setDescription(running?.description ?? "");
                   event.currentTarget.blur();
                 }
@@ -652,18 +614,13 @@ export function TrackerScreen({
             testId="tracker-tags"
           />
 
-          <button
-            className={billable ? "billable billable--on" : "billable"}
-            type="button"
-            role="switch"
-            aria-checked={billable}
-            onClick={toggleBillable}
-            data-testid="tracker-billable"
-            data-billable={billable ? "true" : "false"}
-          >
-            <span aria-hidden="true" className="billable__mark" />
-            {billable ? "Billable" : "Not billable"}
-          </button>
+          <Switch
+            checked={billable}
+            onChange={toggleBillable}
+            label={billable ? "Billable" : "Not billable"}
+            variant="struck"
+            testId="tracker-billable"
+          />
 
           <button
             className={
@@ -682,7 +639,7 @@ export function TrackerScreen({
         <p className="today">
           <span>Today</span>
           <span className="today__value" data-testid="tracker-today">
-            {formatDuration(todaySec, "hms")}
+            {formatDuration(todaySec, durationFormat)}
           </span>
         </p>
 
@@ -700,21 +657,10 @@ export function TrackerScreen({
             <span className={`status__dot status__dot--${sync.tone}`} />
             {sync.label}
           </span>
-          <Menu
-            webUrl={state.webUrl}
-            sharedSession={state.sessionSource === "web"}
-            onEditApiUrl={() => setShowApiUrl((open) => !open)}
-            onSignOut={() => {
-              void signOut();
-            }}
-          />
+          {/* Nothing to overflow into when the web app's origin has not been
+              discovered — both remaining items are links to it. */}
+          {state.webUrl !== null ? <Menu webUrl={state.webUrl} /> : null}
         </div>
-
-        {showApiUrl ? (
-          <div id="api-url-panel">
-            <ApiUrlEditor apiUrl={state.apiUrl} onSave={onSaveApiUrl} />
-          </div>
-        ) : null}
       </div>
     </div>
   );

@@ -27,6 +27,13 @@ import {
   createTask,
   selectProjectTasks,
 } from "./catalog";
+import { listDevices, revokeDevice, revokeOtherDevices } from "./devices";
+import {
+  createEntry,
+  loadMoreEntries,
+  removeEntry,
+  updateEntry,
+} from "./entries";
 import { BackgroundError, toErrorResponse } from "./errors";
 import { addFavorite, removeFavorite } from "./favorites";
 import {
@@ -46,7 +53,9 @@ import {
   peekRunning,
   reload,
   resolveRunning,
+  setActiveView,
 } from "./runtime";
+import { updateSettings } from "./settings";
 import { buildState } from "./state";
 import { startTimer, stopTimer, updateRunning } from "./timer";
 
@@ -250,6 +259,48 @@ const apply = async (message: PopupToBackground): Promise<void> => {
       return;
     case "config:set-api-url":
       return setApiUrl(message.apiUrl);
+    case "view:set":
+      return setActiveView(message.view);
+    case "entries:more":
+      return loadMoreEntries();
+    case "entry:create":
+      // Listed field by field to drop the discriminant, the same as
+      // `timer:update` — an omitted optional arrives as explicit `undefined`,
+      // which `JSON.stringify` leaves out of the object entirely.
+      await createEntry({
+        description: message.description,
+        projectId: message.projectId,
+        taskId: message.taskId,
+        billable: message.billable,
+        tagIds: message.tagIds,
+        start: message.start,
+        end: message.end,
+      });
+      return;
+    case "entry:update":
+      return updateEntry({
+        id: message.id,
+        description: message.description,
+        projectId: message.projectId,
+        taskId: message.taskId,
+        billable: message.billable,
+        tagIds: message.tagIds,
+        start: message.start,
+        end: message.end,
+      });
+    case "entry:remove":
+      return removeEntry(message.id);
+    case "settings:update":
+      return updateSettings(message.patch);
+    case "devices:list":
+      // Answers with the list; `apply` reports it through the fresh snapshot
+      // instead, so the value is dropped here.
+      await listDevices();
+      return;
+    case "device:revoke":
+      return revokeDevice(message.id);
+    case "devices:revoke-others":
+      return revokeOtherDevices();
     default: {
       // `apply` returns void, so falling off the end of this switch would be
       // valid TypeScript: a new message type added to the contract would

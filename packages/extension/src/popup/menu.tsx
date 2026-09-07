@@ -1,38 +1,22 @@
 import { useEffect, useRef, useState, type JSX } from "react";
+import { join, openTab } from "./open-tab";
 
 /**
- * The overflow menu: the ways out of a popup that deliberately does very
- * little.
+ * The way out to the web app, and nothing else any more.
  *
- * Everything here either opens the web app — which owns editing, reports and
- * settings — or changes something the popup itself cannot express. Keeping
- * those behind one button is what leaves the tracker screen to the timer.
+ * Settings, the API URL and signing out used to live here because the popup
+ * could not express them; they are now behind the cog, in the popup itself.
+ * What is left is the surfaces that genuinely need width the popup does not
+ * have — reports and the calendar — so every item here is a link out, and the
+ * menu is not rendered at all when the web app's origin is unknown.
  */
 
 export type MenuProps = {
-  /** Web app origin, discovered from the API. Null hides the links. */
-  webUrl: string | null;
-  /** True when this session is shared with the web app, which changes what signing out does. */
-  sharedSession: boolean;
-  onEditApiUrl: () => void;
-  onSignOut: () => void;
+  /** Web app origin, discovered from the API. */
+  webUrl: string;
 };
 
-const openTab = (url: string): void => {
-  // No `tabs` permission needed to create one, and the popup closes as soon as
-  // focus leaves it — so nothing here has to survive the click.
-  void chrome.tabs.create({ url });
-};
-
-const join = (base: string, path: string): string =>
-  `${base.replace(/\/$/, "")}${path}`;
-
-export function Menu({
-  webUrl,
-  sharedSession,
-  onEditApiUrl,
-  onSignOut,
-}: MenuProps): JSX.Element {
+export function Menu({ webUrl }: MenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -68,71 +52,24 @@ export function Menu({
 
       {open && (
         <div className="menu__list" role="menu" data-testid="menu-list">
-          {webUrl !== null && (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                className="menu__item"
-                onClick={() => openTab(join(webUrl, "/track"))}
-                data-testid="menu-open-app"
-              >
-                Open tracktime
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="menu__item"
-                onClick={() => openTab(join(webUrl, "/reports/summary"))}
-                data-testid="menu-reports"
-              >
-                Reports
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="menu__item"
-                onClick={() => openTab(join(webUrl, "/settings"))}
-                data-testid="menu-settings"
-              >
-                Settings
-              </button>
-              <hr className="menu__rule" />
-            </>
-          )}
-
           <button
             type="button"
             role="menuitem"
             className="menu__item"
-            onClick={() => {
-              setOpen(false);
-              onEditApiUrl();
-            }}
-            data-testid="menu-api-url"
+            onClick={() => openTab(join(webUrl, "/track"))}
+            data-testid="menu-open-app"
           >
-            Change API URL…
+            Open tracktime
           </button>
-
           <button
             type="button"
             role="menuitem"
-            className="menu__item menu__item--danger"
-            onClick={() => {
-              setOpen(false);
-              onSignOut();
-            }}
-            data-testid="menu-sign-out"
+            className="menu__item"
+            onClick={() => openTab(join(webUrl, "/reports/summary"))}
+            data-testid="menu-reports"
           >
-            Sign out
+            Reports
           </button>
-
-          {sharedSession && (
-            <p className="menu__note">
-              Signed in with the web app’s session — signing out here signs out
-              tracktime in this browser too.
-            </p>
-          )}
         </div>
       )}
     </div>

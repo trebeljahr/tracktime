@@ -66,6 +66,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* A picker opened near the foot of a settings section has to be able to
+     scroll itself clear of the bottom edge, not just up to it. */
+  scroll-padding-block-end: 200px;
 }
 
 .popup__title {
@@ -195,9 +198,9 @@ body {
   letter-spacing: -0.01em;
 }
 
-/* The billable toggle. A switch rather than a checkbox because it commits
-   immediately against a running entry, with no form to submit. */
-.billable {
+/* A toggle that commits the moment it is clicked, with no form to submit —
+   the billable flag against a running entry, and every settings switch. */
+.switch {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -212,14 +215,17 @@ body {
   cursor: pointer;
 }
 
-.billable--on {
+.switch--on {
   border-color: var(--accent);
   color: var(--fg);
 }
 
-/* Struck through when off, the same affordance the web app's currency glyph
-   uses — so "not billable" reads as a state, not as a disabled control. */
-.billable__mark {
+.switch:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.switch__mark {
   position: relative;
   width: 14px;
   height: 14px;
@@ -228,12 +234,15 @@ body {
   flex: none;
 }
 
-.billable--on .billable__mark {
+.switch--on .switch__mark {
   background: var(--accent);
   border-color: transparent;
 }
 
-.billable:not(.billable--on) .billable__mark::after {
+/* Struck through when off, the same affordance the web app's currency glyph
+   uses — so "not billable" reads as a state, not as a disabled control. Only
+   the billable toggle wants it; a plain switch's empty circle is enough. */
+.switch--struck:not(.switch--on) .switch__mark::after {
   content: "";
   position: absolute;
   top: 50%;
@@ -367,9 +376,9 @@ button.tag:hover .tag__x {
   color: var(--muted);
 }
 
-/* The tracker is the only screen with a pinned footer, so it takes the
-   popup's height and lets its own body do the scrolling. */
-.tracker {
+/* Every screen takes the popup's height and lets its own body do the
+   scrolling, so a pinned header or footer stays put while the middle moves. */
+.screen {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -401,6 +410,15 @@ button.tag:hover .tag__x {
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+/* Opened upward when the list would run off the bottom of the popup. Chrome
+   clips an extension popup rather than growing it, so a dropdown that does not
+   flip is simply unreachable — and Settings and the entry form both put
+   pickers lower in the page than the tracker ever did. */
+.combobox__list--up {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 
 .combobox__row {
@@ -642,20 +660,481 @@ button.tag:hover .tag__x {
   background: var(--surface);
 }
 
-.menu__item--danger {
-  color: var(--danger);
+/* The menu's separator, its danger item and its shared-session note are gone
+   with the items they belonged to: signing out, the API URL and the settings
+   link now live behind the cog, and the separator's generalisation is `.rule`
+   in the screens section below. */
+
+/* ── header ────────────────────────────────────────────────────────── */
+
+/* 32px, and it stays that small because the tracker gets no title — the
+   elapsed clock is the title. That is what pays for a header on the one
+   screen where every pixel is already spoken for. */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-height: 32px;
+  padding: 0 6px 0 8px;
+  border-bottom: 1px solid var(--border);
 }
 
-.menu__rule {
-  margin: 4px 0;
+.header__title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.header__back {
+  margin-left: -4px;
+}
+
+/* Generalised out of `.menu__trigger`: transparent until hovered, so a row of
+   them reads as one strip rather than as four competing buttons. */
+.icon-button {
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── screens ───────────────────────────────────────────────────────── */
+
+/* Below the combobox (20) and the overflow menu (30), so neither ends up
+   behind a banner that only exists when something went wrong. */
+.screen__alert {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.rule {
+  margin: 0;
   border: 0;
   border-top: 1px solid var(--border);
 }
 
-.menu__note {
-  margin: 4px 0 2px;
-  padding: 0 8px 4px;
+/* ── settings ──────────────────────────────────────────────────────── */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section__header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.section__header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.section__caret {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.section__title {
+  font-weight: 600;
+}
+
+/* The current value, so reading a setting costs zero clicks and changing one
+   costs two. Truncated rather than wrapped: a header that grows a second line
+   moves every section below it. */
+.section__hint,
+.section__saved {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.section__saved {
+  color: var(--ok);
+}
+
+.section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Label above control, never beside it: at 360px a two-column row leaves the
+   label about nine characters, and the settings that need explaining are
+   exactly the ones whose names do not fit in nine. */
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.setting__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting__note {
+  margin: 0;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.4;
+}
+
+/* A number and its unit. The suffix sits beside the field rather than inside
+   it, because `type="number"` reserves the right edge for its own spinner. */
+.number {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.input--number {
+  width: 100%;
+  text-align: right;
+}
+
+.number__suffix {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ── devices ───────────────────────────────────────────────────────── */
+
+.device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.device__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.device__name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device__hint {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device__badge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.device__action {
+  flex: none;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+/* A confirm opened from a row spans the row, so the question is not squeezed
+   into whatever the device name left over. */
+.device .panel {
+  flex-basis: 100%;
+}
+
+/* ── entries ───────────────────────────────────────────────────────── */
+
+.entries {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.entries__empty,
+.entries__more {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.entry-day {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.entry-day__label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.entry-day__total {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+/* One row is one button: the whole thing pushes a detail screen, because a
+   28px destructive control next to a scroll target is a mis-tap generator. */
+.entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.entry:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.entry:disabled {
+  cursor: default;
+}
+
+.entry--running {
+  border-color: var(--accent);
+}
+
+/* An entry with no project is a real state, not a missing colour — an outline
+   says so without inventing a hue the catalog never assigned. */
+.entry__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--muted);
+}
+
+.entry__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.entry__label {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry__hint {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry__times {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.entry__range {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.entry__duration {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+}
+
+/* A row whose mutation has not left the queue yet is not editable: a second
+   edit stacked on an unsent one would replay in an order nobody chose. */
+.entry[data-syncing="true"] {
+  opacity: 0.6;
+}
+
+.entry[data-invoiced="true"] .entry__duration {
+  color: var(--muted);
+}
+
+/* ── entry detail ──────────────────────────────────────────────────── */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detail__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.detail__locked {
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.detail__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Start, end and duration on one row — three fields that are read together
+   and, at 360px, only make sense side by side. */
+.range {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.range__field {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Never `<input type="time">`: Chrome anchors its native overlay to the input
+   and clips it against the popup rather than escaping it, and it forces a
+   locale clock that ignores the user's own `timeFormat`. */
+.input--time {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.daystep {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.daystep__button {
+  flex: none;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.daystep__button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.daystep__label {
+  flex: 1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── the idle strip ────────────────────────────────────────────────── */
+
+/* The full IdlePanel renders only on the tracker. Elsewhere the prompt is one
+   tappable line: the worker parks the question on whichever poll tick finds
+   it, which can be mid-sentence in a field, so it must never seize the screen
+   — and answering it can stop, split or discard the running entry, so the
+   answer belongs next to the clock it changes. */
+.alert {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.alert--idle:hover {
+  background: var(--surface);
 }

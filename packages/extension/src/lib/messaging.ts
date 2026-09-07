@@ -10,18 +10,77 @@
  */
 import type {
   Client,
+  DetailedEntry,
   DetailedFavorite,
+  DeviceSession,
   IdleAnswer,
   PendingIdle,
   Project,
   QuickStart,
   QuickStartItem,
   RecentEntry,
+  ResolvedSettings,
   SyncStatus,
   Tag,
   Task,
   TimeEntry,
+  UpdateSettingsInput,
 } from "@starter/core";
+
+/**
+ * Which of the popup's surfaces is on screen.
+ *
+ * The snapshot is whole, but not everything in it is cheap: the entry window
+ * costs an `entries.list` page, and the popup re-reads the snapshot every three
+ * seconds. Declaring the view lets `buildState` fetch only what is being looked
+ * at and answer `null` — "not loaded for this view" — for the rest, which is a
+ * different thing from an empty list.
+ *
+ * The worker holds the view rather than every message carrying it, so a
+ * `state:get` already in flight when the user navigates still comes back
+ * describing the screen they are now on.
+ */
+export type PopupView = "tracker" | "settings" | "entries";
+
+/**
+ * What the settings screen may change.
+ *
+ * `originId` is stripped: it identifies this worker, and the popup has no
+ * business knowing it. The worker stamps it on the way out so the server's
+ * `settings.changed` echo can be dropped as our own.
+ */
+export type SettingsPatch = Omit<UpdateSettingsInput, "originId">;
+
+/**
+ * The bounded window of past entries the popup browses.
+ *
+ * `entries.list` needs both ends, so the popup gets a fixed trailing window
+ * rather than the web app's sentinel range: a 360px list nobody can filter or
+ * search should not be able to grow without limit.
+ *
+ * `DetailedEntry`, not `TimeEntry` — the server already denormalizes the
+ * project colour, project name, client name and task name onto each row, so a
+ * popup row needs no join against `projects`/`clients`.
+ */
+export type EntryPage = {
+  /**
+   * Newest first, as the server returns them, with the running entry removed.
+   * `entries.list` matches on overlap, so the running entry would otherwise
+   * appear in the list *and* on the tracker, giving one row two editors.
+   */
+  entries: DetailedEntry[];
+  /** Inclusive start of the window, ISO. Rendered as "the last N days". */
+  from: string;
+  to: string;
+  /** True when `entries:more` would fetch another page. */
+  hasMore: boolean;
+  /**
+   * Rows with a mutation still sitting in the offline queue. They render from
+   * the local overlay and are not editable: a second edit stacked on an unsent
+   * one would replay in an order the user never chose.
+   */
+  pendingIds: string[];
+};
 
 export type PopupToBackground =
   | { type: "state:get" }
@@ -80,7 +139,117 @@ export type PopupToBackground =
   | { type: "tag:create"; name: string }
   | { type: "project:create"; name: string; clientId: string | null }
   | { type: "task:create"; projectId: string; name: string }
-  | { type: "config:set-api-url"; apiUrl: string };
+  | { type: "config:set-api-url"; apiUrl: string }
+  /**
+   * Tell the worker which surface is showing.
+   *
+   * Sent only when the view actually changes, and answered like any other
+   * message — with a whole snapshot, now scoped to the new view. Moving *into*
+   * the entries view also marks the cached window stale, because arriving at a
+   * list is exactly the moment it should be true rather than up to fifteen
+   * seconds old.
+   */
+  | { type: "view:set"; view: PopupView }
+  /**
+   * Fetch the next page of the entry window and append it.
+   *
+   * The append happens in the worker. The contract is whole snapshots, and a
+   * popup that concatenated pages itself would be merging domain state — the
+   * one thing it is not allowed to do, because it is destroyed on every close
+   * and has no baseline to merge onto.
+   */
+  | { type: "entries:more" }
+  /**
+   * Log a past entry.
+   *
+   * Both ends are required, unlike an edit: an entry with an open end IS a
+   * running timer, and `timer:start` is the only door to one — routing a manual
+   * create through here would let the popup open a second timer without going
+   * past the stop-whatever-is-running rule.
+   *
+   * `source` and `timeZone` are stamped by the worker, not sent from here, for
+   * the same reason `timer:start` does it: an entry logged from the toolbar
+   * stays traceable to the toolbar, and a create queued offline keeps the zone
+   * it was written in rather than the one it happens to sync from.
+   */
+  | {
+      type: "entry:create";
+      description: string;
+      projectId: string | null;
+      taskId: string | null;
+      /** Omitted lets the picked project's `billableDefault` decide, as on start. */
+      billable?: boolean;
+      tagIds?: string[];
+      start: string;
+      end: string;
+    }
+  /**
+   * Edit one past entry. Absent fields are left alone, as in `timer:update`.
+   *
+   * Unlike `timer:update` this one names its entry, and the asymmetry is the
+   * point: "whichever entry is running" is a fact only the worker can resolve,
+   * while "the row the user opened" is a fact only the popup knows.
+   *
+   * Only fields the user actually touched may be sent, and that is not economy:
+   * `entries.update` refuses an invoiced entry on the mere *presence* of
+   * `projectId`, `taskId`, `billable`, `start` or `end` — changed or not — so a
+   * form that always sent its whole shape would be refused on an entry it never
+   * modified.
+   *
+   * `end` is deliberately not nullable. Clearing it re-opens the entry, which
+   * either starts a second timer or fails with CONFLICT against the one already
+   * running; neither is something a 360px surface should be able to do.
+   */
+  | {
+      type: "entry:update";
+      id: string;
+      description?: string;
+      projectId?: string | null;
+      taskId?: string | null;
+      billable?: boolean;
+      /** Replaces the whole set; `[]` clears it. */
+      tagIds?: string[];
+      start?: string;
+      end?: string;
+    }
+  /** Delete one past entry. Refused server-side when the entry is invoiced. */
+  | { type: "entry:remove"; id: string }
+  /**
+   * Patch settings. Nested blocks are merged key by key server-side, so a patch
+   * carrying only `{ idle: { enabled: true } }` leaves the threshold and the
+   * behaviour alone.
+   *
+   * Carried as one object rather than flattened onto the message because that
+   * object is exactly what `updateSettingsSchema` accepts; rebuilding it from
+   * flat fields here would be a second place for the shape to drift.
+   *
+   * Not queueable offline. `settings.update` is not one of core's offline ops,
+   * and making it one would need a merge policy for two partial patches to the
+   * same block — which the server does not have either. Offline this fails into
+   * the error banner and the user retries, which is honest.
+   */
+  | { type: "settings:update"; patch: SettingsPatch }
+  /**
+   * Fill the device list.
+   *
+   * Sent when the Devices section is opened, never by the poll: a list of
+   * signed-in sessions is not something that has to be right to the second, and
+   * putting it on the snapshot's critical path would cost a `devices.list`
+   * round trip every three seconds for a panel that is usually closed.
+   */
+  | { type: "devices:list" }
+  /**
+   * Sign one OTHER device out.
+   *
+   * Never this one. Revoking the current session kills the bearer token while
+   * the worker still holds a session record, so the popup would keep rendering
+   * `signedIn: true` against a dead credential — the half-applied state the
+   * snapshot contract exists to prevent. Signing this device out is
+   * `auth:sign-out`, which clears the record too. The worker refuses a current
+   * session id so a UI regression cannot reach the server.
+   */
+  | { type: "device:revoke"; id: string }
+  | { type: "devices:revoke-others" };
 
 /**
  * Where the current session came from.
@@ -145,6 +314,50 @@ export type BackgroundState = {
    * whenever the popup is next opened. Nothing is discarded in the meantime.
    */
   pendingIdle: PendingIdle | null;
+  /**
+   * The view the popup last declared, echoed back.
+   *
+   * Without it the popup cannot tell a snapshot describing the screen it is on
+   * from one taken a navigation ago, and would render "nothing here" for the
+   * gap instead of "loading".
+   */
+  view: PopupView;
+  /**
+   * The user's resolved settings, or null before the first read has succeeded.
+   *
+   * Present in every snapshot, not just the settings view: the entries screen
+   * renders clock times and durations, and `timeFormat` / `durationFormat`
+   * decide how. It is close to free — `resolveSettings` answers from
+   * `cachedSettings` until a foreign `settings.changed` event or a local write
+   * replaces it.
+   */
+  settings: ResolvedSettings | null;
+  /**
+   * The entry window the popup is browsing, or null when the entries view is
+   * not open.
+   *
+   * Null rather than an empty page because the two mean opposite things on
+   * screen: "not fetched" is a loading line, "fetched and empty" is a real
+   * answer that deserves its own words.
+   */
+  entries: EntryPage | null;
+  /**
+   * True when a sync event says an entry changed since this window was
+   * fetched.
+   *
+   * The cached rows are still served rather than dropped: blanking a list under
+   * someone mid-scroll is worse than showing it a second late. The next
+   * `resolveEntryPage` refetches instead of honouring the TTL.
+   */
+  entriesStale: boolean;
+  /**
+   * Signed-in sessions, or null when they have never been asked for.
+   *
+   * Null rather than `[]` because an empty list is impossible — the caller's own
+   * session is always in it — and would therefore be a bug worth seeing rather
+   * than an empty state worth rendering.
+   */
+  devices: DeviceSession[] | null;
 };
 
 export type BackgroundResponse =
