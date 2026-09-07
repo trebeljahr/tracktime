@@ -81,6 +81,7 @@ const optimisticEntry = (
   // Nothing is invoiced at the moment a timer starts; the server echo fills
   // this in if it ever changes.
   invoiceId: null,
+  importId: null,
   createdAt: input.start,
   updatedAt: input.start,
 });

@@ -95,6 +95,18 @@ const invalidateFor = (utils: Utils, event: SyncEvent): void => {
     case "settings.changed":
       void utils.settings.invalidate();
       return;
+    case "data.imported":
+      // An import writes thousands of entries and the catalog behind them in
+      // one go, so there is nothing here to patch — every list is refetched,
+      // including the import history the undo button reads.
+      void utils.entries.invalidate();
+      void utils.reports.invalidate();
+      void utils.clients.invalidate();
+      void utils.projects.invalidate();
+      void utils.tasks.invalidate();
+      void utils.tags.invalidate();
+      void utils.data.invalidate();
+      return;
     default: {
       // A new SyncEvent kind with no case here would otherwise be a silent
       // cross-device staleness bug that no test catches. Fail the BUILD

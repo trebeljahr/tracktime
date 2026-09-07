@@ -270,6 +270,43 @@ Optional, because a row queued by a build that predates tags must still decode
 and replay: the server reads an absent list as "no tags" on start/create and
 as "leave them alone" on update.
 
+### Import and export
+
+`data.analyze` / `data.commit` bring a tracked history in from a file, and
+`data.exportJson` / `data.exportCsv` take a whole workspace out. Parsing lives
+in `packages/server/src/services/import/` and is pure, so it is unit-tested
+without a database.
+
+Four rules, each of which fails silently if broken:
+
+- **Column shapes, not vendors.** Headers are matched to roles by an alias
+  table (`columns.ts`), and the values decide the granularity: a `Start`
+  holding `2026-08-21 09:00` is a `start`, one holding `09:00` is a
+  `startTime` needing a `date` beside it. Nothing anywhere names a product.
+- **`analyze` and `commit` take the same input and run the same parser.** The
+  preview is a description, never a token — the commit re-reads the file
+  instead of trusting rows handed back to it, so a tampered preview cannot
+  make it write something the user never approved.
+- **Day/month order is decided per file, then stated on screen.** `03/04` is
+  valid either way round, and a wrong guess moves entries by months without
+  ever erroring. Any value over 12 settles it; when nothing does, the preview
+  says so and the user picks (`dateOrder`).
+- **Every import is a batch.** Entries carry `importId`, so undo is one
+  indexed delete; the batch document lists only the catalog it created, which
+  is deleted on undo only when nothing else has come to use it. A batch whose
+  entries are on an invoice refuses to undo.
+
+Files with a date and a number of hours but no clock time (`date-duration`)
+get their entries stacked back-to-back from `IMPORT_DAY_START_HOUR`, in file
+order, per day. The times of day are invented — the day totals are not — and
+the preview says so rather than letting it pass for recorded fact.
+
+The CSV export is written in the exact column shape the importer recognises,
+so a spreadsheet round trip is supported rather than lucky. The JSON export is
+the lossless one (colors, archived catalog rows, project rates) and references
+the catalog **by name**, so it can be imported into a different workspace or
+into an empty one after the database it came from is gone.
+
 ### Raycast extension
 
 `packages/raycast` is a Raycast extension: a macOS menu bar timer, a live

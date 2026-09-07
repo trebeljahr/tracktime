@@ -4,6 +4,9 @@ import * as React from "react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountSettings } from "@/components/settings/account-settings";
+import { ExportPanel } from "@/components/data/export-panel";
+import { ImportHistory } from "@/components/data/import-history";
+import { ImportPanel } from "@/components/data/import-panel";
 import { DevicesPanel } from "@/components/settings/devices";
 import { BillingSettings } from "@/components/settings/billing-settings";
 import { GeneralSettings } from "@/components/settings/general-settings";
@@ -16,14 +19,27 @@ const TABS = [
   { value: "billing", label: "Billing" },
   { value: "idle", label: "Idle" },
   { value: "limits", label: "Limits" },
+  { value: "data", label: "Data" },
   { value: "devices", label: "Devices" },
   { value: "account", label: "Account" },
 ];
+
+const TAB_VALUES = new Set(TABS.map((tab) => tab.value));
 
 export default function SettingsPage() {
   // One controller for the whole screen: General, Billing, Idle and Limits
   // all write through the same optimistic `settings.update` path.
   const controller = useWorkspaceSettings();
+  const [tab, setTab] = React.useState("general");
+
+  // `?tab=data` so anything that wants to send somebody here — the empty
+  // tracker's "import your history" — can land on the right panel. Read from
+  // `location` in an effect rather than with `useSearchParams`, which forces
+  // the whole page into a Suspense boundary under the static export.
+  React.useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested && TAB_VALUES.has(requested)) setTab(requested);
+  }, []);
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6" data-testid="settings-page">
@@ -35,7 +51,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="general" className="space-y-6">
+      <Tabs value={tab} onValueChange={setTab} className="space-y-6">
         <TabsList
           className="w-full justify-start overflow-x-auto"
           data-testid="settings-tabs"
@@ -62,6 +78,15 @@ export default function SettingsPage() {
         </TabsContent>
         <TabsContent value="limits" data-testid="settings-panel-limits">
           <MaxDurationSettingsPanel controller={controller} />
+        </TabsContent>
+        <TabsContent
+          value="data"
+          className="space-y-6"
+          data-testid="settings-panel-data"
+        >
+          <ImportPanel />
+          <ImportHistory />
+          <ExportPanel />
         </TabsContent>
         <TabsContent value="devices" data-testid="settings-panel-devices">
           <DevicesPanel />

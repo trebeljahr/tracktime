@@ -156,6 +156,7 @@ export const buildOptimisticEntry = (
     tagIds: args.tagIds ?? [],
     // Freshly created time is never on an invoice yet.
     invoiceId: null,
+    importId: null,
     createdAt: stamp,
     updatedAt: stamp,
     projectName: project.projectName,

@@ -41,6 +41,7 @@ const entry = (overrides: Partial<DetailedEntry> = {}): DetailedEntry => ({
   runaway: null,
   tagIds: ["tag-1"],
   invoiceId: null,
+  importId: null,
   createdAt: "2026-09-02T09:00:00.000Z",
   updatedAt: "2026-09-02T09:00:00.000Z",
   projectName: null,

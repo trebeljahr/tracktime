@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Loader2, Timer } from "lucide-react";
+import Link from "next/link";
+import { Loader2, Timer, Upload } from "lucide-react";
 import { toLocalDateKey, type DetailedEntry } from "@starter/shared";
 
 import { Button } from "@/components/ui/button";
@@ -236,6 +237,17 @@ export function EntryList(): React.JSX.Element {
         icon={Timer}
         title="No time tracked yet"
         description="Type what you are working on above and hit Start — or press + to log time you already spent."
+        action={
+          // Somebody arriving from another tracker has years of history sitting
+          // in a file, and this screen is where they find out it can come with
+          // them. The empty state is the only place that question is live.
+          <Button type="button" variant="outline" asChild>
+            <Link href="/settings?tab=data" data-testid="entries-empty-import">
+              <Upload className="size-4" />
+              Import your history
+            </Link>
+          </Button>
+        }
         testId="entries-empty"
       />
     );

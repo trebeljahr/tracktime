@@ -29,6 +29,7 @@ const entry = (overrides: Partial<TimeEntry> = {}): TimeEntry => ({
   runaway: null,
   tagIds: [],
   invoiceId: null,
+  importId: null,
   createdAt: START,
   updatedAt: START,
   ...overrides,

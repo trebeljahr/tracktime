@@ -38,6 +38,7 @@ const entry = (overrides: Partial<DetailedEntry> = {}): DetailedEntry => {
     runaway: null,
     tagIds: [],
     invoiceId: null,
+    importId: null,
     createdAt: start,
     updatedAt: start,
     projectName: "tracktime",

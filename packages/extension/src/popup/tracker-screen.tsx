@@ -164,6 +164,7 @@ const provisionalEntry = (
     runaway: null,
     tagIds,
     invoiceId: null,
+    importId: null,
     createdAt: now,
     updatedAt: now,
   };

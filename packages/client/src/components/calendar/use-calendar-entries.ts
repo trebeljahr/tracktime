@@ -256,6 +256,7 @@ export const useCalendarActions = (
         // never on an invoice yet.
         tagIds: variables.tagIds ?? [],
         invoiceId: null,
+        importId: null,
         createdAt: now,
         updatedAt: now,
         ...projectMeta(projectId),
