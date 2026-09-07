@@ -228,6 +228,16 @@ test("updateSettingsSchema keeps every field optional", () => {
   assert.ok(!accepts(updateSettingsSchema, { durationFormat: "clock" }));
 });
 
+test("updateSettingsSchema takes the three theme choices and nothing else", () => {
+  // The theme is a stored preference rather than a per-browser one, so a
+  // client that invented a fourth name would darken itself and nothing else.
+  assert.ok(accepts(updateSettingsSchema, { theme: "light" }));
+  assert.ok(accepts(updateSettingsSchema, { theme: "dark" }));
+  assert.ok(accepts(updateSettingsSchema, { theme: "system" }));
+  assert.ok(!accepts(updateSettingsSchema, { theme: "auto" }));
+  assert.ok(!accepts(updateSettingsSchema, { theme: "" }));
+});
+
 test("maxDurationSettingsSchema allows 0 as the off switch but nothing below the minimum", () => {
   const valid = { maxHours: 12, behavior: "ask" };
   assert.ok(accepts(maxDurationSettingsSchema, valid));

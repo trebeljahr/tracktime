@@ -46,4 +46,14 @@ describe("applySettingsPatch", () => {
     expect(next.maxDuration).toEqual(FALLBACK_SETTINGS.maxDuration);
     expect(next.idle).toEqual(FALLBACK_SETTINGS.idle);
   });
+
+  it("carries the theme, so the optimistic cache does not flip it back", () => {
+    // The theme is applied to <html> the instant it is picked and only then
+    // sent. A patch that dropped it here would leave the query cache saying
+    // "system" while the page renders dark, and ThemeSync would adopt the
+    // cache's answer and undo the click.
+    const next = applySettingsPatch(FALLBACK_SETTINGS, { theme: "dark" });
+    expect(next.theme).toBe("dark");
+    expect(applySettingsPatch(next, { currency: "USD" }).theme).toBe("dark");
+  });
 });
