@@ -264,6 +264,32 @@ is quietly wrong:
   `launchAutoHide: false` the app freezes on the splash with no console to
   read. Wrap the handle in a plain object; `lib/native-session.ts` does, and
   `native-session.test.ts` has the regression.
+- **`simctl` alone never shows the software keyboard.** The Simulator counts
+  the Mac's keyboard as connected until `Simulator.app` itself has read
+  `defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool
+  false`, so a headless loop screenshots a focused field with no keyboard under
+  it and nothing about the layout is being tested. Write the default, then
+  `open -a Simulator` once.
+
+**Native chrome lives in `packages/client/src/styles/native.css`**, imported by
+one line from `globals.css`. Every selector in it is under `body.cap` — safe-area
+padding, 16px fields, `.cap-touch`, the two-row tracker composer, the top-anchored
+dialog — so it is inert on web *by construction*, and `e2e/mobile-shell.spec.ts`
+(the `phone` Playwright project, `devices["Pixel 5"]`) asserts that at 393pt.
+Rules that would also be right on web belong in `globals.css` instead.
+
+`body.cap` is set twice on purpose: by an inline script at the top of `<body>`
+in `app/layout.tsx`, before the first paint, and again by `mobile/bridge.ts`
+after its dynamic imports resolve. The pre-paint one is what matters on a
+WebView reload, which has no splash to hide the unpadded frame. `<body>`
+therefore carries `suppressHydrationWarning`.
+
+Two things that look like ordinary CSS and are not. Tailwind v4's `translate-*`
+utilities compile to the `translate` **property**, so the way to undo a
+`translate-y-[-50%]` is `--tw-translate-y: 0`, never a `transform` (which stacks
+on top of it). And `native.css` is unlayered while Tailwind's utilities are in
+`@layer utilities`, so its rules already beat them — no `!important` needed, and
+adding one would only hide the fact that the cascade is doing the work.
 
 ### Native client auth
 

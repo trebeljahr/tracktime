@@ -76,6 +76,44 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
   launch forever behind a splash that never auto-hides. `hydrateNativeSession`
   now also has a 5s deadline so no future plugin can freeze the app.
 
+**Corrections found while implementing stage 2 — native chrome:**
+
+- The pre-paint `body.cap` script goes at the **top of `<body>`**, not into the
+  existing `THEME_SCRIPT` in `<head>`: `document.body` does not exist yet while
+  the head is being parsed. `<body>` also carries `suppressHydrationWarning`,
+  since React would otherwise complain about the class it did not render.
+  Proven on device by disabling `bridge.ts`'s own two writes, rebuilding, and
+  confirming the safe-area layout was still applied — so the class really does
+  come from the pre-paint script and not from the bridge.
+- The dialog's native anchoring zeroes **`--tw-translate-y`**, not `transform`.
+  Tailwind v4's `translate-*` utilities compile to the `translate` PROPERTY
+  (`.translate-x-[-50%]{--tw-translate-x:-50%;translate:var(--tw-translate-x)
+  var(--tw-translate-y)}`), so a `transform: translateX(-50%)` would have
+  applied *on top of* the untouched `translate` and pushed the panel a further
+  half-width off the left edge.
+- No `!important` on the 16px rule. `native.css` is unlayered while Tailwind's
+  utilities are in `@layer utilities`, and an unlayered rule beats every layer
+  regardless of specificity.
+- The header needed a `data-testid="app-header"` and `DialogContent` a
+  `data-slot="dialog-content"`; neither had a stable hook, and matching
+  `[role="dialog"]` would also have caught the nav drawer.
+- `entry-list.tsx`'s `STICKY_TOP` had to move to
+  `var(--app-header-offset, 3.5rem)`, because it hardcoded the header's 3.5rem
+  and the tracker bar's `top-14` and the header's height both change under the
+  status-bar inset. The variable is set only under `body.cap`, so the fallback
+  makes the web string identical to what it was.
+- The Playwright phone project is **`devices["Pixel 5"]` (chromium)**, per the
+  critics, and both projects are scoped (`testMatch` / `testIgnore`) so the
+  suite is not run twice.
+- Stage 2's own spec had to be rewritten once: `getComputedStyle().top` returns
+  a used px value not `"50%"`, and the tracker composer's description carries
+  an explicit `text-base`, so it is 16px on web too and the naive font-size
+  assertion passed whether or not the rule leaked. Rewriting `body.cap` to
+  `body` in native.css now fails 4 of the 7.
+- **`@capacitor/keyboard` needed `resize: "native"`.** `"body"` leaves every
+  `position: fixed` element — the sticky header, the tracker bar, stage 3's tab
+  bar — behind the keyboard, and `"none"` leaves the focused field there.
+
 ## Summary
 
 Ship the phone app as the existing Next.js client inside a Capacitor shell — one composition, not a second UI. Everything mobile is either scoped to `body.cap` (a class `packages/client/src/mobile/bridge.ts:30` already sets and nothing styles), behind the synchronous `isNative()` check in that same file, or a correctness fix the web build also wants. No new screens for reports, timesheet, invoices or catalog; they stay honestly cramped one level down. Cookie auth is abandoned for native (a `capacitor://localhost` document is cross-site to the API and loses to WKWebView ITP regardless of SameSite) in favour of the bearer path `packages/core/src/session-auth.ts` was written for — which needs zero server code, only `TRUSTED_ORIGINS`. Stage 1 ends with a signed-in app on the iOS Simulator starting and stopping a real timer against `pnpm run dev`, verified against a real `pnpm build:mobile` bundle rather than live reload, because under live reload the document origin is `http://localhost:7130`, which is same-site with a localhost API and would make cookie auth misleadingly appear to work. Later stages add native chrome, a three-tab bar, resume/offline durability, calendar touch de-hostility, and two zero-custom-native wins (haptics, a runaway-timer local notification). No Swift, no Kotlin, no widget extension, no second HTTP client — the judges called all of that the fatal path.
