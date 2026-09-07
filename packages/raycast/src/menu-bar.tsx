@@ -75,7 +75,20 @@ export default function MenuBar(): React.JSX.Element | null {
   const pinned = running ? favoriteFor(running, favorites) : undefined;
 
   const title = ((): string | undefined => {
-    if (!running || titleMode === "icon") return undefined;
+    if (titleMode === "icon") return undefined;
+
+    // Idle used to render as a bare stopwatch glyph with no text at all,
+    // which is indistinguishable from the dozen other icons up there — the
+    // item was present and simply could not be found. Today's total is the
+    // number worth glancing at when nothing is running, and it keeps the
+    // item legible. "Description only" stays empty: there is no description
+    // to show, and that mode asked for nothing else.
+    if (!running) {
+      return titleMode === "description"
+        ? undefined
+        : formatMenuBarDuration(data?.todaySec ?? 0);
+    }
+
     if (titleMode === "duration") return clock;
     if (titleMode === "description") return label;
     return `${label} · ${clock}`;
@@ -121,7 +134,13 @@ export default function MenuBar(): React.JSX.Element | null {
       icon={running ? Icon.Stopwatch : Icon.Clock}
       title={title}
       isLoading={isLoading}
-      tooltip={running ? `${label} — ${clock}` : "tracktime — no timer running"}
+      tooltip={
+        running
+          ? `${label} — ${clock}`
+          : `tracktime — no timer running · today ${formatDurationShort(
+              data?.todaySec ?? 0,
+            )}`
+      }
     >
       {running ? (
         <MenuBarExtra.Section title={label}>

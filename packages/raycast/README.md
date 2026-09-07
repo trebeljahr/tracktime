@@ -75,9 +75,16 @@ is not there. The pairing screen shows which URL it tried; ⏎ on **Open
 Extension Preferences** and fix **API URL**. The defaults point at the deployed
 hosts, so a local-only setup has to be pointed at the dev ports.
 
-**Nothing in the menu bar** — a Raycast menu bar command only appears after it
-has been run once. Open Raycast, run **Timer Menu Bar**, and the item shows up;
-it then refreshes on its own every minute.
+**Nothing in the menu bar** — three things hide it, in this order:
+
+1. A Raycast menu bar command only appears after it has been run once. Open
+   Raycast, run **Timer Menu Bar**, and the item shows up; it then refreshes on
+   its own every minute.
+2. The **Idle** preference ("Hide the menu bar item when no timer runs") does
+   exactly that — with nothing running there is nothing in the menu bar until
+   the next start.
+3. With no timer running the item shows today's total rather than a clock, so
+   look for a small `0:00` next to the stopwatch, not a running time.
 
 **Seeing what went wrong** — the terminal running `pnpm dev:raycast` is the
 extension's console: `console.log` and stack traces print there. View commands
