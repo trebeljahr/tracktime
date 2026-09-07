@@ -8,6 +8,9 @@ import {
   showToast,
 } from "@raycast/api";
 import { useEffect, useState } from "react";
+import { ProjectForm } from "./components/catalog/project-form.js";
+import { TagForm } from "./components/catalog/tag-form.js";
+import { TaskForm } from "./components/catalog/task-form.js";
 import { getTracktime } from "./lib/api.js";
 import { formatDurationShort } from "./lib/format.js";
 import { useApi } from "./lib/hooks.js";
@@ -101,6 +104,53 @@ export default function StartTimer(): React.JSX.Element {
             title="Start Timer"
             icon={Icon.Play}
             onSubmit={submit}
+          />
+          {/* The thing you want to file under usually does not exist yet at
+              the moment you go to file under it. Each of these pushes a form
+              and comes back with the new row already selected, so a missing
+              project is a detour rather than a dead end. */}
+          <Action.Push
+            title="New Project…"
+            icon={Icon.Folder}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
+            target={
+              <ProjectForm
+                onSaved={(created) => {
+                  setProjectId(created.id);
+                  setTaskId(NONE);
+                  projects.revalidate();
+                }}
+              />
+            }
+          />
+          {projectId !== NONE ? (
+            <Action.Push
+              title="New Task…"
+              icon={Icon.List}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
+              target={
+                <TaskForm
+                  projectId={projectId}
+                  onSaved={(created) => {
+                    setTaskId(created.id);
+                    tasks.revalidate();
+                  }}
+                />
+              }
+            />
+          ) : null}
+          <Action.Push
+            title="New Tag…"
+            icon={Icon.Tag}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "g" }}
+            target={
+              <TagForm
+                onSaved={(created) => {
+                  setTagIds((current) => [...current, created.id]);
+                  tags.revalidate();
+                }}
+              />
+            }
           />
           <Action.OpenInBrowser
             title="Open Web App"

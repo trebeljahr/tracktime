@@ -10,31 +10,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { CATALOG_COLOR_PALETTE, isHexColor } from "@starter/shared";
+
 import { cn } from "@/lib/utils";
 
 /**
- * Mirrors the server's catalog palette (`CATALOG_COLOR_PALETTE`) so a colour
- * picked here is indistinguishable from one auto-assigned on create.
+ * The catalog palette, from `@starter/shared` — the same list the server picks
+ * from when a create ships no color, and the same one the Raycast forms offer.
+ * Re-exported so the components that render swatches keep importing it here.
  */
-export const COLOR_PALETTE: readonly string[] = [
-  "#4f46e5",
-  "#0ea5e9",
-  "#14b8a6",
-  "#22c55e",
-  "#84cc16",
-  "#eab308",
-  "#f97316",
-  "#ef4444",
-  "#ec4899",
-  "#a855f7",
-  "#8b5cf6",
-  "#64748b",
-];
-
-const HEX = /^#[0-9a-fA-F]{6}$/;
-
-/** True for the `#rrggbb` form the API accepts. */
-export const isHexColor = (value: string): boolean => HEX.test(value);
+export { CATALOG_COLOR_PALETTE as COLOR_PALETTE, isHexColor } from "@starter/shared";
 
 const normalize = (value: string): string => {
   const trimmed = value.trim();
@@ -122,7 +107,7 @@ export function ColorPicker({
         data-testid={`${testId}-content`}
       >
         <div className="grid grid-cols-6 gap-2">
-          {COLOR_PALETTE.map((color) => {
+          {CATALOG_COLOR_PALETTE.map((color) => {
             const selected = normalize(value) === color;
             return (
               <button

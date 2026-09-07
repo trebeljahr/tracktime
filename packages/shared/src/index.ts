@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./catalog-colors.js";
 export * from "./protocol.js";
 export * from "./schemas.js";
 export * from "./duration.js";

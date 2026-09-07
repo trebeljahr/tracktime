@@ -14,6 +14,7 @@ import {
   tagListSchema,
   updateTagSchema,
   type Tag as TagWire,
+  type TagRemoveResult,
 } from "@starter/shared";
 import { Tag, toClientTag } from "../../models/Tag.js";
 import { TimeEntry } from "../../models/TimeEntry.js";
@@ -39,12 +40,8 @@ export type TagWithStats = TagWire & {
   totalSec: number;
 };
 
-/** What every catalog `remove` resolves to — deletion is never guaranteed. */
-export type TagRemoveResult = {
-  deleted: boolean;
-  archived: boolean;
-  message: string | null;
-};
+/** Declared in `@starter/shared`, so every client renders the same outcome. */
+export type { TagRemoveResult };
 
 /** Rolled-up usage for one tag, keyed by the tag's id as a string. */
 type TagUsage = { entryCount: number; totalSec: number };

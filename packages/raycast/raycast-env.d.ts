@@ -37,6 +37,12 @@ declare namespace Preferences {
   export type ToggleTimer = ExtensionPreferences & {}
   /** Preferences accessible in the `entries` command */
   export type Entries = ExtensionPreferences & {}
+  /** Preferences accessible in the `projects` command */
+  export type Projects = ExtensionPreferences & {}
+  /** Preferences accessible in the `clients` command */
+  export type Clients = ExtensionPreferences & {}
+  /** Preferences accessible in the `tags` command */
+  export type Tags = ExtensionPreferences & {}
   /** Preferences accessible in the `sign-in` command */
   export type SignIn = ExtensionPreferences & {}
 }
@@ -56,6 +62,12 @@ declare namespace Arguments {
   export type ToggleTimer = {}
   /** Arguments passed to the `entries` command */
   export type Entries = {}
+  /** Arguments passed to the `projects` command */
+  export type Projects = {}
+  /** Arguments passed to the `clients` command */
+  export type Clients = {}
+  /** Arguments passed to the `tags` command */
+  export type Tags = {}
   /** Arguments passed to the `sign-in` command */
   export type SignIn = {}
 }

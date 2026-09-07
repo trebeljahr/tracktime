@@ -273,8 +273,9 @@ as "leave them alone" on update.
 ### Raycast extension
 
 `packages/raycast` is a Raycast extension: a macOS menu bar timer, a live
-`Timer` view that ticks by the second, plus commands to start, stop, toggle,
-browse and edit entries.
+`Timer` view that ticks by the second, commands to start, stop, toggle, browse
+and edit entries, and full catalog CRUD (`projects`, `clients`, `tags`, with
+tasks inside a project).
 
 ```bash
 pnpm dev:raycast                      # builds @starter/core, then `ray develop`
@@ -290,6 +291,12 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   `Authorization: Bearer <token>` with `x-tracktime-client: tracktime-raycast`.
 - `raycast-env.d.ts` is generated from `package.json` by `ray build` and is
   committed, so `pnpm typecheck` works without Raycast installed.
+- Catalog forms live in `src/components/catalog/` and are pushed from both the
+  management commands and the timer forms (⌘⇧P/⌘⇧T/⌘⇧G), each calling back with
+  the created row so the picker that opened it can select it. The color palette
+  is `CATALOG_COLORS` in `@starter/shared` — the same list the server assigns
+  from and the web picker renders, so a color picked in one client is a color
+  the next one can name.
 - Menu bar commands only re-run on their interval (1 min) and when opened, so
   the clock is `h:mm`; mutations call `refreshMenuBar()` to avoid a stale value.
   The `Timer` view command is the live counterpart — on screen, so it can hold a

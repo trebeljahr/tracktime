@@ -144,6 +144,36 @@ export type Tag = {
   updatedAt: string;
 };
 
+/**
+ * What a catalog `remove` reports back. Deletion always happens for clients,
+ * projects and tasks; the counts describe the collateral so a client can say
+ * what it cost rather than claiming a clean delete.
+ *
+ * Deleting a catalog row never deletes tracked time — an entry keeps its
+ * start/end/duration and simply loses the reference.
+ */
+export type CatalogRemoveResult = {
+  /** Time entries that kept their time but lost a project/task reference. */
+  entriesDetached: number;
+  /** Tasks deleted along with their project. */
+  tasksDeleted: number;
+  /** Projects that kept their time but lost their client reference. */
+  projectsDetached: number;
+  /** Pinned quick starts that lost a project/task reference. */
+  favoritesDetached: number;
+};
+
+/**
+ * What removing a tag resolves to. A tag still on tracked time is archived
+ * rather than deleted, so the caller has to be told which of the two happened.
+ */
+export type TagRemoveResult = {
+  deleted: boolean;
+  archived: boolean;
+  /** Why it was archived instead, when that is what happened. */
+  message: string | null;
+};
+
 /** A billable customer that projects belong to. */
 export type Client = {
   id: string;

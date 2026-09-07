@@ -10,6 +10,9 @@ import {
 import type { DetailedEntry } from "@starter/core";
 import { useEffect, useState } from "react";
 import { getTracktime } from "../lib/api.js";
+import { ProjectForm } from "./catalog/project-form.js";
+import { TagForm } from "./catalog/tag-form.js";
+import { TaskForm } from "./catalog/task-form.js";
 import { useApi } from "../lib/hooks.js";
 import { refreshMenuBar, showFailureToast } from "../lib/ui.js";
 
@@ -112,6 +115,51 @@ export function EditEntry({ entry, onSaved }: Props): React.JSX.Element {
             title="Save Entry"
             icon={Icon.Check}
             onSubmit={submit}
+          />
+          {/* Same reason as the start form: refiling an entry is exactly when
+              you discover the project it belongs to was never created. */}
+          <Action.Push
+            title="New Project…"
+            icon={Icon.Folder}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
+            target={
+              <ProjectForm
+                onSaved={(created) => {
+                  setProjectId(created.id);
+                  setTaskId(NONE);
+                  projects.revalidate();
+                }}
+              />
+            }
+          />
+          {projectId !== NONE ? (
+            <Action.Push
+              title="New Task…"
+              icon={Icon.List}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
+              target={
+                <TaskForm
+                  projectId={projectId}
+                  onSaved={(created) => {
+                    setTaskId(created.id);
+                    tasks.revalidate();
+                  }}
+                />
+              }
+            />
+          ) : null}
+          <Action.Push
+            title="New Tag…"
+            icon={Icon.Tag}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "g" }}
+            target={
+              <TagForm
+                onSaved={(created) => {
+                  setTagIds((current) => [...current, created.id]);
+                  tags.revalidate();
+                }}
+              />
+            }
           />
         </ActionPanel>
       }

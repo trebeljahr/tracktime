@@ -5,26 +5,15 @@
 // and `TimeEntry.taskId` are both nullable precisely so a "project-less"
 // entry is a normal, representable state. The same holds one level up: a
 // project whose client is deleted keeps its time and becomes client-less.
+import type { CatalogRemoveResult } from "@starter/shared";
 import { Client } from "../../models/Client.js";
 import { Favorite } from "../../models/Favorite.js";
 import { Project } from "../../models/Project.js";
 import { Task } from "../../models/Task.js";
 import { TimeEntry } from "../../models/TimeEntry.js";
 
-/**
- * What every catalog `remove` resolves to. Deletion always happens; the
- * counts describe the collateral so the UI can report it honestly.
- */
-export type CatalogRemoveResult = {
-  /** Time entries that kept their time but lost a project/task reference. */
-  entriesDetached: number;
-  /** Tasks deleted along with their project. */
-  tasksDeleted: number;
-  /** Projects that kept their time but lost their client reference. */
-  projectsDetached: number;
-  /** Pinned quick starts that lost a project/task reference. */
-  favoritesDetached: number;
-};
+/** Re-exported: every catalog router imports the shape from here. */
+export type { CatalogRemoveResult };
 
 const EMPTY_RESULT: CatalogRemoveResult = {
   entriesDetached: 0,

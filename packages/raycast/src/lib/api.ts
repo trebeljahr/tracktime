@@ -10,12 +10,15 @@ import {
   createApiClient,
   deviceTimeZone,
   type ApiClient,
+  type CatalogRemoveResult,
+  type Client,
   type DetailedEntry,
   type DetailedFavorite,
   type Project,
   type QuickStart,
   type RecentEntry,
   type Tag,
+  type TagRemoveResult,
   type Task,
   type TimeEntry,
   type ResolvedSettings,
@@ -65,6 +68,53 @@ export type UpdateInput = {
   end?: string | null;
 };
 
+/**
+ * Catalog writes.
+ *
+ * Every field is optional on update and absent means "leave it alone", which
+ * is the server's own contract — so a rename never has to resend a rate, and
+ * archiving never has to resend a name.
+ */
+export type CreateClientInput = { name: string; color?: string };
+export type UpdateClientInput = {
+  id: string;
+  name?: string;
+  color?: string;
+  archived?: boolean;
+};
+
+export type CreateProjectInput = {
+  name: string;
+  color?: string;
+  clientId?: string | null;
+  billableDefault?: boolean;
+  /** Null clears the override and falls back to the workspace rate. */
+  hourlyRate?: number | null;
+  estimatedHours?: number | null;
+  budgetAmount?: number | null;
+};
+export type UpdateProjectInput = CreateProjectInput & {
+  id: string;
+  name?: string;
+  archived?: boolean;
+};
+
+export type CreateTaskInput = { projectId: string; name: string };
+export type UpdateTaskInput = {
+  id: string;
+  name?: string;
+  done?: boolean;
+  archived?: boolean;
+};
+
+export type CreateTagInput = { name: string; color?: string };
+export type UpdateTagInput = {
+  id: string;
+  name?: string;
+  color?: string;
+  archived?: boolean;
+};
+
 export type ListInput = {
   from: string;
   to: string;
@@ -100,10 +150,42 @@ export type Tracktime = {
   }>;
   update(input: UpdateInput): Promise<TimeEntry>;
   remove(id: string): Promise<{ success: true; id: string }>;
-  projects(): Promise<ProjectWithStats[]>;
-  tasks(projectId: string): Promise<TaskWithStats[]>;
-  /** Tags are not scoped to a project, so this takes no argument. */
-  tags(): Promise<TagWithStats[]>;
+  projects(options?: {
+    includeArchived?: boolean;
+    clientId?: string | null;
+  }): Promise<ProjectWithStats[]>;
+  /** Null lists every task in the workspace, not none of them. */
+  tasks(
+    projectId: string | null,
+    options?: { includeArchived?: boolean },
+  ): Promise<TaskWithStats[]>;
+  /** Tags are not scoped to a project, so this takes no project. */
+  tags(options?: { includeArchived?: boolean }): Promise<TagWithStats[]>;
+  clients(options?: { includeArchived?: boolean }): Promise<Client[]>;
+
+  createClient(input: CreateClientInput): Promise<Client>;
+  updateClient(input: UpdateClientInput): Promise<Client>;
+  /** Omitting `archived` archives; pass false to bring one back. */
+  archiveClient(id: string, archived?: boolean): Promise<Client>;
+  /** Deletes. Projects keep their time and lose the client reference. */
+  removeClient(id: string): Promise<CatalogRemoveResult>;
+
+  createProject(input: CreateProjectInput): Promise<Project>;
+  updateProject(input: UpdateProjectInput): Promise<Project>;
+  archiveProject(id: string, archived?: boolean): Promise<Project>;
+  /** Deletes, taking its tasks with it. Entries keep their time. */
+  removeProject(id: string): Promise<CatalogRemoveResult>;
+
+  createTask(input: CreateTaskInput): Promise<Task>;
+  updateTask(input: UpdateTaskInput): Promise<Task>;
+  archiveTask(id: string, archived?: boolean): Promise<Task>;
+  removeTask(id: string): Promise<CatalogRemoveResult>;
+
+  createTag(input: CreateTagInput): Promise<Tag>;
+  updateTag(input: UpdateTagInput): Promise<Tag>;
+  /** Archives instead of deleting when the tag is still on tracked time. */
+  removeTag(id: string): Promise<TagRemoveResult>;
+
   settings(): Promise<ResolvedSettings>;
 };
 
@@ -167,17 +249,61 @@ const wrap = (client: ApiClient, originId: string): Tracktime => ({
       originId,
     }),
 
-  projects: () =>
-    client.query<ProjectWithStats[]>("projects.list", { includeArchived: false }),
-
-  tasks: (projectId) =>
-    client.query<TaskWithStats[]>("tasks.list", {
-      projectId,
-      includeArchived: false,
+  projects: (options) =>
+    client.query<ProjectWithStats[]>("projects.list", {
+      includeArchived: options?.includeArchived ?? false,
+      ...(options?.clientId === undefined ? {} : { clientId: options.clientId }),
     }),
 
-  tags: () =>
-    client.query<TagWithStats[]>("tags.list", { includeArchived: false }),
+  tasks: (projectId, options) =>
+    client.query<TaskWithStats[]>("tasks.list", {
+      projectId,
+      includeArchived: options?.includeArchived ?? false,
+    }),
+
+  tags: (options) =>
+    client.query<TagWithStats[]>("tags.list", {
+      includeArchived: options?.includeArchived ?? false,
+    }),
+
+  clients: (options) =>
+    client.query<Client[]>("clients.list", {
+      includeArchived: options?.includeArchived ?? false,
+    }),
+
+  createClient: (input) =>
+    client.mutate<Client>("clients.create", { ...input, originId }),
+  updateClient: (input) =>
+    client.mutate<Client>("clients.update", { ...input, originId }),
+  archiveClient: (id, archived) =>
+    client.mutate<Client>("clients.archive", { id, archived, originId }),
+  removeClient: (id) =>
+    client.mutate<CatalogRemoveResult>("clients.remove", { id, originId }),
+
+  createProject: (input) =>
+    client.mutate<Project>("projects.create", { ...input, originId }),
+  updateProject: (input) =>
+    client.mutate<Project>("projects.update", { ...input, originId }),
+  archiveProject: (id, archived) =>
+    client.mutate<Project>("projects.archive", { id, archived, originId }),
+  removeProject: (id) =>
+    client.mutate<CatalogRemoveResult>("projects.remove", { id, originId }),
+
+  createTask: (input) =>
+    client.mutate<Task>("tasks.create", { ...input, originId }),
+  updateTask: (input) =>
+    client.mutate<Task>("tasks.update", { ...input, originId }),
+  archiveTask: (id, archived) =>
+    client.mutate<Task>("tasks.archive", { id, archived, originId }),
+  removeTask: (id) =>
+    client.mutate<CatalogRemoveResult>("tasks.remove", { id, originId }),
+
+  createTag: (input) =>
+    client.mutate<Tag>("tags.create", { ...input, originId }),
+  updateTag: (input) =>
+    client.mutate<Tag>("tags.update", { ...input, originId }),
+  removeTag: (id) =>
+    client.mutate<TagRemoveResult>("tags.remove", { id, originId }),
 
   settings: () => client.query<ResolvedSettings>("settings.get"),
 });

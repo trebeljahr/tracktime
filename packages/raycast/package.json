@@ -86,6 +86,27 @@
       "mode": "view"
     },
     {
+      "name": "projects",
+      "title": "Projects",
+      "subtitle": "tracktime",
+      "description": "Browse projects and their tasks — create, edit, archive and delete.",
+      "mode": "view"
+    },
+    {
+      "name": "clients",
+      "title": "Clients",
+      "subtitle": "tracktime",
+      "description": "Browse clients — create, edit, archive and delete.",
+      "mode": "view"
+    },
+    {
+      "name": "tags",
+      "title": "Tags",
+      "subtitle": "tracktime",
+      "description": "Browse tags — create, edit, archive and delete.",
+      "mode": "view"
+    },
+    {
       "name": "sign-in",
       "title": "Sign in to tracktime",
       "subtitle": "tracktime",

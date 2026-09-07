@@ -14,6 +14,7 @@ import {
   clientListSchema,
   createClientSchema,
   idInputSchema,
+  pickCatalogColor,
   updateClientSchema,
   type Client as ClientWire,
 } from "@starter/shared";
@@ -25,38 +26,16 @@ import {
   type CatalogRemoveResult,
 } from "./catalog-cascade.js";
 
-/**
- * Fixed palette assigned to new clients / projects that ship no explicit
- * color. Twelve hues that stay legible on both light and dark surfaces.
- */
-export const CATALOG_COLOR_PALETTE: readonly string[] = [
-  "#4f46e5", // indigo
-  "#0ea5e9", // sky
-  "#14b8a6", // teal
-  "#22c55e", // green
-  "#84cc16", // lime
-  "#eab308", // yellow
-  "#f97316", // orange
-  "#ef4444", // red
-  "#ec4899", // pink
-  "#a855f7", // purple
-  "#8b5cf6", // violet
-  "#64748b", // slate
-];
+// The palette, its project offset and the cycling picker live in
+// `@starter/shared` so the web picker and the Raycast forms offer exactly the
+// colors this router assigns. Re-exported because the sibling catalog routers
+// have always imported them from here.
+export {
+  CATALOG_COLOR_PALETTE,
+  PROJECT_COLOR_OFFSET,
+  pickCatalogColor,
+} from "@starter/shared";
 
-/** Offset applied to project colors so they cycle out of phase with clients. */
-export const PROJECT_COLOR_OFFSET = 6;
-
-/**
- * Pick the next palette entry, cycling forever. `offset` lets projects start
- * at a different point in the cycle than clients so the two lists look
- * visually distinct even when created in lockstep.
- */
-export function pickCatalogColor(index: number, offset = 0): string {
-  const size = CATALOG_COLOR_PALETTE.length;
-  const slot = ((index + offset) % size + size) % size;
-  return CATALOG_COLOR_PALETTE[slot] ?? CATALOG_COLOR_PALETTE[0] ?? "#4f46e5";
-}
 
 /** Escape a user-supplied string for safe use inside a RegExp. */
 function escapeRegExp(value: string): string {

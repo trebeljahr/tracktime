@@ -13,10 +13,36 @@ timer in the macOS menu bar.
 | **Stop Timer** | no-view | Stops the running timer. Made for a global hotkey. |
 | **Toggle Timer** | no-view | Stops what is running, or resumes the most recent entry. One hotkey for the whole loop. |
 | **Time Entries** | view | Last 14 days grouped by day — continue, edit, delete. |
+| **Projects** | view | Projects and their tasks — create, edit, archive, delete, start a timer on one. |
+| **Clients** | view | Clients — create, edit, archive, delete, add a project. |
+| **Tags** | view | Tags — create, edit, archive, delete. |
 | **Sign in to tracktime** | view | Pairs this Mac with your account. |
 
 Worth binding to hotkeys: **Toggle Timer** (⌥T works well), **Timer** and
 **Start Timer**.
+
+### Creating catalog rows
+
+Clients, projects, tasks and tags are all creatable and editable here, not just
+selectable. Two ways in:
+
+- The **Projects**, **Clients** and **Tags** commands, each with ⌘N for a new
+  row, ⌘E to edit, ⌘⇧A to archive and ⌃X to delete. Archived rows are hidden
+  behind the dropdown in the search bar rather than gone.
+- Inline, from the forms that need them: **Start Timer** and **Edit Entry**
+  both carry ⌘⇧P (new project), ⌘⇧T (new task) and ⌘⇧G (new tag), and come
+  back with the new row already selected. The project form has ⌘⇧C for a new
+  client. Nothing typed is lost on the detour.
+
+Deletes report what they cost — "Project deleted — 2 tasks deleted · 14 entries
+kept, unfiled" — because deleting a catalog row never deletes tracked time. A
+tag that is still on tracked time is archived instead of deleted, and the
+confirmation says so before you commit to it.
+
+Three things stay in the web app on purpose: per-project idle behaviour and
+recurring budgets (both need more explanation than a launcher form can carry),
+and colors outside the twelve-hue catalog palette (Raycast has no color well,
+so a hex nobody can see while typing is not worth the validation).
 
 ## Setup
 
