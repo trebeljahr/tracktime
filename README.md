@@ -27,6 +27,7 @@ Everything is scoped to a workspace, but today that is effectively one workspace
 | --- | --- |
 | Understand how the system fits together | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Run it locally and open a pull request | [`CONTRIBUTING.md`](CONTRIBUTING.md), or [Development](#development) below for the short version |
+| Run your own instance | [`docs/self-hosting.md`](docs/self-hosting.md) — one VPS, one domain, one `docker compose up` |
 | Deploy it | [`docs/deploy.md`](docs/deploy.md) — the two-app, one-domain Coolify topology and the four places that must agree on the API origin |
 
 [Project](#project) below indexes the rest — roadmap, governance, support, security, and what `CLAUDE.md` and `docs-site/` are.
@@ -100,57 +101,42 @@ Stated plainly, because the code has more scaffolding than product in these area
 - **SaaS subscription billing.** There is no Stripe service in the server at all — only a `billing.status` query that reports which `STRIPE_*` env vars are missing so the UI can show a developer notice. (Watch the word: "Billing" in the settings screen means *your clients' billable rates*, not a subscription.)
 - **Avatar upload / object storage.** An S3 service module exists and nothing imports it. `avatarUrl` is a field with no upload path behind it.
 - **Search, a command palette, and third-party integrations.** No global search, no palette, no calendar sync, no issue-tracker or commit import. Import is file-based only.
-- **Email delivery is conditional.** Password reset, verification and invitation emails fall back to logging the URL to the server console when Listmonk is not configured — which is the default local setup. Email verification is off.
-- **CI has never gone green.** The build-and-deploy workflow has two runs in its history — one failed at the build/test job, the other at E2E — so the Docker image builds and the deploy path have never actually executed. See the caveats in [self-hosting](#self-hosting).
+- **Email verification is off.** Password reset, verification and invitation mail goes out over SMTP once `SMTP_HOST` is set, and falls back to logging the URL to the server console when no transport is configured at all — which is the default local setup. `requireEmailVerification` is still `false`.
+- **CI has never gone green.** The build-and-deploy workflow has two runs in its history — one failed at the build/test job, the other at E2E — so the Docker image builds and the deploy path have never actually executed. The self-host images are published by a separate tag-triggered workflow ([`.github/workflows/release.yml`](.github/workflows/release.yml)), which has not run either — no `v*` tag has been cut yet, so `docker compose` builds them locally until one is.
 
 ## Self-hosting
 
-The compose files here are written for a Coolify + Traefik host. They publish **no ports** and contain **no reverse proxy** — self-hosting outside Coolify means adding those yourself.
+One VPS, one domain, one command. [`docker-compose.selfhost.yml`](docker-compose.selfhost.yml) brings up Caddy, the API, the static web app, Mongo and Redis, with Caddy terminating TLS and routing `/api` and `/ws` to the server and everything else to the client.
+
+```bash
+cp .env.selfhost.example .env
+```
+
+Set `APP_DOMAIN` and `APP_URL` to your domain, generate `BETTER_AUTH_SECRET`, then:
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+[`docs/self-hosting.md`](docs/self-hosting.md) is the full manual: prerequisites, first run, SMTP, backup and restore, upgrades, and troubleshooting.
+
+### Which compose file is which
 
 | File | Purpose |
 | --- | --- |
+| `docker-compose.selfhost.yml` | **Self-hosting.** Everything on one domain behind Caddy, with Mongo and Redis included. The one you want. |
 | `docker-compose.dev.yml` | Local dev infra only: Mongo, Redis, SeaweedFS S3. No app containers. |
-| `docker-compose.server.yml` | Production API. One service, `server`. Expects an externally managed Mongo/Redis via `MONGODB_URI` / `REDIS_URL`. |
-| `docker-compose.client.yml` | Production web app. One service, `client`. |
-| `docker-compose.yml` | Legacy single-app layout that bundles Mongo and Redis. Its own header documents that nothing routes `/api` to the server under it. |
+| `docker-compose.server.yml` | The maintainer's production API. One service, `server`. Expects an externally managed Mongo/Redis. |
+| `docker-compose.client.yml` | The maintainer's production web app. One service, `client`. |
+| `docker-compose.yml` | Legacy single-app layout. Its own header documents that nothing routes `/api` to the server under it. |
 
 The service names `server` and `client` are load-bearing under Coolify — it keys routing by them. Do not rename them.
 
-### 1. Build your own images
+Under the self-host layout the client image is built with an **empty** `NEXT_PUBLIC_API_URL`, so every call the browser makes is same-origin and the image works on anybody's domain. That is why it is published separately as `ghcr.io/trebeljahr/tracktime-client-selfhost` — the `:main` client image bakes in the maintainer's own API host.
 
-Both compose files default to `ghcr.io/trebeljahr/tracktime-{server,client}:main`, which are built from this repo and point at the maintainer's API host. Build your own and set `SERVER_IMAGE` / `CLIENT_IMAGE`.
+### `TRUSTED_ORIGINS`
 
-```bash
-# API — all configuration is runtime env, no build args needed
-docker build -f packages/server/Dockerfile -t myregistry/tracktime-server:main .
-```
-
-**The web app's API URL is baked in at build time.** `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` are inlined into the browser bundle by `next build`; runtime env on the deployed container cannot change them, and rebuilding is the only way to retarget. If you omit them the build does *not* fail — the client falls back to the empty string, i.e. same-origin, and the browser then calls the web container instead of the API. This is the single most common way to get a broken deploy.
-
-```bash
-docker build -f packages/client/Dockerfile -t myregistry/tracktime-client:main . \
-  --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
-  --build-arg NEXT_PUBLIC_WS_URL=wss://api.example.com
-```
-
-> **Caveat, verified by inspection:** `packages/client/next.config.ts` sets `output: "export"` unconditionally, so `next build` emits `packages/client/out` and never `.next/standalone` — which is what `packages/client/Dockerfile`'s runtime stage copies. That Dockerfile has never been exercised by CI. Until it is fixed, the reliable path for the web app is to build a static export (`pnpm run build:client` with the two `NEXT_PUBLIC_*` values set) and serve `packages/client/out` from any static host. The E2E harness does exactly that.
-
-### 2. Supply the environment
-
-No `.env` file ships in the repo — only `packages/server/.env.example` and `packages/client/.env.example` are tracked. The server image's runtime stage contains no env file either, so **every value comes from plain container env**. (`DOTENV_PRIVATE_KEY_PRODUCTION` appears in the compose file but decrypts nothing in a self-hosted image; set it empty to silence the warning.)
-
-Four variables make the server throw at boot when `NODE_ENV=production`:
-
-| Variable | Meaning |
-| --- | --- |
-| `MONGODB_URI` | Mongo connection string. |
-| `BETTER_AUTH_SECRET` | Session signing secret — `openssl rand -base64 32`. |
-| `BETTER_AUTH_URL` | The API's own public origin, as the browser reaches it. |
-| `FRONTEND_URL` | The web app's origin. Doubles as the CORS allow-list and the primary trusted origin. |
-
-Everything else is optional: `REDIS_URL` (the server logs that it is skipping Redis when unset), the `S3_*` / `AWS_*` block, `GOOGLE_CLIENT_*`, `LISTMONK_*`, `SENTRY_DSN`. Note that `docker-compose.server.yml` gives `S3_PUBLIC_URL`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` no default, so compose warns and passes empty strings if you leave them unset.
-
-### 3. `TRUSTED_ORIGINS`
+A single-domain self-host does not need this at all: the browser's origin *is* `FRONTEND_URL`. It matters when something other than that domain signs in.
 
 better-auth validates the `Origin` header on sign-in whenever the request carries `Sec-Fetch-*` headers, which every real browser fetch does. A browser origin that is not `FRONTEND_URL` gets `403 INVALID_ORIGIN` **before the password is checked**. Add, comma-separated, whichever apply:
 
@@ -160,10 +146,6 @@ better-auth validates the `Origin` header on sign-in whenever the request carrie
 - `tauri://localhost` and `http://tauri.localhost` — Tauri on macOS/Linux and Windows
 
 Raycast and CLI clients need nothing here — their requests carry neither `Origin` nor `Sec-Fetch-*`. What guards them is the device flow plus the client-id allowlist in `packages/server/src/auth/client-label.ts`.
-
-### 4. Expose it
-
-The server listens on `5159` (health check at `GET /api/health`), the client container on `6477`. Add a `ports:` block to your copy of each compose file, or put your own proxy in front — one hostname each. Path-based routing (`/api` and `/ws` under one domain) is not what this topology does.
 
 ## Development
 
@@ -240,6 +222,7 @@ The E2E suite starts its own Mongo, Redis and S3 containers on separate ports an
 | [`CHANGELOG.md`](CHANGELOG.md) | What has changed. It starts at the point the project was opened up, not at the first commit. |
 | [`CLAUDE.md`](CLAUDE.md) | Instructions for AI coding agents, not contributor documentation — but worth knowing about. [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout) explains when to reach for it. |
 | [`docs/deploy.md`](docs/deploy.md) | The production topology: two Coolify apps on one domain, and the four places that must agree on the API origin. |
+| [`docs/self-hosting.md`](docs/self-hosting.md) | Running your own instance: `docker-compose.selfhost.yml`, one domain behind a reverse proxy, SMTP, backup, restore and upgrades. |
 | [`docs/dev-setup.md`](docs/dev-setup.md) | The maintainer's own Tailscale/Caddy dev-URL setup. Needs a private CLI that is not installable from this repo — skip it. |
 | `docs-site/` | A Docusaurus site with three pages. **Not deployed anywhere**: with `DOCS_SITE_URL` unset it uses a placeholder URL, which switches on `noIndex` and a disallow-all robots.txt. Its content is still starter boilerplate. Run it locally with `pnpm run dev:docs`. |
 
