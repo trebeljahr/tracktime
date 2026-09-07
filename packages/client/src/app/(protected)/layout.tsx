@@ -4,6 +4,11 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { getSession } from "@/lib/auth-client";
+import { useNativeSession } from "@/hooks/use-native-session";
+import {
+  verdictForRejection,
+  verdictForResult,
+} from "@/lib/session-verdict";
 import { AppShell } from "@/components/app-shell";
 
 type Verdict = "checking" | "in" | "out";
@@ -15,6 +20,12 @@ export default function ProtectedLayout({
 }) {
   const router = useRouter();
   const { isAuthenticated, isLoading } = useAuth();
+  // On native the bearer token comes out of the Keychain asynchronously, so
+  // the very first `useSession()` at the root fires without it and resolves
+  // null. Deciding on that would bounce a signed-in phone to /login on every
+  // cold launch, so the check waits for `ready` — which is true from the
+  // first render on web, where there is no token to wait for.
+  const { token: nativeToken, ready: sessionReady } = useNativeSession();
 
   // The session hook is mounted at the root, so a `null` it cached while the
   // user sat on /login or /signup survives the navigation that follows a
@@ -24,7 +35,7 @@ export default function ProtectedLayout({
   const [recheck, setRecheck] = React.useState<Verdict>("checking");
 
   React.useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || !sessionReady) return;
 
     if (isAuthenticated) {
       setRecheck("in");
@@ -34,28 +45,31 @@ export default function ProtectedLayout({
     let cancelled = false;
     setRecheck("checking");
 
+    // `hasStoredToken` is false on web by construction — `getNativeToken()`
+    // only ever returns a value under Capacitor — so the web verdict is
+    // exactly what it was: session or /login.
+    const context = { hasStoredToken: nativeToken !== null };
+
     void getSession()
       .then((result) => {
         if (cancelled) return;
-        setRecheck(result?.data?.session ? "in" : "out");
+        setRecheck(verdictForResult(result, context));
       })
       .catch(() => {
-        // A network failure is not proof of being signed out, but there is
-        // nothing useful to render either — send them to /login and let them
-        // retry there.
-        if (!cancelled) setRecheck("out");
+        if (cancelled) return;
+        setRecheck(verdictForRejection(context));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, isLoading]);
+  }, [isAuthenticated, isLoading, sessionReady, nativeToken]);
 
   React.useEffect(() => {
     if (recheck === "out") router.replace("/login");
   }, [recheck, router]);
 
-  if (isLoading || recheck === "checking") {
+  if (isLoading || !sessionReady || recheck === "checking") {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="text-muted-foreground">Loading...</p>
