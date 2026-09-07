@@ -163,6 +163,19 @@ export function DateRangePicker({
 }: DateRangePickerProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
 
+  // The two fields are edited as a draft and only committed once they describe
+  // an ordered range. A native date input fires `change` on every keystroke, so
+  // retyping the year of `to` walks through 0002, 0020, 0202 before 2025 — each
+  // an intermediate that is earlier than `from`. Committing those collapsed the
+  // range onto the half-typed year and took the other bound with it.
+  const [draft, setDraft] = React.useState<DateRange>(value);
+
+  React.useEffect(() => {
+    // Primitive deps: a parent that rebuilds `value` each render must not wipe
+    // an edit in progress.
+    setDraft({ from: value.from, to: value.to });
+  }, [value.from, value.to]);
+
   const active = React.useMemo(
     () => matchPreset(value, weekStartsOn),
     [value, weekStartsOn]
@@ -178,19 +191,33 @@ export function DateRangePicker({
 
   const setBound = React.useCallback(
     (bound: "from" | "to", next: string): void => {
-      if (next === "") return;
-      const candidate: DateRange = { ...value, [bound]: next };
-      // Keep the range ordered: an out-of-order edit collapses it to one day
-      // rather than silently producing a range the server would reject.
-      onChange(
-        candidate.from > candidate.to ? { from: next, to: next } : candidate
-      );
+      const candidate: DateRange = { ...draft, [bound]: next };
+      setDraft(candidate);
+
+      // Incomplete or out of order: keep it on screen so the other bound can be
+      // fixed, but do not report it upwards.
+      if (candidate.from === "" || candidate.to === "") return;
+      if (candidate.from > candidate.to) return;
+      if (candidate.from === value.from && candidate.to === value.to) return;
+
+      onChange(candidate);
     },
-    [onChange, value]
+    [draft, onChange, value.from, value.to]
+  );
+
+  const invalid = draft.from !== "" && draft.to !== "" && draft.from > draft.to;
+
+  const handleOpenChange = React.useCallback(
+    (next: boolean): void => {
+      // Discard an unfinished edit rather than reopening onto it.
+      if (!next) setDraft({ from: value.from, to: value.to });
+      setOpen(next);
+    },
+    [value.from, value.to]
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -209,7 +236,7 @@ export function DateRangePicker({
       </PopoverTrigger>
       <PopoverContent
         align={align}
-        className="w-72 p-2"
+        className="w-80 p-2"
         data-testid={`${testId}-content`}
       >
         <div className="grid gap-1">
@@ -231,33 +258,44 @@ export function DateRangePicker({
         <Separator className="my-2" />
 
         <div className="grid grid-cols-2 gap-2">
-          <div className="grid gap-1">
+          <div className="grid min-w-0 gap-1">
             <Label htmlFor={`${testId}-from`} className="text-xs">
               From
             </Label>
             <Input
               id={`${testId}-from`}
               type="date"
-              value={value.from}
+              value={draft.from}
+              max={draft.to || undefined}
               onChange={(event) => setBound("from", event.target.value)}
-              className="h-8"
+              className="h-8 min-w-0 px-2"
               data-testid={`${testId}-from`}
             />
           </div>
-          <div className="grid gap-1">
+          <div className="grid min-w-0 gap-1">
             <Label htmlFor={`${testId}-to`} className="text-xs">
               To
             </Label>
             <Input
               id={`${testId}-to`}
               type="date"
-              value={value.to}
+              value={draft.to}
+              min={draft.from || undefined}
               onChange={(event) => setBound("to", event.target.value)}
-              className="h-8"
+              className="h-8 min-w-0 px-2"
               data-testid={`${testId}-to`}
             />
           </div>
         </div>
+
+        {invalid ? (
+          <p
+            className="mt-2 text-xs text-destructive"
+            data-testid={`${testId}-invalid`}
+          >
+            From is after To — the range is not applied yet.
+          </p>
+        ) : null}
       </PopoverContent>
     </Popover>
   );
