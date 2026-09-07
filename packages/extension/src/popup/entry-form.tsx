@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from "react";
+import { useState, type JSX } from "react";
 import {
   deviceTimeZone,
   formatDuration,
@@ -9,6 +9,7 @@ import {
   zoneLabel,
   type Client,
   type DayKey,
+  type DescriptionSuggestion,
   type DurationFormat,
   type Project,
   type TimeFormat,
@@ -16,6 +17,7 @@ import {
 import type { BackgroundState } from "../lib/messaging";
 import { Combobox, type ComboboxOption } from "./combobox";
 import { DayStepper } from "./day-stepper";
+import { DescriptionField } from "./description-field";
 import { Switch } from "./switch";
 import { TagPicker } from "./tag-picker";
 import { TimeField } from "./time-field";
@@ -68,6 +70,8 @@ export type EntryFormProps = {
   /** The row is still a queued create, so nothing about it can be edited yet. */
   readOnly?: boolean;
   onChange: (next: EntryDraft, patch: EntryFieldPatch) => void;
+  /** Asks the worker what this person has called work like this before. */
+  onSearchDescriptions: (query: string) => void;
   /**
    * Loads the task list for a project into the worker's snapshot.
    *
@@ -193,6 +197,7 @@ export function EntryForm({
   locked = false,
   readOnly = false,
   onChange,
+  onSearchDescriptions,
   onCreateTag,
 }: EntryFormProps): JSX.Element {
   const timeFormat: TimeFormat = state.settings?.timeFormat ?? "24h";
@@ -227,26 +232,43 @@ export function EntryForm({
     change({ description: next }, {});
   };
 
-  /**
-   * Set for the length of an Escape, and read by the blur it causes.
-   *
-   * `blur()` dispatches React's `onBlur` synchronously inside the key handler,
-   * before the `setText` above it has been applied — so without this the
-   * commit runs against the abandoned text and Escape SAVES the edit it was
-   * pressed to throw away.
-   */
-  const reverting = useRef(false);
-
-  const commitDescription = (): void => {
-    if (reverting.current) {
-      reverting.current = false;
-      return;
-    }
-    const next = text.trim();
-    if (next === values.description) return;
+  const commitDescription = (next: string): void => {
     setText(next);
     setLastText(next);
+    if (next === values.description) return;
     change({ description: next }, { description: next });
+  };
+
+  /**
+   * A suggestion taken with everything the entry behind it carried.
+   *
+   * One change, not five: `entries.update` refuses an invoiced entry on the
+   * mere presence of `projectId`, `taskId` or `billable`, so a fill that
+   * arrived as separate patches would be refused halfway through and leave the
+   * entry describing a combination the user never picked. `factsLocked` keeps
+   * the offer off those entries entirely — this is the second line of defence.
+   */
+  const fillFromSuggestion = (suggestion: DescriptionSuggestion): void => {
+    setText(suggestion.description);
+    setLastText(suggestion.description);
+    change(
+      {
+        description: suggestion.description,
+        projectId: suggestion.projectId,
+        taskId: suggestion.taskId,
+        tagIds: suggestion.tagIds,
+        billable: suggestion.billable,
+      },
+      mode === "create"
+        ? { }
+        : {
+            description: suggestion.description,
+            projectId: suggestion.projectId,
+            taskId: suggestion.taskId,
+            tagIds: suggestion.tagIds,
+            billable: suggestion.billable,
+          },
+    );
   };
 
   const selectProject = (next: string | null): void => {
@@ -327,38 +349,25 @@ export function EntryForm({
 
   return (
     <div className="form" data-testid="entry-form">
-      <div className="field">
-        <label className="field__label" htmlFor="entry-description">
-          Description
-        </label>
-        <input
-          id="entry-description"
-          className="input"
-          type="text"
-          autoComplete="off"
-          placeholder="What was this?"
-          value={text}
-          disabled={labelsLocked}
-          onChange={(event) => typeDescription(event.target.value)}
-          // Saved when the field is left, the same as the tracker's running
-          // description — typing must not fire a mutation per keystroke.
-          onBlur={commitDescription}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commitDescription();
-              event.currentTarget.blur();
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              reverting.current = true;
-              setText(values.description);
-              event.currentTarget.blur();
-            }
-          }}
-          data-testid="entry-description"
-        />
-      </div>
+      <DescriptionField
+        id="entry-description"
+        label="Description"
+        value={text}
+        committed={values.description}
+        placeholder="What was this?"
+        disabled={labelsLocked}
+        suggestions={state.descriptions ?? []}
+        suggestionsFor={state.descriptionsFor}
+        onSearch={onSearchDescriptions}
+        onType={typeDescription}
+        onCommit={commitDescription}
+        // Offered only where the fields it would fill can actually be
+        // changed. On an invoiced entry the description is still editable
+        // while the project, task and billable flag are not, and a control
+        // that silently dropped four of its five fields would be a lie.
+        onFill={factsLocked ? undefined : fillFromSuggestion}
+        testId="entry-description"
+      />
 
       <Combobox
         label="Project"

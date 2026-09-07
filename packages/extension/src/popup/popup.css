@@ -515,6 +515,112 @@ button.tag:hover .tag__x {
   border-radius: 8px;
 }
 
+/* ── description suggestions ─────────────────────────────────────────
+ *
+ * Positioned like the pickers above, and for the same reason: a list that
+ * pushed Start down would move the button while it was being aimed at.
+ */
+
+.suggest {
+  position: relative;
+}
+
+.suggest__list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 214px;
+  overflow-y: auto;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.suggest__item {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.suggest__row {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggest__row--active {
+  background: var(--surface);
+}
+
+.suggest__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  /* No project is a real state, not a missing colour — an outline says so
+     without inventing a hue the catalog never assigned. */
+  border: 1px solid var(--muted);
+}
+
+.suggest__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.suggest__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest__hint {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest__fill {
+  flex: none;
+  width: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.suggest__fill:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.suggest__legend {
+  padding: 6px 8px 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 /* ── quick start ───────────────────────────────────────────────────── */
 
 .quick {

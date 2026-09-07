@@ -26,6 +26,7 @@ import {
   createProject,
   createTask,
 } from "./catalog";
+import { searchDescriptions } from "./descriptions";
 import { listDevices, revokeDevice, revokeOtherDevices } from "./devices";
 import {
   createEntry,
@@ -289,6 +290,11 @@ const apply = async (message: PopupToBackground): Promise<void> => {
       return removeEntry(message.id);
     case "settings:update":
       return updateSettings(message.patch);
+    case "descriptions:search":
+      // Fills the cache the snapshot below reads. It swallows its own failure
+      // on purpose — see `descriptions.ts`.
+      await searchDescriptions(message.query);
+      return;
     case "devices:list":
       // Answers with the list; `apply` reports it through the fresh snapshot
       // instead, so the value is dropped here.

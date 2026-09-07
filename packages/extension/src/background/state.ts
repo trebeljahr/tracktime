@@ -23,6 +23,7 @@ import {
   entriesAreStale,
   forgetSession,
   getActiveView,
+  getCachedDescriptions,
   getCachedDevices,
   getCachedSettings,
   isServerReachable,
@@ -83,6 +84,8 @@ const signedOutState = (
   entries: null,
   entriesStale: false,
   devices: null,
+  descriptions: null,
+  descriptionsFor: null,
 });
 
 /**
@@ -282,5 +285,10 @@ export async function buildState(): Promise<BackgroundState> {
     entriesStale: entriesAreStale(),
     // Never fetched here — the Devices section asks for it when it is opened.
     devices: getCachedDevices(),
+    // Same: `descriptions:search` fills these when a description field is
+    // being typed in. Carried on every snapshot afterwards so the poll cannot
+    // blank a list the user is looking at.
+    descriptions: getCachedDescriptions()?.rows ?? null,
+    descriptionsFor: getCachedDescriptions()?.query ?? null,
   };
 }

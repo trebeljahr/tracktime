@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type JSX } from "react";
+import { useState, type FormEvent, type JSX } from "react";
 import {
   createId,
   deviceTimeZone,
@@ -6,6 +6,7 @@ import {
   withProject,
   withTask,
   type Client,
+  type DescriptionSuggestion,
   type DurationFormat,
   type EntryFields,
   type IdleAnswer,
@@ -15,6 +16,7 @@ import {
 } from "@starter/core";
 import type { BackgroundState } from "../lib/messaging";
 import { Combobox, type ComboboxOption } from "./combobox";
+import { DescriptionField } from "./description-field";
 import { formatElapsed } from "./entry-format";
 import { Header } from "./header";
 import { TagPicker } from "./tag-picker";
@@ -63,6 +65,8 @@ export type TrackerScreenProps = {
    */
   onOpenSettings: () => void;
   onOpenEntries: () => void;
+  /** Asks the worker what this person has called work like this before. */
+  onSearchDescriptions: (query: string) => void;
   /** Loads the task list for a project into the worker's snapshot. */
   onCreateClient: (name: string) => Promise<boolean>;
   onCreateTag: (name: string) => Promise<boolean>;
@@ -160,6 +164,7 @@ export function TrackerScreen({
   onAnswerIdle,
   onOpenSettings,
   onOpenEntries,
+  onSearchDescriptions,
   onCreateClient,
   onCreateTag,
   onCreateProject,
@@ -274,25 +279,40 @@ export function TrackerScreen({
   };
 
   /**
-   * Set for the length of an Escape, and read by the blur it causes.
+   * Save a settled description against the running entry.
    *
-   * `blur()` dispatches React's `onBlur` synchronously inside the key handler,
-   * before the `setDescription` above it has been applied — so without this the
-   * commit runs against the abandoned text and Escape SAVES the edit it was
-   * pressed to throw away.
+   * A draft needs no write — `setDescription` has already recorded it, and it
+   * reaches the server when Start is pressed.
    */
-  const reverting = useRef(false);
-
-  /** Save a typed description against the running entry, if it changed. */
-  const commitDescription = (): void => {
-    if (reverting.current) {
-      reverting.current = false;
-      return;
-    }
+  const commitDescription = (next: string): void => {
+    setDescription(next);
     if (running === null) return;
-    const next = description.trim();
     if (next === running.description) return;
     patchRunning({ description: next });
+  };
+
+  /**
+   * A suggestion taken with everything the entry behind it carried.
+   *
+   * The whole point of the gesture is that it is one action: filling the
+   * fields one at a time would send `timer:update` four times against a
+   * running entry, and on a draft would re-derive `billable` from the project
+   * halfway through and overwrite the flag the suggestion came with.
+   */
+  const fillFromSuggestion = (suggestion: DescriptionSuggestion): void => {
+    setDescription(suggestion.description);
+    setProjectId(suggestion.projectId);
+    setTaskId(suggestion.taskId);
+    setTagIds(suggestion.tagIds);
+    setBillable(suggestion.billable);
+    if (running === null) return;
+    patchRunning({
+      description: suggestion.description,
+      projectId: suggestion.projectId,
+      taskId: suggestion.taskId,
+      tagIds: suggestion.tagIds,
+      billable: suggestion.billable,
+    });
   };
 
   const beginProject = async (name: string): Promise<void> => {
@@ -487,34 +507,24 @@ export function TrackerScreen({
             </span>
           ) : null}
 
-          <div className="field">
-            <label className="field__label" htmlFor="description">
-              Description
-            </label>
-            <input
-              id="description"
-              className="input"
-              type="text"
-              autoFocus
-              autoComplete="off"
-              placeholder="What are you working on?"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              // A running entry's description is saved when the field is left,
-              // the same as the web app — typing must not fire a mutation per
-              // keystroke.
-              onBlur={commitDescription}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  reverting.current = true;
-                  setDescription(running?.description ?? "");
-                  event.currentTarget.blur();
-                }
-              }}
-              data-testid="tracker-description"
-            />
-          </div>
+          <DescriptionField
+            id="description"
+            label="Description"
+            value={description}
+            // A draft has nothing settled behind it, so it compares against
+            // itself: leaving an untouched field then writes nothing, and
+            // Escape has nothing to restore it to.
+            committed={running?.description ?? description}
+            placeholder="What are you working on?"
+            autoFocus
+            suggestions={state.descriptions ?? []}
+            suggestionsFor={state.descriptionsFor}
+            onSearch={onSearchDescriptions}
+            onType={setDescription}
+            onCommit={commitDescription}
+            onFill={fillFromSuggestion}
+            testId="tracker-description"
+          />
 
           {pendingProject === null ? (
             <Combobox

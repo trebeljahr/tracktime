@@ -344,6 +344,24 @@ export function App(): JSX.Element {
     [send],
   );
 
+  /**
+   * Ask the worker for description suggestions.
+   *
+   * Silent, like the poll and for the same reason: it must not clear or set
+   * the error banner. A typeahead that wiped the server's refusal off screen
+   * because somebody kept typing would be taking the answer away mid-sentence,
+   * and a network blip is not something a suggestion list should announce.
+   */
+  const searchDescriptions = useCallback((query: string): void => {
+    void sendToBackground({ type: "descriptions:search", query }).then(
+      (response) => {
+        if (!response.ok) return;
+        apiUrlRef.current = response.state.apiUrl;
+        setState(response.state);
+      },
+    );
+  }, []);
+
   const listDevices = useCallback(
     (): Promise<boolean> => send({ type: "devices:list" }),
     [send],
@@ -505,6 +523,7 @@ export function App(): JSX.Element {
             onAnswerIdle: (answer) => send({ type: "idle:answer", answer }),
             onOpenSettings: () => openSection(null),
             onOpenEntries: () => go({ name: "entries" }),
+            onSearchDescriptions: searchDescriptions,
             onCreateClient: createClient,
             onCreateTag: createTag,
             onCreateProject: createProject,
@@ -542,6 +561,7 @@ export function App(): JSX.Element {
             onGoTracker: goTracker,
             onUpdateEntry: updateEntry,
             onDeleteEntry: deleteEntry,
+            onSearchDescriptions: searchDescriptions,
             onCreateTag: createTag,
             onMissing: entryMissing,
           }}
@@ -553,6 +573,7 @@ export function App(): JSX.Element {
             onGoTracker: goTracker,
             onDraftChange: changeDraft,
             onCreateEntry: createEntry,
+            onSearchDescriptions: searchDescriptions,
             onCreateTag: createTag,
           }}
         />

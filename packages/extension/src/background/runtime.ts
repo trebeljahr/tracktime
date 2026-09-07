@@ -21,6 +21,7 @@ import {
   OFFLINE_QUEUE_STORAGE_KEY,
   type ApiClient,
   type Client,
+  type DescriptionSuggestion,
   type DetailedEntry,
   type DetailedFavorite,
   type DeviceSession,
@@ -181,6 +182,22 @@ let cachedEntries: {
 let entriesStale = false;
 
 let cachedDevices: DeviceSession[] | null = null;
+
+/**
+ * The description suggestions for one query, and the query they answer.
+ *
+ * One entry rather than a map keyed by query: the popup asks about whatever is
+ * in the field right now, so every earlier prefix is a question nobody will
+ * ask again. Keeping them would grow without bound for a list that is thrown
+ * away when the popup closes.
+ */
+export type CachedDescriptions = {
+  query: string;
+  rows: DescriptionSuggestion[];
+  fetchedAt: number;
+};
+
+let cachedDescriptions: CachedDescriptions | null = null;
 
 /** Discovered once per API URL from /api/health; null until then. */
 let cachedWebUrl: string | null = null;
@@ -520,6 +537,7 @@ export async function reload(): Promise<Runtime> {
   cachedEntries = null;
   entriesStale = false;
   cachedDevices = null;
+  cachedDescriptions = null;
   // A retarget or a new token is a new account as far as the popup is
   // concerned, and the timer is the only screen that makes sense to land on
   // before anything has been read.
@@ -553,6 +571,7 @@ const setSyncStatus = (next: SyncStatus): void => {
   cachedEntries = null;
   entriesStale = false;
   cachedDevices = null;
+  cachedDescriptions = null;
 
   // A socket that just came up is the first reliable sign the network is back.
   // Nothing awaits this, so it must swallow its own failure — the next
@@ -587,6 +606,9 @@ const applyEvent = (event: SyncEvent): void => {
       rememberRunning(null);
       cachedRecents = null;
       entriesStale = true;
+      // A finished entry is the only thing `entries.descriptions` reads, so
+      // this is the moment a name typed on another device becomes suggestible.
+      cachedDescriptions = null;
       return;
     case "entry.upserted":
       // Marked before the running-entry branches below, not inside them: any
@@ -597,6 +619,7 @@ const applyEvent = (event: SyncEvent): void => {
         rememberRunning(event.entry);
         return;
       }
+      cachedDescriptions = null;
       // An edit that closed the entry we thought was running stops the timer.
       if (cachedRunning?.entry?.id === event.entry.id) {
         rememberRunning(null);
@@ -604,6 +627,7 @@ const applyEvent = (event: SyncEvent): void => {
       return;
     case "entry.deleted":
       entriesStale = true;
+      cachedDescriptions = null;
       if (cachedRunning?.entry?.id === event.id) rememberRunning(null);
       return;
     case "catalog.changed":
@@ -813,6 +837,13 @@ export const entriesCacheIsFresh = (): boolean => {
   if (cachedEntries === null) return false;
   if (entriesStale) return false;
   return Date.now() - cachedEntries.fetchedAt < ENTRIES_CACHE_TTL_MS;
+};
+
+export const getCachedDescriptions = (): CachedDescriptions | null =>
+  cachedDescriptions;
+
+export const setCachedDescriptions = (next: CachedDescriptions): void => {
+  cachedDescriptions = next;
 };
 
 export const getCachedDevices = (): DeviceSession[] | null => cachedDevices;

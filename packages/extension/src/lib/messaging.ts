@@ -10,6 +10,7 @@
  */
 import type {
   Client,
+  DescriptionSuggestion,
   DetailedEntry,
   DetailedFavorite,
   DeviceSession,
@@ -237,6 +238,21 @@ export type PopupToBackground =
    */
   | { type: "devices:list" }
   /**
+   * Ask what this person has called work like this before.
+   *
+   * Answered like everything else — with a whole snapshot, carrying the rows
+   * and the query they answer. The query goes to the SERVER rather than
+   * filtering a list held here, because the rows are a page out of six months:
+   * a local filter would confidently answer "no match" for a description that
+   * is certainly there, having simply not been among the rows the unfiltered
+   * call happened to return.
+   *
+   * Never fails loudly. A typeahead that raises the popup's error banner
+   * because the network blinked is worse than one that quietly offers nothing,
+   * so the worker swallows the failure and leaves the last rows in place.
+   */
+  | { type: "descriptions:search"; query: string }
+  /**
    * Sign one OTHER device out.
    *
    * Never this one. Revoking the current session kills the bearer token while
@@ -354,6 +370,22 @@ export type BackgroundState = {
    * than an empty state worth rendering.
    */
   devices: DeviceSession[] | null;
+  /**
+   * Descriptions this person has used before, or null until one is asked for.
+   *
+   * Fetched on demand like {@link BackgroundState.devices}, and for the same
+   * reason: it is not worth a round trip every three seconds for a field
+   * nobody is typing in.
+   */
+  descriptions: DescriptionSuggestion[] | null;
+  /**
+   * The query {@link BackgroundState.descriptions} answers.
+   *
+   * The popup compares it against what is in the field before offering the
+   * rows. Typing outruns the round trip, so without it the list would spend
+   * most of its life describing a prefix the user has already moved past.
+   */
+  descriptionsFor: string | null;
 };
 
 export type BackgroundResponse =
