@@ -1,0 +1,232 @@
+# tracktime
+
+A self-hostable time tracker: clients, projects, tasks, tags, billable rates, reports and invoices, with a web app, a browser extension and a Raycast extension sharing one backend.
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+
+Hosted instance: <https://tracktime.trebeljahr.com> (API at <https://api.tracktime.trebeljahr.com>).
+
+<!-- Screenshot placeholder: add a capture of the /track screen at docs/screenshots/app.png,
+     then replace this comment with:
+     ![The tracktime web app tracking time against a project](docs/screenshots/app.png) -->
+
+## What it is
+
+Time tracking for freelance and consulting work: start a timer, tag it with a client, project and task, and get the hours back as a report, a CSV, a PDF or an invoice. Rates are per project, snapshotted onto each entry when it is written, so changing a project's rate never rewrites what you already billed.
+
+It is a pnpm monorepo — one Express + tRPC API, one Next.js web client, and shared packages the other clients reuse. Two Docker images and a MongoDB is the whole production footprint; Redis is optional. There is no SaaS tier gate and no telemetry you have not configured yourself.
+
+Everything is scoped to a workspace, but today that is effectively one workspace per person — see [Not there yet](#not-there-yet) before assuming team features.
+
+## Features
+
+### Tracking
+
+- **Timer with start / stop / continue / discard**, plus manual entry creation and editing. Entries carry a description, project, task, tags, a billable flag, a snapshotted hourly rate and currency, a source (web/desktop/mobile/extension/api/import) and the time zone they were recorded in.
+- **Favorites and quick-start recents.** Favorites are reorderable one-tap job templates; quick-start collapses your recent entries into distinct combinations. Quick starts deliberately open untagged, so the same job tagged differently one day does not fragment the list.
+- **Idle detection**, configurable per user (threshold, behaviour, whether a screen lock counts immediately), with a per-project behaviour override on the project itself.
+- **Runaway-timer guard.** A maximum entry duration, evaluated lazily whenever something resolves what is running — asking what is current, starting another timer, joining the sync room. There is no cron: nothing pushes you a notification on Saturday about Friday's forgotten timer, it is caught the next time you look.
+
+### Catalog
+
+- **Clients → Projects → Tasks**, plus **Tags** as an orthogonal dimension (many per entry, across projects).
+- Full CRUD. Clients, projects and tasks have an archive toggle and a delete that always deletes — never the tracked time, though: entries and favorites are detached and survive as project-less rows. Tags follow a different rule: a tag that still labels tracked time is archived instead of deleted, and only an unreferenced tag is removed outright (with a `$pull` sweep afterwards for anything written during the check).
+- Projects carry colour, client, billable default, hourly rate, estimated hours, a budget amount and currency, and an idle-behaviour override.
+
+### Views
+
+- **Track** — the timer plus the day's entries.
+- **Weekly timesheet grid** — rows of project + task, columns of weekday, editable cells. The edit rules are explicit and unit-tested: the running entry's cell is never writable, an empty cell creates exactly one entry, a single same-day entry has its end moved (typing 0 deletes it), and a midnight-crossing or multi-entry cell is refused read-only with a breakdown and a link through rather than guessing.
+- **Calendar** — a time grid positioned by clock time, with drag editing, zoom, clustering for dense bursts of short entries, and an undo stack.
+
+### Reports and money
+
+- **Three reports**: summary (totals, grouped breakdown by project/client/task/tag, zero-filled daily series), detailed (paginated entry log whose totals span the whole range), and weekly (7-day grid).
+- **CSV and PDF export** for all three, paginating the full range so an export is never a page of what you were looking at.
+- **Invoices** built from un-invoiced billable time. Preview rolls up line items without writing; creating an invoice re-gathers server-side rather than trusting the client's line items, assigns a per-year sequential number, and stamps the invoice onto every entry it billed. Draft/sent/paid status, PDF export, and a guard that refuses edits to entries already on an invoice.
+- **Project budgets and estimates** — a lifetime roll-up of hours and earnings against estimated hours and budget, computed from each entry's own snapshotted rate.
+
+> Reporting grouped by tag gives each of an entry's tags that entry's **full** duration, so tag rows sum to more than the range total on purpose. The alternative — splitting a duration across tags — would invent time nobody spent. The screen says so where it happens; the report's own totals stay single-counted.
+
+### Data in and out
+
+- **Import from a delimited file.** Headers are matched to roles by an alias table and the values decide the granularity, so it is column shapes rather than vendor-specific formats. Day/month order is decided per file and stated on screen when nothing in the data settles it.
+- **Preview then commit.** The commit re-parses the same input rather than trusting the preview it handed back, so a tampered preview cannot write something you never approved.
+- **Every import is one undoable batch**, deleted by an indexed id — and refused if any of its entries have since landed on an invoice.
+- **Workspace export**: JSON (lossless — colours, archived rows, project rates, catalog referenced by name so it restores into an empty or different workspace) and CSV (written in the exact column shape the importer reads back).
+
+### Platform
+
+- **Realtime multi-device sync** over WebSocket on the same Express process. The upgrade is authenticated and refused with a real 401/403; mutations carry a per-tab origin id echoed back, so a client ignores its own echo.
+- **Offline queue** in the web app and browser extension: entry mutations made offline are queued and replayed on reconnect, with optimistic temporary ids until the server answers.
+- **Sign-in for clients without a cookie jar** without minting API tokens. Every client signs in normally and sends the resulting session token as `Authorization: Bearer <token>`; clients that cannot show a form (Raycast, a CLI) use the RFC 8628 device flow, approved in an already signed-in browser. Sessions are named by their client under Settings → Devices, where any of them can be revoked — killing HTTP and WebSocket at once.
+- **Split settings**: money and calendar conventions per workspace (default rate, currency, week start), rendering per user (12h/24h, h:m:s vs decimal, idle, limits).
+- Optional Google sign-in, optional Sentry/GlitchTip error reporting, optional Listmonk + SES newsletter double-opt-in.
+
+## Clients
+
+| Client | State |
+| --- | --- |
+| **Web app** (Next.js static export) | Shipped, and the reference implementation. 14 signed-in routes: track, timesheet, calendar, three reports, clients, projects, tasks, tags, invoices, settings, profile, device. |
+| **Browser extension** (Chrome MV3) | Working and genuinely useful — popup only, no content scripts. Timer, badge, catalog, favorites, idle and the offline queue. Version 0.1.0, not published to any store; you load it unpacked. |
+| **Raycast extension** (macOS) | Working and broad — 11 commands, including a menu bar timer, a live one-second timer view and full catalog CRUD. Not published to the Raycast store, and it has **no offline queue**: a mutation made without connectivity is lost, unlike the same action from the web app or extension. |
+| **Desktop** (Electron) | Real but thin. Window lifecycle, persisted fullscreen preference, external-link handling and `powerMonitor`-backed idle reporting over IPC. No tray icon, no global shortcuts, no auto-update, no signing setup. Never built or distributed. |
+| **Desktop** (Tauri) | Scaffolding only — 24 lines of Rust with an empty setup and a Steamworks block inherited from the starter this repo was generated from. Do not count it as a desktop app. |
+| **Mobile** (Capacitor) | Config and a small JS bridge only. No `ios/` or `android/` directory exists, the bundle id is still `com.example.tracktime`, and nothing has been run on a device — despite the `dev:ios` / `dev:android` / `build:mobile` scripts existing in `package.json`. |
+| **CLI** | Does not exist. `tracktime-cli` appears only as an allowlisted device-flow client id. |
+
+## Not there yet
+
+Stated plainly, because the code has more scaffolding than product in these areas:
+
+- **Teams, invitations and workspace switching.** The substrate is real — every user gets a personal workspace, there is a member model with roles and visibility flags, and one middleware scopes every query — and better-auth's `organization` plugin is mounted, so its create-organization, invite-member, list-members and set-role endpoints are callable under `/api/auth/*`. What is missing is everything above them: **no tRPC router, no invite UI, no member list, no role editing and no workspace switcher**. The invitation email links to `/invite/<id>`, and that page does not exist, so an invitation sent today lands on a 404. The realtime layer is not ready either: every member currently receives the identical sync payload, which is only correct while a workspace has one member. Treat this as a single-user app.
+- **A public REST API.** The server mounts exactly four things: better-auth, tRPC, two newsletter routes and a health check. There is no versioned REST surface, no OpenAPI document, no API-key model and no rate limiting. tRPC is reachable with a bearer session token, but it is an internal contract typed against this repo, not a documented public API. (The `api` value in the `EntrySource` enum is reserved for third-party callers and nothing produces it today.)
+- **Timesheet approvals.** Nothing. No submitted/approved state, no approver role, no lock-after-approval, no notifications. The timesheet is an editing grid, not a submittable document. Invoice status is invoice lifecycle, not time approval.
+- **Time off, PTO, holidays, absence.** No model, no screen, no shared type. There is no non-working-day concept, so nothing computes capacity or utilization.
+- **Notifications of any kind.** No web push, no email digests, no scheduler, no job runner. The runaway guard is lazy on purpose and says so in its own source.
+- **SaaS subscription billing.** There is no Stripe service in the server at all — only a `billing.status` query that reports which `STRIPE_*` env vars are missing so the UI can show a developer notice. (Watch the word: "Billing" in the settings screen means *your clients' billable rates*, not a subscription.)
+- **Avatar upload / object storage.** An S3 service module exists and nothing imports it. `avatarUrl` is a field with no upload path behind it.
+- **Search, a command palette, and third-party integrations.** No global search, no palette, no calendar sync, no issue-tracker or commit import. Import is file-based only.
+- **Email delivery is conditional.** Password reset, verification and invitation emails fall back to logging the URL to the server console when Listmonk is not configured — which is the default local setup. Email verification is off.
+- **CI has never gone green.** The build-and-deploy workflow has two runs in its history — one failed at the build/test job, the other at E2E — so the Docker image builds and the deploy path have never actually executed. See the caveats in [self-hosting](#self-hosting).
+
+## Self-hosting
+
+The compose files here are written for a Coolify + Traefik host. They publish **no ports** and contain **no reverse proxy** — self-hosting outside Coolify means adding those yourself.
+
+| File | Purpose |
+| --- | --- |
+| `docker-compose.dev.yml` | Local dev infra only: Mongo, Redis, SeaweedFS S3. No app containers. |
+| `docker-compose.server.yml` | Production API. One service, `server`. Expects an externally managed Mongo/Redis via `MONGODB_URI` / `REDIS_URL`. |
+| `docker-compose.client.yml` | Production web app. One service, `client`. |
+| `docker-compose.yml` | Legacy single-app layout that bundles Mongo and Redis. Its own header documents that nothing routes `/api` to the server under it. |
+
+The service names `server` and `client` are load-bearing under Coolify — it keys routing by them. Do not rename them.
+
+### 1. Build your own images
+
+Both compose files default to `ghcr.io/trebeljahr/tracktime-{server,client}:main`, which are built from this repo and point at the maintainer's API host. Build your own and set `SERVER_IMAGE` / `CLIENT_IMAGE`.
+
+```bash
+# API — all configuration is runtime env, no build args needed
+docker build -f packages/server/Dockerfile -t myregistry/tracktime-server:main .
+```
+
+**The web app's API URL is baked in at build time.** `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` are inlined into the browser bundle by `next build`; runtime env on the deployed container cannot change them, and rebuilding is the only way to retarget. If you omit them the build does *not* fail — the client falls back to the empty string, i.e. same-origin, and the browser then calls the web container instead of the API. This is the single most common way to get a broken deploy.
+
+```bash
+docker build -f packages/client/Dockerfile -t myregistry/tracktime-client:main . \
+  --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
+  --build-arg NEXT_PUBLIC_WS_URL=wss://api.example.com
+```
+
+> **Caveat, verified by inspection:** `packages/client/next.config.ts` sets `output: "export"` unconditionally, so `next build` emits `packages/client/out` and never `.next/standalone` — which is what `packages/client/Dockerfile`'s runtime stage copies. That Dockerfile has never been exercised by CI. Until it is fixed, the reliable path for the web app is to build a static export (`pnpm run build:client` with the two `NEXT_PUBLIC_*` values set) and serve `packages/client/out` from any static host. The E2E harness does exactly that.
+
+### 2. Supply the environment
+
+No `.env` file ships in the repo — only `packages/server/.env.example` and `packages/client/.env.example` are tracked. The server image's runtime stage contains no env file either, so **every value comes from plain container env**. (`DOTENV_PRIVATE_KEY_PRODUCTION` appears in the compose file but decrypts nothing in a self-hosted image; set it empty to silence the warning.)
+
+Four variables make the server throw at boot when `NODE_ENV=production`:
+
+| Variable | Meaning |
+| --- | --- |
+| `MONGODB_URI` | Mongo connection string. |
+| `BETTER_AUTH_SECRET` | Session signing secret — `openssl rand -base64 32`. |
+| `BETTER_AUTH_URL` | The API's own public origin, as the browser reaches it. |
+| `FRONTEND_URL` | The web app's origin. Doubles as the CORS allow-list and the primary trusted origin. |
+
+Everything else is optional: `REDIS_URL` (the server logs that it is skipping Redis when unset), the `S3_*` / `AWS_*` block, `GOOGLE_CLIENT_*`, `LISTMONK_*`, `SENTRY_DSN`. Note that `docker-compose.server.yml` gives `S3_PUBLIC_URL`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` no default, so compose warns and passes empty strings if you leave them unset.
+
+### 3. `TRUSTED_ORIGINS`
+
+better-auth validates the `Origin` header on sign-in whenever the request carries `Sec-Fetch-*` headers, which every real browser fetch does. A browser origin that is not `FRONTEND_URL` gets `403 INVALID_ORIGIN` **before the password is checked**. Add, comma-separated, whichever apply:
+
+- `chrome-extension://<id>` — the browser extension (`pnpm run extension:id prod` prints it)
+- `capacitor://localhost,https://localhost` — Capacitor
+- `app://-` — Electron via a custom protocol (`file://` sends `Origin: null` and cannot be trusted with credentials)
+- `tauri://localhost` and `http://tauri.localhost` — Tauri on macOS/Linux and Windows
+
+Raycast and CLI clients need nothing here — their requests carry neither `Origin` nor `Sec-Fetch-*`. What guards them is the device flow plus the client-id allowlist in `packages/server/src/auth/client-label.ts`.
+
+### 4. Expose it
+
+The server listens on `5159` (health check at `GET /api/health`), the client container on `6477`. Add a `ports:` block to your copy of each compose file, or put your own proxy in front — one hostname each. Path-based routing (`/api` and `/ws` under one domain) is not what this topology does.
+
+## Development
+
+Requires Node 24 (`.nvmrc`), pnpm 11 via corepack, and Docker for the local infra.
+
+```bash
+corepack enable
+nvm install && nvm use
+
+git clone https://github.com/trebeljahr/tracktime.git && cd tracktime
+pnpm install
+
+# REQUIRED — .env.development is not tracked, so create it from the example
+cp packages/server/.env.example packages/server/.env.development
+# then set BETTER_AUTH_SECRET in it to any 32+ character string
+
+pnpm run dev:infra     # Mongo 27017, Redis 6379, SeaweedFS S3 9000 (docker)
+pnpm run dev           # client 3392, API 5159
+```
+
+Open <http://localhost:3392>.
+
+`pnpm run dev` pins those ports on purpose: the browser extension, Raycast and any native build bake their API URL in and cannot follow a port that moves. Variants:
+
+```bash
+pnpm run dev:auto            # every port auto-picked — use this for a second instance
+pnpm run dev:fixed           # the pinned ports, or exit
+pnpm run dev:docs            # also runs the docs site on 4000
+node scripts/dev.mjs --dry-run   # print the resolved ports, start nothing
+```
+
+**Inside a git worktree, `pnpm run dev` behaves like `dev:auto`** so parallel checkouts do not fight over the pinned ports — which also means the extension and Raycast will not find the server there unless you run `dev:fixed` or point them at the printed ports.
+
+Other clients:
+
+```bash
+pnpm run dev:extension       # browser extension, dev target (localhost:5159)
+pnpm run build:extension     # dist/       -> http://localhost:5159
+pnpm run build:extension:prod # dist-prod/ -> https://api.tracktime.trebeljahr.com
+pnpm run extension:id [dev|prod]  # the chrome-extension:// origin to trust
+
+pnpm run dev:raycast         # ray develop
+pnpm run dev:desktop         # Next dev + an Electron window
+```
+
+`pnpm run seed:assets`, `assets:push` and `assets:pull` shell out to a private CLI that is not installable from this repo. Nothing about running or testing the app depends on them — skip them.
+
+## Testing
+
+```bash
+pnpm run test:unit      # 21 server suites (node:test) — pure logic, no services needed
+pnpm run test:client    # 27 Vitest suites in the client — jsdom, no services needed
+pnpm run test:e2e       # 10 Playwright specs — REQUIRES DOCKER
+pnpm test               # all three in sequence
+
+pnpm run typecheck      # builds shared + core, then tsc --noEmit everywhere else
+pnpm run build          # shared -> core -> server -> client
+```
+
+The E2E suite starts its own Mongo, Redis and S3 containers on separate ports and runs against the **static export**, not the dev server, so the first run includes a full client build. If several checkouts run it at once, pass your own `E2E_SERVER_PORT`, `E2E_CLIENT_PORT` and `MONGODB_URI` or you will test another checkout's build.
+
+## Documentation
+
+- [`docs/dev-setup.md`](docs/dev-setup.md) — local setup in more detail
+- [`docs/deploy.md`](docs/deploy.md) — the two-app Coolify deployment
+- [`CLAUDE.md`](CLAUDE.md) — the fullest architectural description of the system, including the invariants that fail quietly if broken
+- `docs-site/` — a Docusaurus site with three pages. It is **not deployed anywhere**: with `DOCS_SITE_URL` unset it uses a placeholder URL, which switches on `noIndex` and a disallow-all robots.txt. Its content is still starter boilerplate. Run it locally with `pnpm run dev:docs`.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Commits must be signed off under the [Developer Certificate of Origin](https://developercertificate.org/) 1.1 — `git commit -s` adds the `Signed-off-by` trailer. There is no CLA.
+
+## License
+
+Licensed under the GNU Affero General Public License, version 3 or later (`AGPL-3.0-or-later`). See [LICENSE](LICENSE).
+
+The code is AGPL; the tracktime name, logo and domain are not — see [TRADEMARK.md](TRADEMARK.md).

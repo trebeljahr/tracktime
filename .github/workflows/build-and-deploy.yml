@@ -3,9 +3,21 @@ name: build-and-deploy
 on:
   push:
     branches: [main]
+  # Pull requests reach ONLY the dco job below. Every pre-existing job is
+  # gated on `github.event_name == 'push'`, because this file both pushes
+  # :main image tags to ghcr.io and POSTs to the Coolify deploy API — a PR
+  # must never be able to reach either.
+  pull_request:
+    types: [opened, synchronize, reopened]
 
+# The group was the constant `main-deploy`, which with cancel-in-progress
+# would have let PR runs cancel a main deploy mid-flight (and each other).
+# Including the event name and ref keeps every push to main in one
+# self-cancelling deploy group exactly as before — github.ref is always
+# refs/heads/main there — while each PR gets its own group, so a new push
+# to a PR branch cancels only that PR's own stale run.
 concurrency:
-  group: main-deploy
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -14,6 +26,7 @@ permissions:
 
 jobs:
   verify:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +40,7 @@ jobs:
       - run: pnpm run test:client
 
   e2e:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [verify]
     services:
@@ -87,6 +101,7 @@ jobs:
           AWS_REGION: us-east-1
 
   build-server:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [verify, e2e]
     steps:
@@ -106,6 +121,7 @@ jobs:
             ghcr.io/${{ github.repository }}-server:${{ github.sha }}
 
   build-client:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [verify, e2e]
     steps:
@@ -156,6 +172,7 @@ jobs:
   # the WebSocket sync connections, and a client-only change must not
   # restart it and drop every connected device's socket.
   deploy:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-server, build-client]
     steps:
@@ -204,3 +221,108 @@ jobs:
           COOLIFY_WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
         if: env.COOLIFY_BASE_URL == '' && env.COOLIFY_WEBHOOK_URL != ''
         run: curl -fsSL "$COOLIFY_WEBHOOK_URL"
+
+  # DCO gate — the ONLY job a pull request can reach. tracktime takes
+  # Developer Certificate of Origin 1.1 sign-off rather than a CLA, so the
+  # check is mechanical: every non-merge commit in the PR carries a
+  # `Signed-off-by:` trailer. Hand-rolled bash on purpose — no third-party
+  # action in the trust path of the one job that runs on untrusted PR code.
+  #
+  # The workflow-level block grants `packages: write` for the image pushes, so
+  # this job pins its own `contents: read` rather than inheriting that scope:
+  # the one job a pull request can reach never writes anything. The
+  # pull_request event (rather than pull_request_target) also gives a
+  # read-only token for fork PRs.
+  dco:
+    name: Signed-off-by present on every commit
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 is required — the default shallow checkout cannot walk
+      # base..head. The default pull_request ref is the merge commit, whose
+      # two parents ARE base.sha and head.sha, so both ends of the range are
+      # already present without a second fetch, forks included.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify DCO sign-off
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          for sha in "$BASE_SHA" "$HEAD_SHA"; do
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "Fetching missing commit $sha"
+              git fetch --no-tags --quiet origin "$sha" || true
+            fi
+          done
+
+          # --no-merges so a branch that has main merged into it is judged on
+          # its own commits; nobody signs off a merge they did not author.
+          commits="$(git rev-list --no-merges "$BASE_SHA".."$HEAD_SHA")"
+
+          if [ -z "$commits" ]; then
+            echo "No non-merge commits between $BASE_SHA and $HEAD_SHA - nothing to check."
+            exit 0
+          fi
+
+          total=0
+          missing=0
+          while IFS= read -r sha; do
+            [ -n "$sha" ] || continue
+            total=$((total + 1))
+            subject="$(git show -s --format='%s' "$sha")"
+            author="$(git show -s --format='%an <%ae>' "$sha")"
+            # %(trailers:...) is git's own trailer parser: it reads only the
+            # trailer block at the end of the message, so the words
+            # "Signed-off-by" appearing in prose in the body do not count.
+            trailers="$(git show -s --format='%(trailers:key=Signed-off-by,valueonly)' "$sha")"
+
+            if [ -z "$(printf '%s' "$trailers" | tr -d '[:space:]')" ]; then
+              echo "MISSING  ${sha:0:12}  ${subject}"
+              echo "         author: ${author}"
+              missing=$((missing + 1))
+            elif printf '%s\n' "$trailers" | grep -qxF "$author"; then
+              echo "ok       ${sha:0:12}  ${subject}"
+            else
+              # Not fatal: a sign-off under a second identity (a work address,
+              # GitHub's noreply form) is still a sign-off. Surfaced only so a
+              # genuine typo is visible in the log.
+              echo "ok       ${sha:0:12}  ${subject}"
+              echo "         note: signed off as $(printf '%s' "$trailers" | paste -sd ';' -), author is ${author}"
+            fi
+          done <<< "$commits"
+
+          if [ "$missing" -gt 0 ]; then
+            echo ""
+            echo "--------------------------------------------------------------"
+            echo "DCO check failed: $missing of $total commit(s) have no Signed-off-by trailer."
+            echo ""
+            echo "Contributions to tracktime are accepted under the Developer"
+            echo "Certificate of Origin 1.1 (see CONTRIBUTING.md). Every commit"
+            echo "must carry a Signed-off-by trailer certifying that you have the"
+            echo "right to submit it under the project's license."
+            echo ""
+            echo "Sign new commits as you make them:"
+            echo ""
+            echo "    git commit -s -m \"your message\""
+            echo ""
+            echo "Add the trailer to the commits already on this branch, then"
+            echo "update the pull request branch:"
+            echo ""
+            echo "    git rebase --signoff origin/main"
+            echo "    git push --force-with-lease"
+            echo ""
+            echo "To sign off automatically from now on:"
+            echo ""
+            echo "    git config --global format.signOff true"
+            echo "--------------------------------------------------------------"
+            exit 1
+          fi
+
+          echo "All $total commit(s) signed off."

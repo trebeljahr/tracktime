@@ -1,0 +1,98 @@
+name: Feature request
+description: Suggest a change or an addition to tracktime.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion.
+
+        Please search the existing issues first — the idea may already be
+        under discussion.
+
+        Open an issue like this **before** writing code for anything
+        non-trivial. It is better to hear "out of scope" here than in a pull
+        request you already spent an evening on. See
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: >-
+        Describe the situation you are in and what is difficult about it today.
+        Focus on the problem rather than the solution — a well-described problem
+        often has a simpler answer than the one you had in mind.
+      placeholder: >-
+        I bill three clients at different rates and I have to open each project
+        to remember which rate applies before I start a timer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you would like tracktime to do.
+      placeholder: >-
+        Show the project's hourly rate next to the project name in the picker,
+        for projects that are billable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: >-
+        Other approaches you thought about, and why they are worse. Including
+        "I currently work around it by ..." is useful.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which client surface would this affect?
+      description: Pick the closest match, or "Not sure".
+      options:
+        - Web app
+        - Browser extension (Chrome)
+        - Raycast extension (macOS)
+        - Desktop (Electron)
+        - Mobile (Capacitor)
+        - Server / API
+        - Several / all of them
+        - Not sure
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Mockups, links, prior art, or related issues.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: >-
+            I understand tracktime has a deliberately narrow scope and that the
+            maintainer may decline this request, or accept the problem but solve
+            it differently.
+          required: true
+
+  - type: checkboxes
+    id: code-of-conduct
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: >-
+            I agree to follow this project's
+            [Code of Conduct](../blob/main/CODE_OF_CONDUCT.md).
+          required: true

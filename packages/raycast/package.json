@@ -6,7 +6,7 @@
   "icon": "icon.png",
   "author": "trebeljahr",
   "categories": ["Productivity"],
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "type": "module",
   "commands": [
