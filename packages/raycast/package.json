@@ -66,12 +66,20 @@
       ]
     },
     {
+      "name": "toggle-timer",
+      "title": "Start / Stop Timer",
+      "subtitle": "tracktime",
+      "description": "Stop the running timer, or resume the last thing you tracked. Bind it to a hotkey — it never opens a window.",
+      "mode": "no-view",
+      "keywords": ["toggle", "start", "stop", "resume", "continue", "track"]
+    },
+    {
       "name": "timer",
       "title": "Timer",
       "subtitle": "tracktime",
       "description": "Start or stop tracking — the running timer, favorites and recent work.",
       "mode": "view",
-      "keywords": ["start", "stop", "toggle", "track", "resume", "pause"]
+      "keywords": ["start", "stop", "track", "resume", "favorites", "recent"]
     },
     {
       "name": "entries",

@@ -312,11 +312,12 @@ into an empty one after the database it came from is gone.
 ### Raycast extension
 
 `packages/raycast` is a Raycast extension with a deliberately small surface —
-**four** commands: `menu-bar` (the macOS menu bar timer), `timer` (the live view
-that ticks by the second and is *both* start and stop), `entries` ("Show All
-Time"), and `open-dashboard`. Everything else — reports, invoices, the calendar,
-catalog curation — is web app work, reached in one keystroke rather than
-reimplemented as a launcher command.
+**five** commands: `menu-bar` (the macOS menu bar timer), `toggle-timer`
+("Start / Stop Timer", the `no-view` hotkey), `timer` (the live view that ticks
+by the second and is *both* start and stop), `entries` ("Show All Time"), and
+`open-dashboard`. Everything else — reports, invoices, the calendar, catalog
+curation — is web app work, reached in one keystroke rather than reimplemented
+as a launcher command.
 
 ```bash
 pnpm dev:raycast                      # builds @starter/core, then `ray develop`
@@ -340,6 +341,14 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   primary action while a timer runs, the start form when none does) and carries
   `keywords` so "start" and "stop" still find it. Continuous state belongs in
   the menu bar, which is the one surface that can hold it.
+- `toggle-timer` is the exception, and the mode is the reason: only `no-view`
+  and menu bar commands can be launched in the background, so it is the one
+  surface a **global hotkey** can drive without opening a window. It stops what
+  is running, or continues the newest entry in the same `RECENT_DAYS` window
+  the other surfaces call recent, and reports either in a HUD. With nothing to
+  resume it launches `timer` rather than starting a nameless entry the user
+  then has to fix. Folding it into `timer` costs the hotkey, which is the whole
+  point of it — a view command opens a window before it can do anything.
 - Pairing has no command: `components/signed-out.tsx` pushes `components/
   sign-in.tsx` from the empty state every view shows while signed out, and
   ⌘⇧A in `timer` reopens it to see the account or sign out. Keep the push —
