@@ -1,0 +1,44 @@
+# https://editorconfig.org
+#
+# This file describes the conventions the codebase ALREADY follows — it does
+# not introduce a new style. Every value below was measured against the tracked
+# files: no tab-indented line exists anywhere in the repo, every tracked text
+# file ends in a newline, no file uses CRLF, and no source file carries
+# trailing whitespace.
+#
+# There is no repo-wide formatter (no Prettier, no Biome — the only lint
+# tooling is packages/client/eslint.config.mjs), so an editor honouring this
+# file is what keeps whitespace-only diffs out of review.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# The whole TypeScript/JS/config surface indents in steps of two.
+[*.{ts,tsx,js,jsx,mjs,cjs,json,jsonc,yml,yaml,css,html}]
+indent_style = space
+indent_size = 2
+
+# Shell scripts (e2e/start-server.sh, scripts/*.sh) also indent by two.
+[*.sh]
+indent_style = space
+indent_size = 2
+
+# Rust in src-tauri/ indents by four, as rustfmt produces.
+[*.{rs,toml}]
+indent_style = space
+indent_size = 4
+
+# Two trailing spaces are a hard line break in Markdown, so trimming them
+# silently changes rendered output. Indentation is left unset: Markdown mixes
+# list continuation, fenced code and nested lists at widths an editor should
+# not normalise.
+[*.md]
+trim_trailing_whitespace = false
+indent_size = unset

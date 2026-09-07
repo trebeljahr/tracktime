@@ -42,11 +42,11 @@ say what they cover.
 
 - [ ] I have signed off my commits (`git commit -s`) per the [DCO](https://developercertificate.org/)
 - [ ] My commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`), first line under 72 characters
-- [ ] `pnpm run build`, `pnpm run test:unit` and `pnpm run test:client` pass locally
+- [ ] `pnpm run typecheck`, `pnpm run build`, `pnpm run test:unit` and `pnpm run test:client` pass locally
 - [ ] I have added or updated tests covering the change, or explained above why none are needed
 - [ ] I have updated the documentation where behaviour changed (`README.md`, `CLAUDE.md`, `docs/`, `docs-site/`)
 - [ ] This pull request is focused on one concern
-- [ ] I have read [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)
+- [ ] I have read [CONTRIBUTING.md](https://github.com/trebeljahr/tracktime/blob/main/CONTRIBUTING.md)
 
 <!--
 Not signed off yet?

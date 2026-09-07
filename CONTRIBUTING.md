@@ -23,6 +23,79 @@ Everyone participating is expected to follow the
 
 ---
 
+## Your first contribution
+
+### Finding something to work on
+
+Three places, in the order worth trying them:
+
+1. **[ROADMAP.md](ROADMAP.md).** It splits the known gaps into *Next*
+   (the code is already shaped for it, the work is defined), *Later* (larger,
+   or genuinely undecided) and *Not planned* (out of scope, and why). Each item
+   says what already exists and what would have to be built, so you can judge
+   the size before you start. Items under **Next** are the closest thing this
+   project has to a good-first-issue list.
+2. **The open issues.** Anything already filed is, by definition, something
+   somebody wanted.
+3. **The README's [Not there yet](README.md#not-there-yet) section.** It is an
+   honest list of what does not exist. Read it together with the roadmap: not
+   everything missing is wanted, and the roadmap is where that distinction is
+   recorded.
+
+If none of that fits, the most valuable contributions to a project this size
+are often the unglamorous ones — a documentation statement that turned out to
+be wrong, a missing `data-testid` that made a spec brittle, a test for a rule
+that only has one.
+
+### Open an issue before large work
+
+For a bug fix or a documentation correction, go straight to a pull request.
+
+For anything bigger, **open an issue first** — a
+[feature request](.github/ISSUE_TEMPLATE/feature_request.yml) is the right
+form. This is a single-maintainer project with an opinionated scope
+(see [GOVERNANCE.md](GOVERNANCE.md)), and the cost of hearing "out of scope"
+in an issue is a few minutes; the cost of hearing it on a finished pull
+request is your evening. It also stops two people building the same thing.
+GitHub Discussions are not enabled on this repository, so open-ended
+questions go in the issue tracker too — there is a
+[question form](.github/ISSUE_TEMPLATE/question.yml) for them.
+
+### What a good first pull request looks like here
+
+- **One concern.** A refactor bundled with a behaviour change is hard to
+  review and hard to revert. Split them.
+- **The checks pass locally** — `pnpm run typecheck`, `pnpm run build`,
+  `pnpm run test:unit`, `pnpm run test:client`. Those four are what CI's
+  `verify` job runs. CI also runs `e2e` and `dco` on your pull request, which
+  you are not expected to run locally — see
+  [Tests and checks](#tests-and-checks), including why an E2E failure may not
+  be yours.
+- **A test when there is a rule to pin.** Pure logic lives in
+  `packages/shared` and `packages/server/src/services/` precisely so it can be
+  unit-tested without a database — if your change is a rule, it can almost
+  certainly be tested cheaply.
+- **Shared behaviour in the shared packages.** If more than one client needs
+  it, it belongs in `packages/shared` or `packages/core`, not in the web app
+  with a copy pasted into the extension later.
+- **Documentation corrected in the same pull request** if your change makes an
+  existing statement false.
+- **Commits signed off** — `git commit -s`. CI checks every one of them.
+
+A first pull request that touches one file, fixes one thing and explains why
+is more welcome than a large one that arrives unannounced.
+
+### Getting oriented in the code
+
+[ARCHITECTURE.md](ARCHITECTURE.md) is the map: what each package is for, what
+a request does from a React hook to MongoDB and back, and how a change made on
+one device reaches another over the WebSocket. Read it before the first change
+that spans more than one package — the boundary between `packages/shared` and
+`packages/core` in particular is a rule rather than a habit, and it is the
+thing that keeps four clients able to share code.
+
+---
+
 ## Development setup
 
 ### Prerequisites
@@ -32,6 +105,15 @@ Everyone participating is expected to follow the
 | Node.js | 24 | `.nvmrc`; `engines.node` in `package.json` is `>=24` |
 | pnpm | 11.1.2 | `packageManager` in `package.json` |
 | Docker | any recent | runs MongoDB, Redis and an S3-compatible store for local dev |
+
+If you would rather not install those locally,
+[`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) describes
+a ready-made environment — open the repository in a devcontainer-aware editor
+or in GitHub Codespaces and you get Node, pnpm and the tooling already set up.
+The web app, the unit tests and the typecheck all work there. Be aware that the
+browser extension, Raycast and any native build bake their API URL in and
+cannot follow a forwarded or remapped port, so those surfaces are still easiest
+to work on locally. The rest of this section assumes a local setup.
 
 Enable pnpm through corepack rather than installing it globally, so the pinned
 version in `packageManager` is the one you get:
@@ -137,6 +219,18 @@ Domain logic that more than one client needs belongs in `packages/shared` (types
 and pure rules) or `packages/core` (runtime behaviour). Only UI belongs in the
 extension and Raycast packages.
 
+That is the layout. For what the pieces actually *do* — the request lifecycle,
+the workspace-scoping rule that every domain query goes through, and the
+WebSocket sync path — see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+[`CLAUDE.md`](CLAUDE.md) at the repository root is worth knowing about but is
+not contributor documentation: it is instructions written for AI coding agents
+working in this repository, so expect agent workflow, provisioning commands for
+a private CLI and deployment details mixed in with the architecture. It is
+nonetheless the fullest and most current record of the invariants that fail
+quietly if broken, so read it for the deep detail once ARCHITECTURE.md has
+given you the shape.
+
 ---
 
 ## Tests and checks
@@ -151,16 +245,30 @@ extension and Raycast packages.
 | `pnpm --filter @starter/client run lint` | ESLint over the client package. There is no root `lint` script. |
 | `pnpm test` | All three test commands in sequence. |
 
-**A pull request should pass `pnpm run build`, `pnpm run test:unit` and
-`pnpm run test:client`.** Run `pnpm run typecheck` too — it is cheap and catches
-things the builds do not.
+**A pull request should pass `pnpm run typecheck`, `pnpm run build`,
+`pnpm run test:unit` and `pnpm run test:client`** — those four, in that order,
+are exactly what CI's `verify` job runs. Two more jobs run on your pull request
+that you do not run locally: `e2e` (below) and `dco`, which checks that every
+commit carries a `Signed-off-by` trailer. Do not skip the typecheck
+because the build passes: `pnpm run build` compiles shared → core → server →
+client and never touches `packages/extension`, `packages/raycast` or
+`electron/`, so a change that breaks one of those is invisible to the build.
 
-E2E is the awkward one and we do not require it from contributors. It needs
-Docker, it takes minutes because of the client build, and its ports and database
-are not isolated by default — if you run it while another checkout is running,
-pass your own `E2E_SERVER_PORT`, `E2E_CLIENT_PORT` and `MONGODB_URI` or you will
-be testing the other checkout's build. Note also that CI's E2E job is not
-currently green; see [PR process](#pull-request-process).
+E2E is the awkward one. CI does run it on pull requests, but you are not
+expected to run it locally: it needs Docker, it takes minutes because of the
+client build, and its ports and database are not isolated by default — if you
+run it while another checkout is running, pass your own `E2E_SERVER_PORT`,
+`E2E_CLIENT_PORT` and `MONGODB_URI` or you will be testing the other checkout's
+build. The suite also needs its browser downloaded once, which no other command
+does for you:
+
+```bash
+npx playwright install chromium    # once per machine, before the first run
+pnpm run test:e2e
+```
+
+Note that CI's E2E job is not currently green on `main` either; see
+[PR process](#pull-request-process) for what that means for your pull request.
 
 ---
 
@@ -191,6 +299,16 @@ Testing conventions by package: `node:test` + `assert/strict` for the server
 (`packages/server/src/tests/*.test.ts`), Vitest + testing-library colocated
 alongside the component for the client, Playwright in `e2e/*.spec.ts` with
 helpers in `e2e/helpers.ts`.
+
+### Editor setup
+
+[`.editorconfig`](.editorconfig) at the repository root carries the whitespace
+conventions — indentation, line endings, final newlines. Most editors honour it
+natively; some need a plugin. Install it if yours does, because there is no
+repository-wide formatter to clean up after you: `packages/client` is the only
+package with an ESLint config, and there is no Prettier anywhere in the tree.
+Whitespace-only churn in a diff makes review harder for everyone, so match the
+file you are editing.
 
 ---
 
@@ -281,50 +399,79 @@ will not merge until it is fixed.
    with a behaviour change is much harder to review, and much harder to revert
    if it turns out to be wrong. Split them.
 3. **Discuss features in an issue first.** Bug fixes and doc corrections can go
-   straight to a PR.
-4. **Run the checks locally** — `pnpm run build`, `pnpm run test:unit`,
-   `pnpm run test:client`, `pnpm run typecheck`.
-5. **Update the docs when behaviour changes.** `CLAUDE.md` at the repository
-   root is the most accurate description of how the system actually works and is
-   kept current; if your change makes a statement in it wrong, fix the statement
-   in the same PR.
+   straight to a PR. See [Your first contribution](#your-first-contribution).
+4. **Run the checks locally** — `pnpm run typecheck`, `pnpm run build`,
+   `pnpm run test:unit`, `pnpm run test:client`. These are the same four CI
+   runs on your pull request.
+5. **Update the docs when behaviour changes.** If your change makes a statement
+   in `README.md`, [ARCHITECTURE.md](ARCHITECTURE.md) or `CLAUDE.md` wrong, fix
+   that statement in the same PR. `CLAUDE.md` is instructions for AI coding
+   agents rather than contributor documentation, but it is the most accurate
+   running description of how the system actually works, and it is kept
+   current — so it counts.
 6. **Sign off your commits** (see above).
 7. **Fill in the pull request template** — what changed, why, how you tested it.
 
 ### What CI runs
 
-`.github/workflows/build-and-deploy.yml` runs on pushes to `main` and on pull
-requests, but the two do very different things.
+Everything is in one workflow file,
+[`.github/workflows/build-and-deploy.yml`](.github/workflows/build-and-deploy.yml),
+which runs on pushes to `main` and on pull requests. A pull request gets the
+checks and none of the publishing.
 
-On a **push to `main`** it runs `pnpm install --frozen-lockfile`,
-`pnpm run build`, `pnpm run test:unit` and `pnpm run test:client`, then a
-Playwright E2E job, then builds and publishes the two Docker images and deploys
-them.
+**On a pull request**, three jobs run:
 
-On a **pull request** every one of those jobs is skipped
-(`if: github.event_name == 'push'`, so a PR can reach neither the `ghcr.io`
-push nor the deploy API). The only job that runs is `dco`, in that same
-workflow file.
+| Job | What it does |
+|---|---|
+| `verify` | `pnpm install --frozen-lockfile`, then `pnpm run typecheck`, `pnpm run build`, `pnpm run test:unit`, `pnpm run test:client`. |
+| `e2e` | Playwright, after `verify` passes. Mongo and Redis as service containers, MinIO started in a step, then the full suite against the client's static export. This is the slow one. |
+| `dco` | Checks that every non-merge commit in the pull request carries a `Signed-off-by` trailer. |
+
+Every credential those jobs need is a throwaway literal in the workflow file
+itself — none of them reads a repository secret — so they work unchanged from a
+fork, and each pins `permissions: contents: read` so pull request code never
+runs with a token that can publish anything.
+
+**On a push to `main`**, `verify` and `e2e` run the same way, and then three
+more jobs follow that a pull request can never reach: `build-server` and
+`build-client` publish the two Docker images to `ghcr.io`, and `deploy` calls
+the Coolify deploy API. Each of those three is gated on
+`if: github.event_name == 'push'` in its own right, not merely through the
+`needs:` chain — so a green pull request cannot push an image or trigger a
+deploy no matter what.
 
 Two honest caveats about the state of CI, so nothing surprises you:
 
-- The E2E job is not currently passing on `main`. If your PR is otherwise sound,
-  an E2E failure that reproduces on `main` is not yours to fix — say so in the
-  PR and we will sort it out separately.
-- The Docker image build jobs are gated behind the E2E job and have therefore
-  never actually run. The `packages/client/Dockerfile` path in particular is
-  unverified.
+- **The E2E job is not currently passing on `main`.** If your pull request is
+  otherwise sound, an E2E failure that also reproduces on `main` is not yours
+  to fix — say so in the pull request and it will be sorted out separately.
+  Check the workflow's recent runs on `main` before assuming a failure is
+  something you caused.
+- **The Docker image build and deploy jobs are gated behind E2E and have
+  therefore never actually run**, which is why the README calls the deploy path
+  unverified. Nothing you do in a pull request can reach them either way.
 
 ---
 
 ## Security
 
-Please do not open a public issue for a security problem. Email
-<ricotrebeljahr@gmail.com> instead. See [SECURITY.md](SECURITY.md) if present.
+Please do not open a public issue for a security problem. Email it to
+<ricotrebeljahr@gmail.com> — GitHub private advisories are not enabled on this
+repository, so email is the reporting channel. [SECURITY.md](SECURITY.md) has
+the full policy, including what to put in a report and the expected timelines.
 
 ## Questions
 
-Open a [discussion or an issue](https://github.com/trebeljahr/tracktime/issues),
-or email <ricotrebeljahr@gmail.com>. The hosted app is at
-<https://tracktime.trebeljahr.com>, its API at
-<https://api.tracktime.trebeljahr.com>.
+Open a [question issue](https://github.com/trebeljahr/tracktime/issues/new?template=question.yml)
+— GitHub Discussions are not enabled on this repository, so the issue tracker
+is where questions go — or email <ricotrebeljahr@gmail.com>.
+[SUPPORT.md](SUPPORT.md) says which to use and what to expect. The hosted app is at <https://tracktime.trebeljahr.com>, with the
+API served on `/api` of that same domain.
+
+## Who decides
+
+One maintainer, Rico Trebeljahr ([@trebeljahr](https://github.com/trebeljahr)),
+has final say on scope, design and what merges.
+[GOVERNANCE.md](GOVERNANCE.md) sets out how decisions get made, how a
+disagreement ends, what gets a pull request merged, and why a declined change
+is usually about maintenance cost rather than about your work.

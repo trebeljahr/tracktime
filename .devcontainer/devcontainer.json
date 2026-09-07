@@ -1,0 +1,103 @@
+// Dev container for tracktime. Opens in GitHub Codespaces or in VS Code via
+// "Dev Containers: Reopen in Container".
+//
+// It gives you the toolchain and the backing services, nothing more: after the
+// container is up, follow the Development section of README.md — create
+// packages/server/.env.development from .env.example, run `pnpm run dev:infra`
+// to start MongoDB/Redis/S3, then `pnpm run dev`.
+//
+// Caveat worth knowing before you rely on this: the web app works fine here,
+// but the browser extension, the Raycast extension and the desktop/mobile
+// shells bake their API URL in at build time and expect the API on
+// localhost:5159. Codespaces forwards ports at generated *.github.dev URLs, so
+// those clients cannot reach the server from a Codespace. Develop them locally.
+{
+  "name": "tracktime",
+
+  // Node 24 — matches .nvmrc (24) and package.json engines.node (>=24).
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:24-bookworm",
+
+  "features": {
+    // `pnpm run dev:infra` and `pnpm run test:e2e` both start containers
+    // (docker-compose.dev.yml and e2e/start-server.sh), so the dev container
+    // needs a Docker daemon of its own.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      // dev:infra invokes the hyphenated `docker-compose`, which this feature
+      // does NOT install by default — it ships Compose v2 as `docker compose`.
+      // Compose Switch provides the hyphenated name on top of v2.
+      "installDockerComposeSwitch": true
+    }
+  },
+
+  // pnpm is pinned by package.json "packageManager" (pnpm@11.1.2); corepack
+  // installs exactly that version. The install is slow the first time —
+  // electron and @tauri-apps/cli download platform binaries in postinstall.
+  "postCreateCommand": "corepack enable && pnpm install --frozen-lockfile",
+
+  "forwardPorts": [
+    // Application ports pinned by scripts/dev.mjs
+    3392,
+    5159,
+    4000,
+    // Infrastructure published by docker-compose.dev.yml
+    27017,
+    6379,
+    9000
+  ],
+
+  "portsAttributes": {
+    "3392": {
+      "label": "Web client (Next.js)",
+      "onAutoForward": "notify"
+    },
+    "5159": {
+      "label": "API server (Express + tRPC + ws)",
+      "onAutoForward": "silent"
+    },
+    "4000": {
+      "label": "Docs site (Docusaurus, pnpm run dev:docs)",
+      "onAutoForward": "silent"
+    },
+    "27017": {
+      "label": "MongoDB (dev:infra)",
+      "onAutoForward": "silent"
+    },
+    "6379": {
+      "label": "Redis (dev:infra)",
+      "onAutoForward": "silent"
+    },
+    "9000": {
+      "label": "S3 / SeaweedFS (dev:infra)",
+      "onAutoForward": "silent"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // VS Code does not read .editorconfig without this.
+        "editorconfig.editorconfig",
+        // packages/client/eslint.config.mjs is the repo's only lint config.
+        "dbaeumer.vscode-eslint",
+        // The client is Tailwind v4 + shadcn/ui.
+        "bradlc.vscode-tailwindcss",
+        // Runs and debugs the specs in e2e/.
+        "ms-playwright.playwright",
+        // Inspect the local database dev:infra starts.
+        "mongodb.mongodb-vscode"
+      ],
+      "settings": {
+        // There is no Prettier or other repo-wide formatter. Leaving
+        // formatOnSave on would let VS Code's built-in TypeScript formatter
+        // reflow whole files and bury a real change in whitespace noise.
+        "editor.formatOnSave": false,
+        "files.eol": "\n",
+        // Use the workspace TypeScript (^6) rather than the one bundled with
+        // VS Code, so the editor agrees with `pnpm run typecheck`.
+        "typescript.tsdk": "node_modules/typescript/lib",
+        // pnpm workspace: let the ESLint extension find each package's config.
+        "eslint.workingDirectories": [{ "mode": "auto" }]
+      }
+    }
+  }
+}

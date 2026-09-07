@@ -1,0 +1,19 @@
+# Line endings. Every tracked text file in this repo is LF today and none
+# carries a CRLF, so normalise on commit and check out LF everywhere — a
+# checkout that rewrote e2e/start-server.sh or scripts/*.sh to CRLF would fail
+# to run under bash.
+* text=auto eol=lf
+
+*.sh text eol=lf
+
+# Generated files. Collapsed by default in GitHub diffs and excluded from the
+# repository language statistics, so they neither drown a review nor
+# misrepresent what the codebase is written in.
+pnpm-lock.yaml linguist-generated=true
+packages/raycast/raycast-env.d.ts linguist-generated=true
+
+# Binary assets. Git detects these on its own; declaring them keeps a diff or a
+# merge from ever attempting to treat one as text.
+*.png binary
+*.ico binary
+*.icns binary

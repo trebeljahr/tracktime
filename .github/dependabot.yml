@@ -1,0 +1,56 @@
+# Dependency updates.
+#
+# Two ecosystems, both weekly. Minor and patch updates are grouped into one
+# pull request per ecosystem so the tracker stays readable; majors are left
+# ungrouped, because those are the ones that need reading one at a time.
+version: 2
+
+updates:
+  # This is a pnpm workspace: pnpm-workspace.yaml lists `packages/*` and
+  # `docs-site`, and there is a single pnpm-lock.yaml at the root. Dependabot
+  # resolves workspaces from that root lockfile, so one entry at "/" covers the
+  # root package.json plus packages/{client,server,shared,core,extension,
+  # raycast} and docs-site. Pointing separate entries at those directories
+  # would ask Dependabot to resolve manifests that have no lockfile of their
+  # own. electron/package.json is `{"type": "commonjs"}` with no dependencies
+  # and is not a workspace member, so there is nothing there to update.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    labels:
+      - "dependencies"
+
+  # For the github-actions ecosystem the directory must be "/" — Dependabot
+  # looks under .github/workflows itself. Covers the action versions pinned in
+  # build-and-deploy.yml and the three release workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    labels:
+      - "dependencies"

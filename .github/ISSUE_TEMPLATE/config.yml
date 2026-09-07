@@ -1,0 +1,27 @@
+# Issue routing. The three forms in this directory are the only ways to open an
+# issue; everything else is pointed somewhere more useful below.
+#
+# Every URL here must be a page that exists for a logged-out stranger. Two that
+# looked obvious do not: GitHub Discussions is switched off on this repository
+# (so questions get question.yml instead of a /discussions link), and private
+# vulnerability reporting is off too — /security/advisories/new is maintainer-
+# only while it is, so the security route below is the email address that
+# actually receives reports. If either setting is ever turned on, repoint these
+# and the matching lines in SUPPORT.md, SECURITY.md and CONTRIBUTING.md.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Documentation
+    # docs-site/ exists but is not deployed: with DOCS_SITE_URL unset it builds
+    # against a placeholder host, sets noIndex and writes a disallow-all
+    # robots.txt. Until it is deployed, the README is the documentation.
+    url: https://github.com/trebeljahr/tracktime#readme
+    about: Setup, architecture, self-hosting and the deployment topology in docs/deploy.md — read before filing, the answer is often already there.
+
+  - name: Where to ask, and what to expect
+    url: https://github.com/trebeljahr/tracktime/blob/main/SUPPORT.md
+    about: Which route fits your question, what makes one answerable, and the response you can expect from a single-maintainer side project. Questions themselves go through the "Question or support" form above.
+
+  - name: Report a security vulnerability
+    url: mailto:ricotrebeljahr@gmail.com
+    about: Do not open a public issue for a security problem. Email it instead — GitHub private advisories are not enabled on this repository. SECURITY.md has the full policy and what to put in a report.

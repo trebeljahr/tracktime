@@ -1,0 +1,60 @@
+# Code owners for tracktime.
+#
+# One maintainer today, so the catch-all below already covers every file. The
+# explicit entries after it exist for a different reason: they are the paths
+# where a wrong change is expensive and hard to notice in review, so they are
+# listed by name to make the request unmissable and to say why the path is
+# sensitive. Order matters — the last matching pattern wins.
+#
+# Being an owner is a review request, not a gate. Branch protection is what
+# would make these required; see CONTRIBUTING.md for how a PR actually lands.
+
+*                                   @trebeljahr
+
+# --- Authentication and workspace scoping -----------------------------------
+# auth.ts configures better-auth including the bearer plugin, so a cookie
+# client and a token client (extension, Raycast, CLI) converge on one session
+# path. workspace.ts decides which workspace a request may read, and
+# client-label.ts is the allowlist of device-flow client ids. A mistake here is
+# a cross-account data leak, not a bug report.
+/packages/server/src/auth/          @trebeljahr
+
+# --- Express middleware ordering --------------------------------------------
+# The order in createApp() is load-bearing and documented in CLAUDE.md
+# ("Critical Middleware Ordering"): CORS before every route so preflight works,
+# the better-auth handler before express.json because it parses its own body,
+# and the scoped import body limit before the global 100kb one because
+# whichever json parser runs first consumes the body. Rearranged, most of this
+# still boots and fails later, in production.
+/packages/server/src/app.ts         @trebeljahr
+
+# --- CI, release and deploy automation --------------------------------------
+# build-and-deploy.yml holds the registry push and the Coolify deploy, and the
+# release workflows publish artifacts. A change here can ship or break
+# production without touching a line of application code.
+/.github/workflows/                 @trebeljahr
+
+# --- Licensing and trademark ------------------------------------------------
+# AGPL-3.0-or-later, and a trademark policy that is deliberately separate from
+# it. Neither is a routine edit; both change what other people are allowed to
+# do with this project.
+/LICENSE                            @trebeljahr
+/TRADEMARK.md                       @trebeljahr
+
+# --- Server environment contract --------------------------------------------
+# .env.example is the reference every deployment is built from. The same
+# pattern covers .env.production, which is committed with its secrets encrypted
+# by dotenvx (it is not present in this checkout). .env.keys is gitignored and
+# must stay that way.
+/packages/server/.env*              @trebeljahr
+
+# --- Deployment topology ----------------------------------------------------
+# The service names `client` and `server` inside these files are load-bearing:
+# Coolify keys docker_compose_domains by them, and a mismatch serves 503.
+# docker-compose.dev.yml is the local Mongo/Redis/S3 stack that dev and E2E
+# both assume; docker-compose.yml is the legacy single-app layout kept for
+# reference.
+/docker-compose.client.yml          @trebeljahr
+/docker-compose.server.yml          @trebeljahr
+/docker-compose.dev.yml             @trebeljahr
+/docker-compose.yml                 @trebeljahr

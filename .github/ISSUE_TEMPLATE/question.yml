@@ -1,0 +1,84 @@
+name: Question or support
+description: Ask how something works, whether a workflow is supported, or for help self-hosting.
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        GitHub Discussions are not enabled on this repository, so questions go
+        here in the issue tracker.
+
+        Two things worth reading first, because they answer a fair number of
+        questions before they are asked:
+
+        - The README's **Not there yet** section lists what is deliberately
+          unbuilt — teams, a public REST API, approvals, notifications.
+        - [SUPPORT.md](../blob/main/SUPPORT.md) covers what makes a question
+          answerable and what to expect for an answer.
+
+        **Do not ask about a security problem here.** Email
+        ricotrebeljahr@gmail.com instead — see
+        [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like to know?
+      description: >-
+        What you are trying to do and where you got stuck. If you already tried
+        something, say what and what happened.
+      placeholder: >-
+        I want the browser extension to talk to my self-hosted server, but
+        signing in from the popup returns 403 INVALID_ORIGIN.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which client surface is this about?
+      description: Pick the closest match, or "Not sure".
+      options:
+        - Web app
+        - Browser extension (Chrome)
+        - Raycast extension (macOS)
+        - Desktop (Electron)
+        - Mobile (Capacitor)
+        - Server / API
+        - Self-hosting / deployment
+        - Several / all of them
+        - Not sure
+    validations:
+      required: false
+
+  - type: dropdown
+    id: hosting
+    attributes:
+      label: Hosted or self-hosted?
+      options:
+        - Hosted (tracktime.trebeljahr.com)
+        - Self-hosted
+        - Running it locally for development
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: >-
+        If self-hosting, the commit you are on. Error text, copied rather than
+        described, is more useful than a summary of it.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: code-of-conduct
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: >-
+            I agree to follow this project's
+            [Code of Conduct](../blob/main/CODE_OF_CONDUCT.md).
+          required: true

@@ -19,13 +19,15 @@ and rebuild. There is no backport path.
 
 **Please do not open a public issue for a security problem.**
 
-Two private channels, in order of preference:
+**Email <ricotrebeljahr@gmail.com>.** That is the whole channel, and it is
+monitored.
 
-1. **GitHub private security advisories** — preferred.
-   <https://github.com/trebeljahr/tracktime/security/advisories/new>
-   This keeps the report, the discussion, and the fix in one private place.
-2. **Email** — <ricotrebeljahr@gmail.com>. Fine if you would rather not use
-   GitHub, or if the report does not fit an advisory form.
+GitHub's private vulnerability reporting is **not** enabled on this repository,
+so `/security/advisories/new` is maintainer-only and there is nothing for an
+outside reporter to submit there. Do not let that push you into opening a public
+issue — email instead. If the setting is turned on later, this section and the
+routes in `SUPPORT.md`, `CONTRIBUTING.md` and
+`.github/ISSUE_TEMPLATE/config.yml` get updated together.
 
 ## What to include
 

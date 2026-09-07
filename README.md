@@ -3,8 +3,11 @@
 A self-hostable time tracker: clients, projects, tasks, tags, billable rates, reports and invoices, with a web app, a browser extension and a Raycast extension sharing one backend.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![build-and-deploy](https://github.com/trebeljahr/tracktime/actions/workflows/build-and-deploy.yml/badge.svg?branch=main)](https://github.com/trebeljahr/tracktime/actions/workflows/build-and-deploy.yml?query=branch%3Amain)
 
-Hosted instance: <https://tracktime.trebeljahr.com> (API at <https://api.tracktime.trebeljahr.com>).
+Hosted instance: <https://tracktime.trebeljahr.com>. The API is served on `/api` of that same domain, not on a host of its own — [`docs/deploy.md`](docs/deploy.md) explains why.
+
+> The build badge is pinned to `main` and reports the real state of the pipeline. It is not green — see [Not there yet](#not-there-yet).
 
 <!-- Screenshot placeholder: add a capture of the /track screen at docs/screenshots/app.png,
      then replace this comment with:
@@ -17,6 +20,16 @@ Time tracking for freelance and consulting work: start a timer, tag it with a cl
 It is a pnpm monorepo — one Express + tRPC API, one Next.js web client, and shared packages the other clients reuse. Two Docker images and a MongoDB is the whole production footprint; Redis is optional. There is no SaaS tier gate and no telemetry you have not configured yourself.
 
 Everything is scoped to a workspace, but today that is effectively one workspace per person — see [Not there yet](#not-there-yet) before assuming team features.
+
+## Where things live
+
+| If you want to | Go to |
+| --- | --- |
+| Understand how the system fits together | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
+| Run it locally and open a pull request | [`CONTRIBUTING.md`](CONTRIBUTING.md), or [Development](#development) below for the short version |
+| Deploy it | [`docs/deploy.md`](docs/deploy.md) — the two-app, one-domain Coolify topology and the four places that must agree on the API origin |
+
+[Project](#project) below indexes the rest — roadmap, governance, support, security, and what `CLAUDE.md` and `docs-site/` are.
 
 ## Features
 
@@ -69,7 +82,7 @@ Everything is scoped to a workspace, but today that is effectively one workspace
 | --- | --- |
 | **Web app** (Next.js static export) | Shipped, and the reference implementation. 14 signed-in routes: track, timesheet, calendar, three reports, clients, projects, tasks, tags, invoices, settings, profile, device. |
 | **Browser extension** (Chrome MV3) | Working and genuinely useful — popup only, no content scripts. Timer, badge, catalog, favorites, idle and the offline queue. Version 0.1.0, not published to any store; you load it unpacked. |
-| **Raycast extension** (macOS) | Working and broad — 11 commands, including a menu bar timer, a live one-second timer view and full catalog CRUD. Not published to the Raycast store, and it has **no offline queue**: a mutation made without connectivity is lost, unlike the same action from the web app or extension. |
+| **Raycast extension** (macOS) | Working and broad — 4 commands (menu bar timer, a live one-second timer view, an entries browser and an open-dashboard action), with full catalog CRUD reached through pushed forms rather than commands of its own. Not published to the Raycast store, and it has **no offline queue**: a mutation made without connectivity is lost, unlike the same action from the web app or extension. |
 | **Desktop** (Electron) | Real but thin. Window lifecycle, persisted fullscreen preference, external-link handling and `powerMonitor`-backed idle reporting over IPC. No tray icon, no global shortcuts, no auto-update, no signing setup. Never built or distributed. |
 | **Desktop** (Tauri) | Scaffolding only — 24 lines of Rust with an empty setup and a Steamworks block inherited from the starter this repo was generated from. Do not count it as a desktop app. |
 | **Mobile** (Capacitor) | Config and a small JS bridge only. No `ios/` or `android/` directory exists, the bundle id is still `com.example.tracktime`, and nothing has been run on a device — despite the `dev:ios` / `dev:android` / `build:mobile` scripts existing in `package.json`. |
@@ -189,7 +202,7 @@ Other clients:
 ```bash
 pnpm run dev:extension       # browser extension, dev target (localhost:5159)
 pnpm run build:extension     # dist/       -> http://localhost:5159
-pnpm run build:extension:prod # dist-prod/ -> https://api.tracktime.trebeljahr.com
+pnpm run build:extension:prod # dist-prod/ -> https://tracktime.trebeljahr.com
 pnpm run extension:id [dev|prod]  # the chrome-extension:// origin to trust
 
 pnpm run dev:raycast         # ray develop
@@ -210,18 +223,29 @@ pnpm run typecheck      # builds shared + core, then tsc --noEmit everywhere els
 pnpm run build          # shared -> core -> server -> client
 ```
 
-The E2E suite starts its own Mongo, Redis and S3 containers on separate ports and runs against the **static export**, not the dev server, so the first run includes a full client build. If several checkouts run it at once, pass your own `E2E_SERVER_PORT`, `E2E_CLIENT_PORT` and `MONGODB_URI` or you will test another checkout's build.
+The E2E suite starts its own Mongo, Redis and S3 containers on separate ports and runs against the **static export**, not the dev server, so the first run includes a full client build. It needs Docker and a one-off `npx playwright install chromium`. [CONTRIBUTING.md](CONTRIBUTING.md#tests-and-checks) has the details, including the port and database variables you must set if another checkout is running the suite at the same time.
 
-## Documentation
+## Project
 
-- [`docs/dev-setup.md`](docs/dev-setup.md) — local setup in more detail
-- [`docs/deploy.md`](docs/deploy.md) — the two-app Coolify deployment
-- [`CLAUDE.md`](CLAUDE.md) — the fullest architectural description of the system, including the invariants that fail quietly if broken
-- `docs-site/` — a Docusaurus site with three pages. It is **not deployed anywhere**: with `DOCS_SITE_URL` unset it uses a placeholder URL, which switches on `noIndex` and a disallow-all robots.txt. Its content is still starter boilerplate. Run it locally with `pnpm run dev:docs`.
+| File | What it is for |
+| --- | --- |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | How the packages fit together, what a request does end to end, and how multi-device sync works. Start here to change code. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Setup, the checks a pull request should pass, code style, and the DCO sign-off mechanics. |
+| [`ROADMAP.md`](ROADMAP.md) | What is wanted next, what is undecided, and what is deliberately out of scope — with what already exists for each. |
+| [`GOVERNANCE.md`](GOVERNANCE.md) | Who decides (one maintainer), how disagreements end, and what gets a pull request merged. |
+| [`SUPPORT.md`](SUPPORT.md) | Where to ask a question, and what to expect for an answer. |
+| [`SECURITY.md`](SECURITY.md) | How to report a vulnerability privately. Do not open a public issue for one. |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | The behaviour expected of everyone taking part, and how to report a problem. |
+| [`TRADEMARK.md`](TRADEMARK.md) | What the licence does *not* cover: the name, the logo and the domain — and how to fork cleanly. |
+| [`CHANGELOG.md`](CHANGELOG.md) | What has changed. It starts at the point the project was opened up, not at the first commit. |
+| [`CLAUDE.md`](CLAUDE.md) | Instructions for AI coding agents, not contributor documentation — but worth knowing about. [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout) explains when to reach for it. |
+| [`docs/deploy.md`](docs/deploy.md) | The production topology: two Coolify apps on one domain, and the four places that must agree on the API origin. |
+| [`docs/dev-setup.md`](docs/dev-setup.md) | The maintainer's own Tailscale/Caddy dev-URL setup. Needs a private CLI that is not installable from this repo — skip it. |
+| `docs-site/` | A Docusaurus site with three pages. **Not deployed anywhere**: with `DOCS_SITE_URL` unset it uses a placeholder URL, which switches on `noIndex` and a disallow-all robots.txt. Its content is still starter boilerplate. Run it locally with `pnpm run dev:docs`. |
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the pull request process, and [ROADMAP.md](ROADMAP.md) if you are looking for something to pick up.
 
 Commits must be signed off under the [Developer Certificate of Origin](https://developercertificate.org/) 1.1 — `git commit -s` adds the `Signed-off-by` trailer. There is no CLA.
 

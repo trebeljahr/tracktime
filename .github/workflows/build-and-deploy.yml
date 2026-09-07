@@ -3,10 +3,17 @@ name: build-and-deploy
 on:
   push:
     branches: [main]
-  # Pull requests reach ONLY the dco job below. Every pre-existing job is
-  # gated on `github.event_name == 'push'`, because this file both pushes
-  # :main image tags to ghcr.io and POSTs to the Coolify deploy API — a PR
-  # must never be able to reach either.
+  # Pull requests reach `dco`, `verify` and `e2e` — the jobs that only read
+  # the checkout and run the test suites. They must NEVER reach build-server,
+  # build-client or deploy: this file pushes :main image tags to ghcr.io and
+  # POSTs to the Coolify deploy API, and neither is a thing a PR gets to do.
+  #
+  # That boundary is enforced per job, not by the `needs:` chain. build-server,
+  # build-client and deploy each carry their own
+  # `if: github.event_name == 'push'` IN ADDITION to their `needs:`, so the two
+  # upstream jobs running on a PR cannot pull them in. Do not remove those
+  # three `if:` lines, and do not add a job that depends on verify/e2e without
+  # deciding explicitly which events it runs on.
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -25,9 +32,18 @@ permissions:
   packages: write
 
 jobs:
+  # Runs on BOTH events: a contributor has to be able to see that their change
+  # builds and passes the tests, which is the whole point of opening a PR.
+  # Nothing here reads a secret or writes anywhere — see the `permissions:`
+  # block below — so it is equally safe from a fork.
   verify:
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # The workflow-level block grants `packages: write` for the two image
+    # pushes. This job pins `contents: read` instead, so PR code never runs
+    # with a token that can publish a package. (A fork PR gets a read-only
+    # token regardless; this covers same-repo branch PRs too.)
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,19 +51,45 @@ jobs:
           node-version-file: .nvmrc
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile
+      # `pnpm run build` compiles shared -> core -> server -> client, which
+      # leaves packages/extension, packages/raycast and electron/ untypechecked
+      # — they are not in the build graph at all. A change that breaks the
+      # browser extension, the Raycast extension or the Electron main process
+      # would otherwise go green through the entire pipeline.
+      - run: pnpm run typecheck
       - run: pnpm run build
       - run: pnpm run test:unit
       - run: pnpm run test:client
 
+  # Also runs on both events. Every credential it needs is a literal in the
+  # `env:` block below (throwaway values for containers that live for the
+  # length of the job), so it works unchanged from a fork.
+  #
+  # It is the slow job — 42 specs, `workers: 1`, plus a client build. If that
+  # turns out to be too slow to sit on every push to a draft branch, gate it
+  # with `if: github.event_name == 'push' || !github.event.pull_request.draft`
+  # and add `ready_for_review` to the pull_request `types:` above, rather than
+  # dropping it from PRs entirely.
   e2e:
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [verify]
+    permissions:
+      contents: read
     services:
       mongo-e2e:
         image: mongo:7
         ports:
           - 27018:27017
+        # start-server.sh's own Mongo readiness loop is inside an
+        # `if [ -z "${CI:-}" ]` guard, so under CI nothing waits for Mongo —
+        # without this the server can start before the database accepts
+        # connections, which surfaces as an unexplained failure on somebody's
+        # first contribution.
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
       redis-e2e:
         image: redis:7-alpine
         ports:
@@ -75,11 +117,17 @@ jobs:
             curl -sf http://127.0.0.1:9002/minio/health/live && break
             sleep 1
           done
+          # Both bucket names: the job env below sets S3_BUCKET_NAME to
+          # starter-e2e, but playwright.config.ts's server webServer `env:`
+          # block hardcodes tracktime-e2e and overrides it — so the bucket the
+          # server actually writes to is tracktime-e2e.
           docker run --rm --network host \
             --entrypoint sh minio/mc:latest -c \
             "mc alias set local http://127.0.0.1:9002 minioadmin minioadmin && \
              mc mb --ignore-existing local/starter-e2e && \
-             mc anonymous set download local/starter-e2e"
+             mc anonymous set download local/starter-e2e && \
+             mc mb --ignore-existing local/tracktime-e2e && \
+             mc anonymous set download local/tracktime-e2e"
 
       - run: npx playwright install --with-deps chromium
 
@@ -100,6 +148,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: minioadmin
           AWS_REGION: us-east-1
 
+  # PUSH ONLY. `docker/login-action` below authenticates to ghcr.io with
+  # secrets.GITHUB_TOKEN, which is read-only on a fork PR — `push: true` would
+  # fail with a 403. The `if:` is what keeps this job off pull requests; the
+  # `needs:` does not, since verify and e2e now run on both events.
   build-server:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -120,6 +172,7 @@ jobs:
             ghcr.io/${{ github.repository }}-server:main
             ghcr.io/${{ github.repository }}-server:${{ github.sha }}
 
+  # PUSH ONLY, for the same reason as build-server. Keep the `if:`.
   build-client:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -171,6 +224,12 @@ jobs:
   # Deploying them separately is the point of the split: the server holds
   # the WebSocket sync connections, and a client-only change must not
   # restart it and drop every connected device's socket.
+  #
+  # PUSH ONLY, and the `if:` below is the only thing enforcing that. Note that
+  # the per-step `if: env.COOLIFY_* != ''` guards are NOT a PR safety net: on a
+  # fork every COOLIFY_* secret resolves to an empty string, so every step
+  # would skip and the job would report GREEN having deployed nothing — a
+  # silent false pass, which is worse than a loud failure.
   deploy:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -222,17 +281,17 @@ jobs:
         if: env.COOLIFY_BASE_URL == '' && env.COOLIFY_WEBHOOK_URL != ''
         run: curl -fsSL "$COOLIFY_WEBHOOK_URL"
 
-  # DCO gate — the ONLY job a pull request can reach. tracktime takes
-  # Developer Certificate of Origin 1.1 sign-off rather than a CLA, so the
-  # check is mechanical: every non-merge commit in the PR carries a
-  # `Signed-off-by:` trailer. Hand-rolled bash on purpose — no third-party
-  # action in the trust path of the one job that runs on untrusted PR code.
+  # DCO gate — pull requests only. tracktime takes Developer Certificate of
+  # Origin 1.1 sign-off rather than a CLA, so the check is mechanical: every
+  # non-merge commit in the PR carries a `Signed-off-by:` trailer.
+  # Hand-rolled bash on purpose — no third-party action in the trust path of a
+  # job that runs against untrusted PR code.
   #
   # The workflow-level block grants `packages: write` for the image pushes, so
-  # this job pins its own `contents: read` rather than inheriting that scope:
-  # the one job a pull request can reach never writes anything. The
-  # pull_request event (rather than pull_request_target) also gives a
-  # read-only token for fork PRs.
+  # this job pins its own `contents: read` rather than inheriting that scope —
+  # as verify and e2e now do too. No job a pull request can reach writes
+  # anything. The pull_request event (rather than pull_request_target) also
+  # gives a read-only token for fork PRs.
   dco:
     name: Signed-off-by present on every commit
     if: github.event_name == 'pull_request'
