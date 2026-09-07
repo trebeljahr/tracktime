@@ -6,8 +6,10 @@ import { CatalogScreen } from "@/components/catalog/catalog-screen";
 import { TaskFormDialog } from "@/components/catalog/task-form-dialog";
 import { TasksTable } from "@/components/catalog/tasks-table";
 import {
+  CLIENT_LIST_INPUT,
   PROJECT_LIST_INPUT,
   TASK_LIST_INPUT,
+  type ClientRow,
   type ProjectRow,
   type TaskRow,
 } from "@/components/catalog/types";
@@ -32,6 +34,10 @@ export default function TasksPage(): React.JSX.Element {
   const projectsQuery = trpc.projects.list.useQuery(PROJECT_LIST_INPUT, {
     staleTime: 30_000,
   });
+  // Only for the project dialog a task row can open from its Project cell.
+  const clientsQuery = trpc.clients.list.useQuery(CLIENT_LIST_INPUT, {
+    staleTime: 30_000,
+  });
 
   const allTasks = React.useMemo<TaskRow[]>(
     () => tasksQuery.data ?? [],
@@ -40,6 +46,10 @@ export default function TasksPage(): React.JSX.Element {
   const allProjects = React.useMemo<ProjectRow[]>(
     () => projectsQuery.data ?? [],
     [projectsQuery.data],
+  );
+  const allClients = React.useMemo<ClientRow[]>(
+    () => clientsQuery.data ?? [],
+    [clientsQuery.data],
   );
 
   const needle = search.trim().toLowerCase();
@@ -113,6 +123,8 @@ export default function TasksPage(): React.JSX.Element {
     >
       <TasksTable
         tasks={visibleTasks}
+        projects={allProjects}
+        clients={allClients}
         isLoading={tasksQuery.isLoading}
         isFiltered={needle !== "" || projectFilter !== null}
         onCreate={() => setCreating(true)}

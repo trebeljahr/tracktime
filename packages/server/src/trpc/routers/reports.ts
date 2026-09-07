@@ -27,6 +27,7 @@ import {
   formatDuration,
   summaryReportSchema,
   sumAmounts,
+  trackedSpanSchema,
   addDaysToKey,
   dayKeyInZone,
   dayKeysBetween,
@@ -46,6 +47,7 @@ import {
   type SummaryGroup,
   type SummaryReportResult,
   type SummaryTimelinePoint,
+  type TrackedSpan,
   type Visibility,
   type WeekStart,
   type WeeklyReportResult,
@@ -1077,6 +1079,54 @@ type CsvExport = CsvExportResult & { mimeType: "text/csv" };
 // ── router ───────────────────────────────────────────────────────────
 
 /**
+ * The first and last day this scope has tracked time on.
+ *
+ * The upper bound is `max(last end, last start, today)`: `$max` skips the
+ * `null` end of a running entry, and a manually filed entry can sit in the
+ * future, so neither the last end nor the last start alone bounds the data.
+ * Today is always a sensible range end, so folding it in costs nothing.
+ */
+const buildTrackedSpan = async (
+  scope: ReportScope,
+  timeZone: string,
+): Promise<TrackedSpan> => {
+  const conditions: Record<string, unknown>[] = [
+    { workspaceId: scope.workspaceId },
+  ];
+  const authorScope = authorScopeFilter(scope.visibility);
+  if (authorScope) conditions.push(authorScope);
+
+  const [span] = await TimeEntry.aggregate<{
+    first: Date | null;
+    lastStart: Date | null;
+    lastEnd: Date | null;
+  }>([
+    { $match: { $and: conditions } },
+    {
+      $group: {
+        _id: null,
+        first: { $min: "$start" },
+        lastStart: { $max: "$start" },
+        lastEnd: { $max: "$end" },
+      },
+    },
+  ]);
+
+  if (!span || span.first === null) return { from: null, to: null };
+
+  const lastMs = Math.max(
+    span.lastEnd?.getTime() ?? 0,
+    span.lastStart?.getTime() ?? 0,
+    Date.now(),
+  );
+
+  return {
+    from: dayKeyInZone(span.first.getTime(), timeZone),
+    to: dayKeyInZone(lastMs, timeZone),
+  };
+};
+
+/**
  * Lift the request context into a report scope.
  *
  * Both fields come from the workspace middleware, which resolved them once.
@@ -1096,6 +1146,17 @@ export const reportsRouter = router({
     .input(summaryReportSchema)
     .query(async ({ ctx, input }): Promise<SummaryReportResult> => {
       return buildSummary(reportScope(ctx), input, input.groupBy);
+    }),
+
+  /**
+   * The days this workspace's tracked time actually spans — what an "all
+   * time" range resolves to. Cheap enough to sit behind every catalog row's
+   * "show time entries" link.
+   */
+  trackedSpan: workspaceProcedure
+    .input(trackedSpanSchema)
+    .query(async ({ ctx, input }): Promise<TrackedSpan> => {
+      return buildTrackedSpan(reportScope(ctx), resolveTimeZone(input.timeZone));
     }),
 
   /** Flat, paginated entry log; totals always span the full filtered range. */

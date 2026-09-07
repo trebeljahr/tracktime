@@ -20,6 +20,19 @@ export type ReportFilters = {
   timeZone?: string;
 };
 
+/**
+ * The first and last day a workspace has tracked time on, resolved in the
+ * caller's zone. Both `null` when nothing has been tracked yet.
+ *
+ * This is what makes an honest "all time" range possible. A fixed epoch start
+ * would hand the summary report tens of thousands of zero-filled timeline days
+ * for a workspace that began last month, so the bounds come from the data.
+ */
+export type TrackedSpan = {
+  from: string | null;
+  to: string | null;
+};
+
 export type SummaryReportInput = ReportFilters & { groupBy: ReportGroupBy };
 
 export type SummaryGroup = {

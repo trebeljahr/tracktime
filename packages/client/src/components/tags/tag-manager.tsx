@@ -13,8 +13,12 @@ import {
 
 import { ColorPicker, COLOR_PALETTE } from "@/components/color-picker";
 import { EmptyState } from "@/components/empty-state";
+import { CatalogName } from "@/components/catalog/catalog-name";
 import { ConfirmDialog } from "@/components/catalog/confirm-dialog";
-import { Badge } from "@/components/ui/badge";
+import {
+  EntriesLink,
+  ShowEntriesItem,
+} from "@/components/catalog/entries-link";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,6 +49,7 @@ import {
 } from "@/components/ui/table";
 import { toast } from "@/components/ui/sonner";
 import { useFormatSettings } from "@/lib/format";
+import { useAllTimeRange } from "@/lib/entry-links";
 import {
   useTagMutations,
   useTags,
@@ -88,6 +93,7 @@ export function removalPreview(tag: TagRow): {
 /** Tag management surface — create, rename, recolour, archive, delete. */
 export function TagManager(): React.JSX.Element {
   const format = useFormatSettings();
+  const allTime = useAllTimeRange();
   const { allTags, isLoading } = useTags({ includeArchived: true });
   const { setTagArchived, removeTag } = useTagMutations();
 
@@ -161,38 +167,42 @@ export function TagManager(): React.JSX.Element {
                   data-archived={tag.archived ? "true" : "false"}
                 >
                   <TableCell>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span
-                        aria-hidden="true"
-                        className="size-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: tag.color }}
-                      />
-                      <span
-                        className="truncate font-medium"
-                        data-testid={`tag-name-${tag.id}`}
-                      >
-                        {tag.name}
-                      </span>
-                      {tag.archived ? (
-                        <Badge variant="outline" className="shrink-0">
-                          Archived
-                        </Badge>
-                      ) : null}
-                    </span>
+                    <CatalogName
+                      name={tag.name}
+                      color={tag.color}
+                      archived={tag.archived}
+                      editLabel={`Edit tag "${tag.name}"`}
+                      onEdit={() => setEditing(tag)}
+                      nameTestId={`tag-name-${tag.id}`}
+                    />
                   </TableCell>
 
                   <TableCell
                     className="text-right tabular-nums text-muted-foreground"
                     data-testid={`tag-entries-${tag.id}`}
                   >
-                    {tag.entryCount}
+                    <EntriesLink
+                      target={{ dimension: "tag", id: tag.id }}
+                      range={allTime}
+                      label={tag.name}
+                      testId={`tag-entries-link-${tag.id}`}
+                    >
+                      {tag.entryCount}
+                    </EntriesLink>
                   </TableCell>
 
                   <TableCell
                     className="text-right tabular-nums"
                     data-testid={`tag-tracked-${tag.id}`}
                   >
-                    {format.duration(tag.totalSec)}
+                    <EntriesLink
+                      target={{ dimension: "tag", id: tag.id }}
+                      range={allTime}
+                      label={tag.name}
+                      testId={`tag-tracked-link-${tag.id}`}
+                    >
+                      {format.duration(tag.totalSec)}
+                    </EntriesLink>
                   </TableCell>
 
                   <TableCell>
@@ -209,6 +219,12 @@ export function TagManager(): React.JSX.Element {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <ShowEntriesItem
+                          target={{ dimension: "tag", id: tag.id }}
+                          range={allTime}
+                          testId={`tag-entries-menu-${tag.id}`}
+                        />
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onSelect={() => setEditing(tag)}
                           data-testid={`tag-edit-${tag.id}`}

@@ -15,6 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { CatalogName } from "@/components/catalog/catalog-name";
 import { formatDayLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -106,6 +107,11 @@ export type DetailedTableProps = {
   duration: (seconds: number) => string;
   money: (amount: number) => string;
   clock: (iso: string) => string;
+  /**
+   * Opens the project a row is filed under. Omitted where the project rows
+   * are not to hand, which leaves the cell as plain text.
+   */
+  onEditProject?: (projectId: string) => void;
 };
 
 /** The flat entry log, one row per time entry, with bulk-select checkboxes. */
@@ -119,6 +125,7 @@ export function DetailedTable({
   duration,
   money,
   clock,
+  onEditProject,
 }: DetailedTableProps): React.JSX.Element {
   const allSelected = entries.length > 0 && selected.size >= entries.length;
   const someSelected = selected.size > 0 && !allSelected;
@@ -167,6 +174,8 @@ export function DetailedTable({
         {entries.map((entry) => {
           const isSelected = selected.has(entry.id);
           const running = entry.end === null;
+          // Hoisted so the narrowing survives into the click handler below.
+          const projectId = entry.projectId;
           return (
             <TableRow
               key={entry.id}
@@ -196,9 +205,21 @@ export function DetailedTable({
                   )}
                 </span>
               </TableCell>
+              {/* The project's own colour and name are edited from wherever
+                  they are read, this log included — the row's project itself
+                  is changed with the bulk bar, which is the report's job. */}
               <TableCell>
                 {entry.projectName === null ? (
                   <span className="text-muted-foreground">No project</span>
+                ) : onEditProject && projectId !== null ? (
+                  <CatalogName
+                    name={entry.projectName}
+                    color={entry.projectColor}
+                    nameClassName="font-normal"
+                    editLabel={`Edit project "${entry.projectName}"`}
+                    onEdit={() => onEditProject(projectId)}
+                    testId={`detailed-project-${entry.id}`}
+                  />
                 ) : (
                   <span className="flex items-center gap-2">
                     <span

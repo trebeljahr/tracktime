@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -31,8 +30,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useFormatSettings } from "@/lib/format";
+import { useAllTimeRange } from "@/lib/entry-links";
+import { CatalogName } from "./catalog-name";
 import { ClientFormDialog } from "./client-form-dialog";
 import { ConfirmDialog } from "./confirm-dialog";
+import { EntriesLink, ShowEntriesItem } from "./entries-link";
 import type { ClientRow, ProjectRow } from "./types";
 import { useClientMutations } from "./use-catalog-mutations";
 
@@ -83,6 +85,9 @@ export function ClientsTable({
 }: ClientsTableProps): React.JSX.Element {
   const format = useFormatSettings();
   const { setClientArchived, removeClient } = useClientMutations();
+  // The roll-ups on these rows are lifetime totals, so the entry log they
+  // link to has to be too.
+  const allTime = useAllTimeRange();
 
   const [editing, setEditing] = React.useState<ClientRow | null>(null);
   const [pendingDelete, setPendingDelete] = React.useState<ClientRow | null>(
@@ -154,21 +159,14 @@ export function ClientsTable({
                   data-archived={client.archived ? "true" : "false"}
                 >
                   <TableCell>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span
-                        aria-hidden="true"
-                        className="size-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: client.color }}
-                      />
-                      <span className="truncate font-medium">
-                        {client.name}
-                      </span>
-                      {client.archived ? (
-                        <Badge variant="outline" className="shrink-0">
-                          Archived
-                        </Badge>
-                      ) : null}
-                    </span>
+                    <CatalogName
+                      name={client.name}
+                      color={client.color}
+                      archived={client.archived}
+                      editLabel={`Edit client "${client.name}"`}
+                      onEdit={() => setEditing(client)}
+                      testId={`client-name-${client.id}`}
+                    />
                   </TableCell>
 
                   <TableCell
@@ -182,14 +180,28 @@ export function ClientsTable({
                     className="text-right tabular-nums"
                     data-testid={`client-tracked-${client.id}`}
                   >
-                    {format.duration(rollup.totalSec)}
+                    <EntriesLink
+                      target={{ dimension: "client", id: client.id }}
+                      range={allTime}
+                      label={client.name}
+                      testId={`client-tracked-link-${client.id}`}
+                    >
+                      {format.duration(rollup.totalSec)}
+                    </EntriesLink>
                   </TableCell>
 
                   <TableCell
                     className="text-right tabular-nums text-muted-foreground"
                     data-testid={`client-entries-${client.id}`}
                   >
-                    {rollup.entryCount}
+                    <EntriesLink
+                      target={{ dimension: "client", id: client.id }}
+                      range={allTime}
+                      label={client.name}
+                      testId={`client-entries-link-${client.id}`}
+                    >
+                      {rollup.entryCount}
+                    </EntriesLink>
                   </TableCell>
 
                   <TableCell>
@@ -206,6 +218,12 @@ export function ClientsTable({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <ShowEntriesItem
+                          target={{ dimension: "client", id: client.id }}
+                          range={allTime}
+                          testId={`client-entries-menu-${client.id}`}
+                        />
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onSelect={() => setEditing(client)}
                           data-testid={`client-edit-${client.id}`}

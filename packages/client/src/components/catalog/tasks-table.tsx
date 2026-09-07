@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -32,13 +31,24 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useFormatSettings } from "@/lib/format";
+import { useAllTimeRange } from "@/lib/entry-links";
+import { CatalogName } from "./catalog-name";
 import { ConfirmDialog } from "./confirm-dialog";
+import { EntriesLink, ShowEntriesItem } from "./entries-link";
+import { ProjectFormDialog } from "./project-form-dialog";
 import { TaskFormDialog } from "./task-form-dialog";
-import type { TaskRow } from "./types";
+import type { ClientRow, ProjectRow, TaskRow } from "./types";
 import { useTaskMutations } from "./use-catalog-mutations";
 
 export type TasksTableProps = {
   tasks: TaskRow[];
+  /**
+   * Every project, so the Project cell can open the project it names. A task
+   * row carries its project's name and colour but not the row itself.
+   */
+  projects: ProjectRow[];
+  /** Passed straight through to the project dialog opened from a row. */
+  clients: ClientRow[];
   isLoading: boolean;
   /** True when filters are hiding rows, so the empty state can say so. */
   isFiltered: boolean;
@@ -48,14 +58,22 @@ export type TasksTableProps = {
 /** Every task the owner has, across projects — the Tasks manage screen. */
 export function TasksTable({
   tasks,
+  projects,
+  clients,
   isLoading,
   isFiltered,
   onCreate,
 }: TasksTableProps): React.JSX.Element {
   const format = useFormatSettings();
   const { updateTask, setTaskArchived, removeTask } = useTaskMutations(null);
+  // The Tracked column is a lifetime total, so its link has to span one too.
+  const allTime = useAllTimeRange();
 
   const [editing, setEditing] = React.useState<TaskRow | null>(null);
+  /** The task row's project, opened for editing from the Project cell. */
+  const [editingProject, setEditingProject] = React.useState<ProjectRow | null>(
+    null,
+  );
   const [pendingDelete, setPendingDelete] = React.useState<TaskRow | null>(
     null,
   );
@@ -125,35 +143,31 @@ export function TasksTable({
                 </TableCell>
 
                 <TableCell>
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span
-                      className={`truncate font-medium ${
-                        task.done ? "text-muted-foreground line-through" : ""
-                      }`}
-                      data-testid={`task-name-${task.id}`}
-                    >
-                      {task.name}
-                    </span>
-                    {task.archived ? (
-                      <Badge variant="outline" className="shrink-0">
-                        Archived
-                      </Badge>
-                    ) : null}
-                  </span>
+                  <CatalogName
+                    name={task.name}
+                    archived={task.archived}
+                    done={task.done}
+                    editLabel={`Edit task "${task.name}"`}
+                    onEdit={() => setEditing(task)}
+                    nameTestId={`task-name-${task.id}`}
+                  />
                 </TableCell>
 
                 <TableCell className="text-muted-foreground">
                   {task.projectName ? (
-                    <span className="flex items-center gap-2">
-                      <span
-                        aria-hidden="true"
-                        className="size-2.5 shrink-0 rounded-full"
-                        style={{
-                          backgroundColor: task.projectColor ?? "#64748b",
-                        }}
-                      />
-                      <span className="truncate">{task.projectName}</span>
-                    </span>
+                    <CatalogName
+                      name={task.projectName}
+                      color={task.projectColor}
+                      nameClassName="font-normal"
+                      editLabel={`Edit project "${task.projectName}"`}
+                      onEdit={() => {
+                        const project = projects.find(
+                          (row) => row.id === task.projectId,
+                        );
+                        if (project) setEditingProject(project);
+                      }}
+                      testId={`task-project-${task.id}`}
+                    />
                   ) : (
                     <span className="text-muted-foreground/70">—</span>
                   )}
@@ -163,7 +177,18 @@ export function TasksTable({
                   className="text-right tabular-nums"
                   data-testid={`task-total-${task.id}`}
                 >
-                  {format.duration(task.totalSec)}
+                  <EntriesLink
+                    target={{
+                      dimension: "task",
+                      id: task.id,
+                      projectId: task.projectId,
+                    }}
+                    range={allTime}
+                    label={task.name}
+                    testId={`task-total-link-${task.id}`}
+                  >
+                    {format.duration(task.totalSec)}
+                  </EntriesLink>
                 </TableCell>
 
                 <TableCell>
@@ -180,6 +205,16 @@ export function TasksTable({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <ShowEntriesItem
+                        target={{
+                          dimension: "task",
+                          id: task.id,
+                          projectId: task.projectId,
+                        }}
+                        range={allTime}
+                        testId={`task-entries-menu-${task.id}`}
+                      />
+                      <DropdownMenuSeparator />
                       <DropdownMenuItem
                         onSelect={() => setEditing(task)}
                         data-testid={`task-edit-${task.id}`}
@@ -217,6 +252,15 @@ export function TasksTable({
           </TableBody>
         </Table>
       </div>
+
+      <ProjectFormDialog
+        open={editingProject !== null}
+        onOpenChange={(next) => {
+          if (!next) setEditingProject(null);
+        }}
+        project={editingProject}
+        clients={clients}
+      />
 
       <TaskFormDialog
         open={editing !== null}

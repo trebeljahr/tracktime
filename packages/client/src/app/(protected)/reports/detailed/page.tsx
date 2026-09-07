@@ -17,6 +17,12 @@ import { ORIGIN_ID } from "@/hooks/use-sync";
 import { CURRENCY_FALLBACK_ICON, currencyIcon } from "@/lib/currency";
 import { useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
+import { ProjectFormDialog } from "@/components/catalog/project-form-dialog";
+import {
+  CLIENT_LIST_INPUT,
+  PROJECT_LIST_INPUT,
+  type ProjectRow,
+} from "@/components/catalog/types";
 import { BulkActionBar } from "@/components/reports/bulk-action-bar";
 import {
   DEFAULT_DETAILED_SORT,
@@ -62,7 +68,24 @@ function DetailedReport(): React.JSX.Element {
     staleTime: 15_000,
   });
 
-  const projectsQuery = trpc.projects.list.useQuery({});
+  const projectsQuery = trpc.projects.list.useQuery(PROJECT_LIST_INPUT);
+  // Only for the project dialog a row's Project cell opens.
+  const clientsQuery = trpc.clients.list.useQuery(CLIENT_LIST_INPUT, {
+    staleTime: 30_000,
+  });
+  const [editingProject, setEditingProject] = React.useState<ProjectRow | null>(
+    null,
+  );
+  const openProject = React.useCallback(
+    (projectId: string): void => {
+      const project = (projectsQuery.data ?? []).find(
+        (row) => row.id === projectId,
+      );
+      if (project) setEditingProject(project);
+    },
+    [projectsQuery.data],
+  );
+
   const projectsById = React.useMemo(() => {
     const map = new Map<
       string,
@@ -374,6 +397,7 @@ function DetailedReport(): React.JSX.Element {
               duration={fmt.duration}
               money={fmt.money}
               clock={fmt.clock}
+              onEditProject={openProject}
             />
           )}
 
@@ -406,6 +430,15 @@ function DetailedReport(): React.JSX.Element {
           onDelete={handleDelete}
         />
       ) : null}
+
+      <ProjectFormDialog
+        open={editingProject !== null}
+        onOpenChange={(next) => {
+          if (!next) setEditingProject(null);
+        }}
+        project={editingProject}
+        clients={clientsQuery.data ?? []}
+      />
 
       {query.isError ? (
         <p className="text-sm text-destructive" data-testid="detailed-error">

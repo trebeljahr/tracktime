@@ -35,7 +35,11 @@ import {
 } from "@/components/ui/table";
 import { budgetView } from "@/lib/budget-view";
 import { formatMoney, useFormatSettings } from "@/lib/format";
+import { useAllTimeRange } from "@/lib/entry-links";
+import { CatalogName } from "./catalog-name";
+import { ClientFormDialog } from "./client-form-dialog";
 import { ConfirmDialog } from "./confirm-dialog";
+import { EntriesLink, ShowEntriesItem } from "./entries-link";
 import { ProjectFormDialog } from "./project-form-dialog";
 import { TaskPanel } from "./task-panel";
 import type { ClientRow, ProjectRow } from "./types";
@@ -53,16 +57,6 @@ export type ProjectsTableProps = {
 
 const COLUMN_COUNT = 9;
 
-function ColorDot({ color }: { color: string }): React.JSX.Element {
-  return (
-    <span
-      aria-hidden="true"
-      className="size-2.5 shrink-0 rounded-full"
-      style={{ backgroundColor: color }}
-    />
-  );
-}
-
 export function ProjectsTable({
   projects,
   clients,
@@ -73,6 +67,9 @@ export function ProjectsTable({
 }: ProjectsTableProps): React.JSX.Element {
   const format = useFormatSettings();
   const { setProjectArchived, removeProject } = useProjectMutations();
+  // Both roll-up columns are lifetime totals, so the entry log they open has
+  // to span the same thing.
+  const allTime = useAllTimeRange();
 
   // A budget carries its own currency, so the meter formats money with that
   // one rather than through `format.money`, which is bound to the workspace.
@@ -87,6 +84,10 @@ export function ProjectsTable({
 
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [editing, setEditing] = React.useState<ProjectRow | null>(null);
+  /** The project row's client, opened for editing from the Client cell. */
+  const [editingClient, setEditingClient] = React.useState<ClientRow | null>(
+    null,
+  );
   const [pendingDelete, setPendingDelete] = React.useState<ProjectRow | null>(
     null,
   );
@@ -170,33 +171,36 @@ export function ProjectsTable({
                       </Button>
                     </TableCell>
 
+                    {/* The name opens the project rather than expanding the
+                        row: the chevron beside it already does that, and a
+                        rename or a colour change is the edit people reach for
+                        far more often than the task list. */}
                     <TableCell>
-                      <button
-                        type="button"
-                        className="flex min-w-0 items-center gap-2 text-left"
-                        onClick={() =>
-                          setExpandedId(expanded ? null : project.id)
-                        }
-                        data-testid={`project-name-${project.id}`}
-                      >
-                        <ColorDot color={project.color} />
-                        <span className="truncate font-medium">
-                          {project.name}
-                        </span>
-                        {project.archived ? (
-                          <Badge variant="outline" className="shrink-0">
-                            Archived
-                          </Badge>
-                        ) : null}
-                      </button>
+                      <CatalogName
+                        name={project.name}
+                        color={project.color}
+                        archived={project.archived}
+                        editLabel={`Edit project "${project.name}"`}
+                        onEdit={() => setEditing(project)}
+                        testId={`project-name-${project.id}`}
+                      />
                     </TableCell>
 
                     <TableCell className="text-muted-foreground">
                       {project.clientName ? (
-                        <span className="flex items-center gap-2">
-                          <ColorDot color={project.clientColor ?? "#64748b"} />
-                          <span className="truncate">{project.clientName}</span>
-                        </span>
+                        <CatalogName
+                          name={project.clientName}
+                          color={project.clientColor}
+                          nameClassName="font-normal"
+                          editLabel={`Edit client "${project.clientName}"`}
+                          onEdit={() => {
+                            const client = clients.find(
+                              (row) => row.id === project.clientId,
+                            );
+                            if (client) setEditingClient(client);
+                          }}
+                          testId={`project-client-${project.id}`}
+                        />
                       ) : (
                         <span className="text-muted-foreground/70">—</span>
                       )}
@@ -227,7 +231,14 @@ export function ProjectsTable({
                       className="text-right tabular-nums"
                       data-testid={`project-tracked-${project.id}`}
                     >
-                      {format.duration(project.totalSec)}
+                      <EntriesLink
+                        target={{ dimension: "project", id: project.id }}
+                        range={allTime}
+                        label={project.name}
+                        testId={`project-tracked-link-${project.id}`}
+                      >
+                        {format.duration(project.totalSec)}
+                      </EntriesLink>
                     </TableCell>
 
                     <TableCell data-testid={`project-budget-${project.id}`}>
@@ -242,7 +253,14 @@ export function ProjectsTable({
                       className="text-right tabular-nums text-muted-foreground"
                       data-testid={`project-entries-${project.id}`}
                     >
-                      {project.entryCount}
+                      <EntriesLink
+                        target={{ dimension: "project", id: project.id }}
+                        range={allTime}
+                        label={project.name}
+                        testId={`project-entries-link-${project.id}`}
+                      >
+                        {project.entryCount}
+                      </EntriesLink>
                     </TableCell>
 
                     <TableCell>
@@ -259,6 +277,12 @@ export function ProjectsTable({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <ShowEntriesItem
+                            target={{ dimension: "project", id: project.id }}
+                            range={allTime}
+                            testId={`project-entries-menu-${project.id}`}
+                          />
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem
                             onSelect={() => setEditing(project)}
                             data-testid={`project-edit-${project.id}`}
@@ -310,6 +334,14 @@ export function ProjectsTable({
           </TableBody>
         </Table>
       </div>
+
+      <ClientFormDialog
+        open={editingClient !== null}
+        onOpenChange={(next) => {
+          if (!next) setEditingClient(null);
+        }}
+        client={editingClient}
+      />
 
       <ProjectFormDialog
         open={editing !== null}

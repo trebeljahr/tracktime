@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import { BarChart3, Clock, Receipt } from "lucide-react";
-import type { ReportGroupBy } from "@starter/shared";
+import type { ReportGroupBy, SummaryGroup } from "@starter/shared";
 
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,17 @@ const GROUP_BY_OPTIONS: { id: ReportGroupBy; label: string }[] = [
 const isGroupBy = (value: string | null): value is ReportGroupBy =>
   GROUP_BY_OPTIONS.some((option) => option.id === value);
 
+/**
+ * The report param each grouping's keys are ids for. The time buckets are
+ * absent on purpose: a "Week 12" row has no catalog row to filter by.
+ */
+const PARAM_FOR_GROUP_BY: Partial<Record<ReportGroupBy, string>> = {
+  project: REPORT_PARAM.projects,
+  client: REPORT_PARAM.clients,
+  task: REPORT_PARAM.tasks,
+  tag: REPORT_PARAM.tags,
+};
+
 const percent = (part: number, whole: number): string =>
   whole > 0 ? `${((part / whole) * 100).toFixed(0)}% of tracked time` : "";
 
@@ -54,6 +66,7 @@ function SummaryReport(): React.JSX.Element {
   const filters = useReportFilters();
   const { state, filters: reportFilters, setParam, getParam } = filters;
   const fmt = useFormatSettings();
+  const searchParams = useSearchParams();
 
   const groupByParam = getParam(REPORT_PARAM.groupBy);
   const groupBy: ReportGroupBy = isGroupBy(groupByParam)
@@ -97,6 +110,26 @@ function SummaryReport(): React.JSX.Element {
     );
     return (groupKey) => views.get(groupKey) ?? null;
   }, [groupBy, projectsQuery.data, fmt.durationShort, fmt.currency]);
+
+  /**
+   * Drilling into a group keeps every filter already on screen and adds the
+   * group as one more — the detailed report reads the same query string, so
+   * the row's number and the log it opens describe the same set of entries.
+   * The grouping itself is dropped, since the destination has no grouping.
+   */
+  const hrefForGroup = React.useMemo<
+    ((group: SummaryGroup) => string | null) | undefined
+  >(() => {
+    const param = PARAM_FOR_GROUP_BY[groupBy];
+    if (param === undefined) return undefined;
+    const base = searchParams.toString();
+    return (group) => {
+      const next = new URLSearchParams(base);
+      next.delete(REPORT_PARAM.groupBy);
+      next.set(param, group.key);
+      return `/reports/detailed?${next.toString()}`;
+    };
+  }, [groupBy, searchParams]);
 
   const kpis = React.useMemo<KpiItem[]>(() => {
     const totalSec = result?.totalSec ?? 0;
@@ -245,6 +278,7 @@ function SummaryReport(): React.JSX.Element {
               money={fmt.money}
               dimensionLabel={dimension}
               budgetFor={budgetFor}
+              hrefForGroup={hrefForGroup}
               // Stated from the grouping itself, not inferred from the label,
               // so renaming "Tag" cannot silently drop the double-counting
               // caveat.

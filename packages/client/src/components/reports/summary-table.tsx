@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import type { SummaryGroup } from "@starter/shared";
 
 import { BudgetMeterCell } from "@/components/budget-meter";
@@ -32,6 +33,12 @@ export type SummaryTableProps = {
    */
   budgetFor?: (groupKey: string) => BudgetView | null;
   /**
+   * Where a group row leads — the entry log behind that row's number. Returns
+   * null for a dimension whose keys are not catalog rows (day, week, month),
+   * and may be omitted entirely.
+   */
+  hrefForGroup?: (group: SummaryGroup) => string | null;
+  /**
    * Whether the groups can overlap — true only for tags, where one entry
    * carries several. Defaults to the tag dimension so the caller does not have
    * to remember; pass it explicitly if a future dimension overlaps too.
@@ -52,6 +59,7 @@ export function SummaryTable({
   money,
   dimensionLabel,
   budgetFor,
+  hrefForGroup,
   groupsOverlap = dimensionLabel === OVERLAPPING_DIMENSION,
 }: SummaryTableProps): React.JSX.Element {
   const rows = React.useMemo(
@@ -98,17 +106,34 @@ export function SummaryTable({
         {rows.map((group, index) => {
           const share = (group.seconds / denominator) * 100;
           const color = colorForGroup(group, index);
+          const href = hrefForGroup?.(group) ?? null;
+          const label = (
+            <span className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                className="size-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: color }}
+              />
+              <span className="truncate">{group.label}</span>
+            </span>
+          );
           return (
             <TableRow key={group.key} data-testid={`summary-row-${group.key}`}>
+              {/* A grouped total and the entries under it are the same fact at
+                  two zoom levels, so the row itself is the way down to them. */}
               <TableCell className="font-medium">
-                <span className="flex items-center gap-2">
-                  <span
-                    aria-hidden="true"
-                    className="size-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: color }}
-                  />
-                  <span className="truncate">{group.label}</span>
-                </span>
+                {href === null ? (
+                  label
+                ) : (
+                  <Link
+                    href={href}
+                    className="rounded underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title={`Show time entries for ${group.label}`}
+                    data-testid={`summary-link-${group.key}`}
+                  >
+                    {label}
+                  </Link>
+                )}
               </TableCell>
               <TableCell>
                 <span className="flex items-center gap-2">

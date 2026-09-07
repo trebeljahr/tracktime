@@ -10,7 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 import { useFormatSettings } from "@/lib/format";
+import { useAllTimeRange } from "@/lib/entry-links";
 import { ConfirmDialog } from "./confirm-dialog";
+import { EntriesLink } from "./entries-link";
 import { taskListInput, type TaskRow } from "./types";
 import { useTaskMutations } from "./use-catalog-mutations";
 
@@ -31,6 +33,7 @@ export function TaskPanel({
   showArchived,
 }: TaskPanelProps): React.JSX.Element {
   const format = useFormatSettings();
+  const allTime = useAllTimeRange();
   const query = trpc.tasks.list.useQuery(taskListInput(projectId), {
     staleTime: 30_000,
   });
@@ -195,7 +198,14 @@ export function TaskPanel({
                 className="shrink-0 tabular-nums text-sm text-muted-foreground"
                 data-testid={`task-total-${task.id}`}
               >
-                {format.duration(task.totalSec)}
+                <EntriesLink
+                  target={{ dimension: "task", id: task.id, projectId }}
+                  range={allTime}
+                  label={task.name}
+                  testId={`task-total-link-${task.id}`}
+                >
+                  {format.duration(task.totalSec)}
+                </EntriesLink>
               </span>
 
               <Button

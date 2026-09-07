@@ -381,6 +381,14 @@ export const reportFiltersSchema = z.object({
   timeZone: z.string().max(64).optional(),
 });
 
+/**
+ * The tracked span carries no range of its own — asking for it IS asking what
+ * the range should be. Only the zone, so the bounds land on the right days.
+ */
+export const trackedSpanSchema = z.object({
+  timeZone: z.string().max(64).optional(),
+});
+
 export const summaryReportSchema = reportFiltersSchema.extend({
   groupBy: reportGroupBySchema,
 });
