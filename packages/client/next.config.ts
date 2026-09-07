@@ -1,16 +1,31 @@
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
 import type { NextConfig } from "next";
 
-// Relative asset paths are required by the desktop/mobile shells, which load
-// the exported client from file:// (Electron) or the Capacitor bundle.
+// Relative asset paths are required only by the shells that load the exported
+// client off a file:// document, where there is no server and no root to be
+// absolute from: Electron (`build:desktop`, `electron:build`,
+// `electron:preview`) and Tauri (`build:tauri`). Those four — and only those
+// four — set RELATIVE_ASSET_PREFIX=1. The flag is named for what it does
+// rather than for one of its consumers, because `build:tauri` setting a
+// variable called ELECTRON_BUILD reads like a copy-paste slip and invites a
+// deletion that silently blanks the Tauri window.
 //
-// They are WRONG everywhere else. With `trailingSlash: true` every route is a
-// directory, so a page served at /track/ resolves "./_next/..." to
-// "/track/_next/..." and every asset 404s — the whole web build renders blank
-// on any route but "/". So the prefix is opt-in, set by the native build
-// scripts, and never applied to `next dev` or a web production build.
+// Capacitor is deliberately NOT in that list. CapacitorRouter.route(for:)
+// (node_modules/@capacitor/ios/Capacitor/Capacitor/Router.swift) resolves every
+// asset from the bundle root: it returns `basePath + "/index.html"` when the
+// path has no extension and `basePath + path` otherwise. So with
+// `trailingSlash: true`, a chunk requested as "./_next/…" from a document at
+// /track/ resolves to "/track/_next/…", which has an extension, and the router
+// looks for a file that does not exist — a blank screen behind a splash
+// `launchAutoHide: false` never hides. Root-absolute "/_next/…" is correct
+// there, and is what the web build already uses.
+//
+// Relative paths are WRONG for the web build for the same reason: a page
+// served at /track/ would resolve "./_next/..." to "/track/_next/..." and every
+// asset 404s. So the prefix is opt-in and never applied to `next dev` or to a
+// web production build.
 const isDev = process.env.NODE_ENV === "development";
-const isNativeBuild = process.env.NATIVE_BUILD === "1";
+const useRelativeAssetPrefix = process.env.RELATIVE_ASSET_PREFIX === "1";
 
 // Next 16 blocks cross-origin requests to /_next dev resources by default.
 // scripts/dev.mjs prints 127.0.0.1 URLs while Next treats localhost as its own
@@ -21,7 +36,7 @@ const devOrigins = ["127.0.0.1", "localhost", ...(process.env.NEXT_DEV_ORIGINS?.
 const baseConfig: NextConfig = {
   output: "export",
   ...(isDev ? { allowedDevOrigins: devOrigins } : {}),
-  ...(isNativeBuild && !isDev ? { assetPrefix: "./" } : {}),
+  ...(useRelativeAssetPrefix && !isDev ? { assetPrefix: "./" } : {}),
   trailingSlash: true,
   images: { unoptimized: true },
   transpilePackages: ["@starter/server", "@starter/shared", "@starter/core"],
