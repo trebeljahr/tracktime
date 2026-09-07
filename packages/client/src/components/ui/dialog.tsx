@@ -18,7 +18,12 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-black/70 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      // Entry animation only. An exit animation keeps the dialog — and its
+      // dismissable layer — mounted while it plays, and Radix reads that
+      // lingering layer as still being on screen: the click that reopens the
+      // dialog lands on it as an "interaction outside" and closes what it
+      // just opened. See DialogContent below.
+      "fixed inset-0 z-50 bg-black/70 data-[state=open]:animate-in data-[state=open]:fade-in-0",
       className,
     )}
     {...props}
@@ -43,7 +48,19 @@ const DialogContent = React.forwardRef<
         // visible to a test and to Radix, simply outside the screen. Forms
         // grow over time (the project dialog gained budget fields), so the
         // container caps itself rather than every form remembering to.
-        "fixed left-[50%] top-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto border border-border bg-background p-5 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:rounded-lg",
+        // A dialog animates in but not out, and that is load-bearing rather
+        // than a taste: Radix keeps closed content mounted for the length of
+        // its exit animation, and its dismissable layer keeps listening the
+        // whole time. The click that reopened the dialog reached that layer
+        // as an interaction outside, which closed the dialog again in the
+        // same click that opened it — so for ~200ms after a dialog was
+        // dismissed, the button that reopens it was dead, and logging two
+        // time entries in a row hung the second one. Suppressing that
+        // dismissal is not enough either: reopening mid-exit leaves Radix's
+        // layer bookkeeping out of step and the dialog comes back inert,
+        // its own overlay swallowing every click. Unmounting on close is the
+        // version with no window for either.
+        "fixed left-[50%] top-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto border border-border bg-background p-5 shadow-lg duration-200 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:rounded-lg",
         className,
       )}
       {...props}

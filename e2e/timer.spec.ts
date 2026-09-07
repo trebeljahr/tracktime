@@ -296,6 +296,40 @@ test.describe("Timer", () => {
   });
 
   /**
+   * Regression: a dialog stays mounted for the length of its exit animation,
+   * and its dismissable layer keeps listening the whole time. The click that
+   * reopened this one reached that layer as an interaction outside, which
+   * closed the dialog again in the same click that opened it — so for a
+   * fraction of a second after logging a block, the + was dead. Logging two
+   * blocks in a row is the ordinary case, so this was the ordinary case
+   * failing, intermittently, depending on how long the first row took to land.
+   */
+  test("the add-time dialog reopens straight after it was used", async ({
+    page,
+  }) => {
+    await openTracker(page, "manual-reopen");
+
+    const dialog = page.getByTestId("manual-entry-dialog");
+
+    await page.getByTestId("tracker-manual-open").click();
+    await expect(dialog).toBeVisible();
+    await page.getByTestId("manual-entry-description").fill("First block");
+    await page.getByTestId("manual-entry-duration").fill("30m");
+    await page.getByTestId("manual-entry-duration").press("Enter");
+    await page.getByTestId("manual-entry-add").click();
+    await expect(entryRow(page, "First block")).toHaveCount(1);
+
+    // Deliberately no settling wait: the exit animation is still running at
+    // this point, which is the state the bug lived in.
+    await page.getByTestId("tracker-manual-open").click();
+    await expect(dialog).toBeVisible();
+
+    // The guard is narrow — a dialog that is genuinely open still dismisses.
+    await page.mouse.click(20, 20);
+    await expect(dialog).toBeHidden();
+  });
+
+  /**
    * Regression: the running row used to render a Continue button. Clicking it
    * stopped the entry and started an identical copy, so repeatedly pressing it
    * shredded one stretch of work into a pile of few-second fragments instead of
