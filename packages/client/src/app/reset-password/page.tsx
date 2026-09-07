@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { AuthHeader } from "@/components/auth-header";
 
 function ResetPasswordForm() {
   const router = useRouter();
@@ -90,12 +91,10 @@ export default function ResetPasswordPage() {
   return (
     <div className="flex min-h-screen items-center justify-center p-8">
       <div className="mx-auto w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">Reset password</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Enter your new password
-          </p>
-        </div>
+        <AuthHeader
+          title="Reset password"
+          subtitle="Enter your new password"
+        />
         <Suspense fallback={<p className="text-muted-foreground">Loading...</p>}>
           <ResetPasswordForm />
         </Suspense>

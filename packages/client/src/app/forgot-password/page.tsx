@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { AuthHeader } from "@/components/auth-header";
 
 
 
@@ -35,12 +36,10 @@ export default function ForgotPasswordPage() {
   return (
     <div className="flex min-h-screen items-center justify-center p-8">
       <div className="mx-auto w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">Forgot password</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Enter your email and we&apos;ll send you a reset link
-          </p>
-        </div>
+        <AuthHeader
+          title="Forgot password"
+          subtitle="Enter your email and we'll send you a reset link"
+        />
 
         {sent ? (
           <div className="rounded-md bg-green-50 p-4 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400" data-testid="reset-sent">

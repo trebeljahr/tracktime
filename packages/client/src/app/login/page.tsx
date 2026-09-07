@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn, getSession, POST_AUTH_REDIRECT } from "@/lib/auth-client";
+import { AuthHeader } from "@/components/auth-header";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -36,12 +37,10 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center p-8">
       <div className="mx-auto w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">Log in</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Enter your credentials to access your account
-          </p>
-        </div>
+        <AuthHeader
+          title="Log in"
+          subtitle="Enter your credentials to access your account"
+        />
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (

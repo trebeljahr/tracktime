@@ -22,15 +22,23 @@ import { cn } from "@/lib/utils";
  */
 export function BrandMark({
   className,
+  label = "tracktime",
 }: {
   className?: string;
+  /**
+   * Pass `null` where the mark sits next to the word "tracktime" already —
+   * the lockup, say. Two accessible names for one logo makes a screen reader
+   * announce the app twice.
+   */
+  label?: string | null;
 }): React.ReactElement {
   return (
     <svg
       viewBox="0 0 64 64"
       className={cn("size-5 shrink-0", className)}
-      role="img"
-      aria-label="tracktime"
+      {...(label === null
+        ? { "aria-hidden": true }
+        : { role: "img", "aria-label": label })}
     >
       <rect width="64" height="64" rx="14" fill="#4F46E5" />
       <circle

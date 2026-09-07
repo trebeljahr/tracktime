@@ -1,18 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 196 40" width="196" height="40" role="img" aria-label="tracktime">
-  <!-- Wordmark inherits `currentColor`, so the lockup follows the app's own
-       light/dark class instead of the OS-level media query. Only the mark's
-       neutral track ring needs the media query (it has no text context). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 208 48" width="208" height="48" role="img" aria-label="tracktime">
+  <!-- The standalone lockup: for a README, an email, anywhere there is no app
+       around it. Inside the app, components/brand-lockup.tsx renders the same
+       thing with real HTML text, so the wordmark picks up the app's font and
+       type scale.
+
+       The mark is mark-tile.svg at 40px, unchanged — the same tile the
+       favicon, the extension's toolbar button, the Raycast menu bar and the
+       desktop icon all show. `pnpm run icons:brand` does not read this file,
+       so if the tile ever changes, change it here too.
+
+       The wordmark inherits `currentColor` for "track", so the lockup follows
+       whatever it is placed on. Only "time" is pinned, to the brand indigo. -->
   <style>
-    .track { stroke: #D4D4D8 }
-    @media (prefers-color-scheme: dark) { .track { stroke: #3F3F46 } }
+    .accent { fill: #4F46E5 }
+    @media (prefers-color-scheme: dark) { .accent { fill: #818CF8 } }
   </style>
-  <g transform="translate(4 4)">
-    <circle class="track" cx="16" cy="16" r="11" fill="none" stroke-width="4"/>
-    <path d="M16 5A11 11 0 1 1 6.474 21.5" fill="none" stroke="#4F46E5" stroke-width="4" stroke-linecap="round"/>
-    <circle cx="16" cy="16" r="2.6" fill="#4F46E5"/>
+  <g transform="translate(4 4) scale(0.625)">
+    <rect width="64" height="64" rx="14" fill="#4F46E5"/>
+    <circle cx="32" cy="32" r="19" fill="none" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="7"/>
+    <path d="M32 13A19 19 0 1 1 15.55 41.5" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round"/>
+    <circle cx="32" cy="32" r="4.5" fill="#FFFFFF"/>
   </g>
-  <text x="44" y="27" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Inter, Helvetica, Arial, sans-serif"
-        font-size="22" font-weight="600" letter-spacing="-0.6">
-    <tspan fill="currentColor">track</tspan><tspan fill="#4F46E5">time</tspan>
+  <text x="54" y="32" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Inter, Helvetica, Arial, sans-serif"
+        font-size="24" font-weight="600" letter-spacing="-0.7">
+    <tspan fill="currentColor">track</tspan><tspan class="accent">time</tspan>
   </text>
 </svg>

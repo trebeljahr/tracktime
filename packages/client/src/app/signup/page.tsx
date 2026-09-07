@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signUp, getSession, POST_AUTH_REDIRECT } from "@/lib/auth-client";
+import { AuthHeader } from "@/components/auth-header";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -45,12 +46,10 @@ export default function SignupPage() {
   return (
     <div className="flex min-h-screen items-center justify-center p-8">
       <div className="mx-auto w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">Create an account</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Enter your details to get started
-          </p>
-        </div>
+        <AuthHeader
+          title="Create an account"
+          subtitle="Enter your details to get started"
+        />
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
