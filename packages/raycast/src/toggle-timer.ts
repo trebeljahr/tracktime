@@ -1,8 +1,13 @@
 import { LaunchType, launchCommand, showHUD } from "@raycast/api";
 import { getTracktime } from "./lib/api.js";
 import { formatDurationShort, isoDaysAgo } from "./lib/format.js";
+import { noteTimerEcho } from "./lib/storage.js";
 import { entryLabel, RECENT_DAYS } from "./lib/timer-data.js";
-import { refreshMenuBar, showFailureToast } from "./lib/ui.js";
+import {
+  isAlreadyStopped,
+  refreshMenuBar,
+  showFailureToast,
+} from "./lib/ui.js";
 
 /**
  * One hotkey for the whole loop: stop what is running, or pick the last thing
@@ -22,13 +27,24 @@ export default async function ToggleTimer(): Promise<void> {
     const running = await api.current();
 
     if (running) {
-      const stopped = await api.stop(running.id);
-      await refreshMenuBar();
-      await showHUD(
-        `⏹ Stopped — ${formatDurationShort(stopped.durationSec)}${
-          stopped.description ? ` · ${stopped.description}` : ""
-        }`,
-      );
+      try {
+        const stopped = await api.stop(running.id);
+        await refreshMenuBar();
+        await showHUD(
+          `⏹ Stopped — ${formatDurationShort(stopped.durationSec)}${
+            stopped.description ? ` · ${stopped.description}` : ""
+          }`,
+        );
+      } catch (error) {
+        if (!isAlreadyStopped(error)) throw error;
+        // Stopped elsewhere between the read above and the write. The user got
+        // the state they pressed for, so say so rather than reporting a
+        // failure. `api.stop` threw before it could record the echo, so this
+        // clears it — the same repair the Timer view and the menu bar make.
+        await noteTimerEcho(null);
+        await refreshMenuBar();
+        await showHUD("⏹ Timer already stopped");
+      }
       return;
     }
 
