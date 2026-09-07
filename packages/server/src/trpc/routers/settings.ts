@@ -73,6 +73,7 @@ export const settingsRouter = router({
       const touchesUser =
         input.timeFormat !== undefined ||
         input.durationFormat !== undefined ||
+        input.theme !== undefined ||
         input.idle !== undefined ||
         input.maxDuration !== undefined;
 
@@ -97,6 +98,7 @@ export const settingsRouter = router({
             $set: {
               timeFormat: input.timeFormat ?? current.timeFormat,
               durationFormat: input.durationFormat ?? current.durationFormat,
+              theme: input.theme ?? current.theme,
               idle,
               maxDuration,
             },

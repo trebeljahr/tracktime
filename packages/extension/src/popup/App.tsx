@@ -25,6 +25,7 @@ import {
 } from "./route";
 import { forgetRoute, loadRoute, rememberRoute } from "./route-memory";
 import { Screens } from "./screens";
+import { rememberTheme } from "./theme";
 import { SignInScreen } from "./sign-in-screen";
 import type { RunningPatch } from "./tracker-screen";
 
@@ -198,6 +199,20 @@ export function App(): JSX.Element {
   const goTracker = useCallback((): void => {
     go({ name: "tracker" });
   }, [go]);
+
+  /**
+   * Follow the account's theme.
+   *
+   * `theme` is a synced user preference, so picking dark in the web app
+   * darkens this popup on the next snapshot — including one taken three
+   * seconds after another device changed it. Remembered as it is applied, so
+   * the next open paints in the right theme before React runs at all.
+   */
+  useEffect(() => {
+    const theme = state?.settings?.theme;
+    if (theme === undefined) return;
+    rememberTheme(theme);
+  }, [state?.settings?.theme]);
 
   /**
    * Tell the worker which surface is being looked at.

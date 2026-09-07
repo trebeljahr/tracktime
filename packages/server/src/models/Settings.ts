@@ -25,6 +25,7 @@ import type {
   IdleSettings,
   MaxDurationSettings,
   ResolvedSettings,
+  ThemePreference,
   TimeFormat,
   UserPreferences,
   WeekStart,
@@ -51,6 +52,10 @@ export const DEFAULT_MAX_DURATION: MaxDurationSettings =
 export const DEFAULT_USER_PREFERENCES: Omit<UserPreferences, "userId"> = {
   timeFormat: "24h",
   durationFormat: "hms",
+  // "system" rather than "light": a client that has not been told otherwise
+  // should follow the machine, which is what every one of them did before this
+  // preference was stored at all.
+  theme: "system",
   idle: DEFAULT_IDLE,
   maxDuration: DEFAULT_MAX_DURATION,
 };
@@ -101,6 +106,8 @@ export interface IUserPreferences extends Document {
   userId: string;
   timeFormat: TimeFormat;
   durationFormat: DurationFormat;
+  /** Absent on documents written before the theme was synced. */
+  theme?: ThemePreference | null;
   /** Absent on documents written before idle detection existed. */
   idle?: IdleSettings | null;
   /** Absent on documents written before the runaway guard existed. */
@@ -173,6 +180,14 @@ const userPreferencesSchema = new Schema<IUserPreferences>(
       required: true,
       default: DEFAULT_USER_PREFERENCES.durationFormat,
     },
+    // NOT `required`: every preferences document written before the theme was
+    // stored here has no such field, and a required one would fail validation
+    // on each of them the next time it was saved. The read below defaults it.
+    theme: {
+      type: String,
+      enum: ["light", "dark", "system"],
+      default: DEFAULT_USER_PREFERENCES.theme,
+    },
     idle: {
       type: idleSchema,
       required: true,
@@ -241,6 +256,9 @@ export async function getOrCreateUserPreferences(
       userId,
       timeFormat: existing.timeFormat,
       durationFormat: existing.durationFormat,
+      // A document written before the theme was synced has none; "system" is
+      // what such a client was already doing on its own.
+      theme: existing.theme ?? DEFAULT_USER_PREFERENCES.theme,
       // A preferences document written before idle detection existed has no
       // `idle` sub-document; fall back field by field rather than dropping it.
       idle: {
@@ -273,6 +291,7 @@ export async function getOrCreateUserPreferences(
         userId,
         timeFormat: created.timeFormat,
         durationFormat: created.durationFormat,
+        theme: created.theme ?? DEFAULT_USER_PREFERENCES.theme,
         idle: { ...DEFAULT_IDLE, ...(created.idle ?? {}) },
         maxDuration: {
           ...DEFAULT_MAX_DURATION,
@@ -305,6 +324,7 @@ export async function getResolvedSettings(
     weekStartsOn: workspace.weekStartsOn,
     timeFormat: user.timeFormat,
     durationFormat: user.durationFormat,
+    theme: user.theme,
     idle: user.idle,
     maxDuration: user.maxDuration,
   };

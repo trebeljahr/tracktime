@@ -451,6 +451,18 @@ export type UserPreferences = {
   userId: string;
   timeFormat: TimeFormat;
   durationFormat: DurationFormat;
+  /**
+   * Light, dark, or follow the operating system.
+   *
+   * A person's, not a device's. It used to live in the web app's
+   * `localStorage` alone, which meant the browser extension rendering beside
+   * that same web app had no way to know a dark theme had been chosen — every
+   * client guessed from `prefers-color-scheme` and the two disagreed on any
+   * machine where the choice was not the OS one. Storing it here is what lets
+   * every surface render the same theme; each client still keeps a local copy
+   * so it can paint before the first `settings.get` answers.
+   */
+  theme: ThemePreference;
   idle: IdleSettings;
   maxDuration: MaxDurationSettings;
 };

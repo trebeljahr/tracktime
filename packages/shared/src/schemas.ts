@@ -529,6 +529,7 @@ export const updateSettingsSchema = z.object({
   weekStartsOn: z.union([z.literal(0), z.literal(1)]).optional(),
   timeFormat: z.enum(["12h", "24h"]).optional(),
   durationFormat: z.enum(["hms", "decimal"]).optional(),
+  theme: z.enum(["light", "dark", "system"]).optional(),
   idle: idleSettingsSchema.partial().optional(),
   maxDuration: maxDurationSettingsSchema.partial().optional(),
   originId,

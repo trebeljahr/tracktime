@@ -1,7 +1,14 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { applyTheme, cachedTheme } from "./theme";
 import "./popup.css";
+
+// Before the first render, and synchronously: the popup is rebuilt from
+// scratch every time it is opened, so a theme applied after the worker answers
+// would flash the wrong one several times a day. `App` corrects this the
+// moment a snapshot carrying the real preference arrives.
+applyTheme(cachedTheme());
 
 const container = document.getElementById("root");
 if (!container) {

@@ -25,6 +25,15 @@ const prefersDark = (): boolean =>
   typeof window !== "undefined" &&
   window.matchMedia("(prefers-color-scheme: dark)").matches;
 
+/**
+ * Set once the local choice has been reconciled with the server's.
+ *
+ * Its absence is what tells {@link ThemeSync} that this browser's stored
+ * choice predates the theme being synced at all, and is therefore worth
+ * pushing up rather than overwriting — see the migration note there.
+ */
+export const THEME_SYNCED_KEY = "tracktime.theme.synced";
+
 const readStoredChoice = (): ThemeChoice => {
   if (typeof window === "undefined") return "system";
   try {
@@ -63,6 +72,23 @@ type ThemeState = {
 
 type Listener = () => void;
 
+/**
+ * Where a deliberate theme change is published, so it reaches the server.
+ *
+ * A module-level sink rather than a prop or a context, because the two things
+ * that change the theme — the top bar's toggle and the settings screen — are
+ * mounted in different trees, and the theme store they share is itself outside
+ * React. {@link ThemeSync} registers it; with nothing registered the theme
+ * still works, it just stays on this device.
+ */
+type ThemeSink = (choice: ThemeChoice) => void;
+
+let sink: ThemeSink | null = null;
+
+export const setThemeSink = (next: ThemeSink | null): void => {
+  sink = next;
+};
+
 const SERVER_STATE: ThemeState = { choice: "system", resolved: "light" };
 
 let state: ThemeState = SERVER_STATE;
@@ -79,12 +105,32 @@ const subscribe = (listener: Listener): (() => void) => {
 const getSnapshot = (): ThemeState => state;
 const getServerSnapshot = (): ThemeState => SERVER_STATE;
 
+/** The local copy the no-flash script in app/layout reads on the next load. */
+const persistChoice = (choice: ThemeChoice): void => {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, choice);
+  } catch {
+    /* private mode — the theme just won't persist */
+  }
+};
+
 /** Apply a choice to the DOM and publish it to every subscriber. */
 const commitChoice = (choice: ThemeChoice): void => {
   const resolved = applyTheme(choice);
   if (state.choice === choice && state.resolved === resolved) return;
   state = { choice, resolved };
   for (const listener of listeners) listener();
+};
+
+/**
+ * Apply a choice that came FROM the server.
+ *
+ * Deliberately does not reach the sink: echoing an adopted value back up would
+ * write the server's own answer to it on every settings refetch.
+ */
+export const adoptTheme = (choice: ThemeChoice): void => {
+  persistChoice(choice);
+  commitChoice(choice);
 };
 
 export type UseThemeResult = {
@@ -119,12 +165,12 @@ export const useTheme = (): UseThemeResult => {
   }, []);
 
   const setTheme = React.useCallback((next: ThemeChoice): void => {
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch {
-      /* private mode — the theme just won't persist */
-    }
+    // Stored locally as well as sent, and in that order: localStorage is what
+    // the no-flash script reads on the next load, so a round trip must never
+    // stand between the click and the theme surviving a reload.
+    persistChoice(next);
     commitChoice(next);
+    sink?.(next);
   }, []);
 
   return {

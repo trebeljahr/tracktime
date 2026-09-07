@@ -24,6 +24,7 @@ export const FALLBACK_SETTINGS: ResolvedSettings = {
   weekStartsOn: 1,
   timeFormat: "24h",
   durationFormat: "hms",
+  theme: "system",
   idle: DEFAULT_IDLE_SETTINGS,
   maxDuration: DEFAULT_MAX_DURATION_SETTINGS,
 };

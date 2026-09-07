@@ -3,6 +3,7 @@ import {
   formatDuration,
   type DurationFormat,
   type ResolvedSettings,
+  type ThemePreference,
   type TimeFormat,
   type WeekStart,
 } from "@starter/core";
@@ -30,6 +31,12 @@ export type GeneralSectionProps = {
   settings: ResolvedSettings | null;
   onSave: (patch: SettingsPatch) => Promise<boolean>;
 };
+
+const THEMES: ReadonlyArray<{ value: ThemePreference; label: string }> = [
+  { value: "system", label: "Match the system" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
 
 const TIME_FORMATS: ReadonlyArray<{ value: TimeFormat; label: string }> = [
   { value: "24h", label: "24-hour" },
@@ -95,6 +102,33 @@ export function GeneralSection({
 
   return (
     <>
+      <SettingRow
+        label="Theme"
+        htmlFor="setting-theme"
+        note="Shared with the web app and your other machines."
+        testId="setting-theme"
+      >
+        <select
+          id="setting-theme"
+          className="select"
+          value={settings.theme}
+          onChange={(event) => {
+            // Not applied here: the popup follows `state.settings.theme`, so
+            // the successful mutation's snapshot is what repaints it — and a
+            // refusal therefore leaves the theme where it really is rather
+            // than where the <select> briefly said it was.
+            void onSave({ theme: event.target.value as ThemePreference });
+          }}
+          data-testid="theme-select"
+        >
+          {THEMES.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </SettingRow>
+
       <SettingRow
         label="Time format"
         htmlFor="setting-time-format"

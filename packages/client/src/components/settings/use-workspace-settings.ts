@@ -60,6 +60,7 @@ export const applySettingsPatch = (
     durationFormat: isDefined(patch.durationFormat)
       ? patch.durationFormat
       : current.durationFormat,
+    theme: isDefined(patch.theme) ? patch.theme : current.theme,
     idle,
     maxDuration,
   };

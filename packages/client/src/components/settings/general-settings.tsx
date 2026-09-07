@@ -86,7 +86,7 @@ export function GeneralSettings({
       <CardContent className="divide-y divide-border py-0">
         <SettingRow
           title="Theme"
-          description="Stored on this device — it is not shared with your other machines."
+          description="Saved to your account, so the browser extension and your other machines follow it."
           testId="setting-theme"
         >
           <OptionGroup

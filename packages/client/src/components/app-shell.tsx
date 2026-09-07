@@ -43,6 +43,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { ThemeSync } from "@/components/theme-sync";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useRunningEntry, useSync } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
@@ -369,6 +370,7 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
             <div className="ml-auto flex items-center gap-1.5">
               <RunningTimerIndicator />
               <SyncDot status={status} />
+              <ThemeSync />
               <ThemeToggle />
               <UserMenu />
             </div>
