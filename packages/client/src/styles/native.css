@@ -1,0 +1,165 @@
+/*
+ * Native shell chrome — safe areas, the software keyboard, touch targets.
+ *
+ * THE ONE RULE IN THIS FILE: every selector is under `body.cap`, which only
+ * the native shell ever sets (app/layout.tsx pre-paint, mobile/bridge.ts after
+ * init). Nothing here can reach the web app, the desktop shells or the E2E
+ * suite — inert by construction rather than by screenshot test. Keep it that
+ * way: a rule that would also be right on web belongs in globals.css.
+ *
+ * The other half of the same argument is what is NOT here. The base sizes in
+ * components/ui/button.tsx and input.tsx back every desktop screen, so raising
+ * `h-9` to `h-11` to fix a phone would re-lay-out the whole web app. The
+ * controls the phone's core loop touches opt in with `.cap-touch` instead.
+ *
+ * `env(safe-area-inset-*)` only resolves to a real value because
+ * app/layout.tsx exports `viewportFit: "cover"`. Without it these are all 0px
+ * and the file does nothing at all.
+ */
+
+body.cap {
+  /*
+   * Where content has to start to clear the status bar / Dynamic Island.
+   * The header is `sticky top-0 h-14` (3.5rem) and the tracker bar sticks
+   * below it at `top-14`; both need the same number, and so does
+   * tracker/entry-list.tsx's STICKY_TOP — which reads this variable with
+   * `3.5rem` as its fallback, so the web value is literally unchanged.
+   */
+  --app-header-offset: calc(3.5rem + env(safe-area-inset-top, 0px));
+
+  /* A grey flash on every tap is a browser affordance, not an app one. */
+  -webkit-tap-highlight-color: transparent;
+
+  /*
+   * iOS inflates text in a "narrow" column on rotation. The app already
+   * chooses its own sizes and a phone is portrait-locked here anyway.
+   */
+  -webkit-text-size-adjust: 100%;
+
+  /*
+   * No rubber-band on the document. It exposes the WebView's own ground
+   * (capacitor.config.ts `backgroundColor`) above the header and below the
+   * tracker bar, which reads as the app coming apart, and on iOS it is also
+   * the gesture that pulls the whole WebView down.
+   */
+  overscroll-behavior: none;
+}
+
+/*
+ * The document scroller is <html>, not <body>, so the rule above does not
+ * reach it. Scoped through `:has()` so it still cannot match on web.
+ */
+html:has(body.cap) {
+  overscroll-behavior: none;
+}
+
+/* ── Safe areas ─────────────────────────────────────────────────────── */
+
+/*
+ * The header grows by the inset rather than being pushed down by it: it is
+ * `sticky top-0` with a translucent background, so padding keeps the blur
+ * running all the way up under the status bar instead of leaving a bare
+ * strip of body background there.
+ */
+body.cap [data-testid="app-header"] {
+  height: var(--app-header-offset);
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Comes to rest below the taller header, not below the web one. */
+body.cap [data-testid="tracker-bar"] {
+  top: var(--app-header-offset);
+}
+
+/*
+ * The last entry row has to clear the home indicator. Stage 3 adds the tab
+ * bar's own height to this.
+ */
+body.cap [data-testid="app-main"] {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* The nav drawer is `fixed inset-0`, so both insets are its own problem. */
+body.cap [data-testid="sidebar-mobile"] {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/*
+ * Dialogs anchor to the top under the safe area instead of centring
+ * themselves. A centred panel is translated by half its own height, so when
+ * the keyboard shrinks the viewport it is pushed up off the top edge — the
+ * focused field goes out of reach in the direction nothing scrolls. Anchored,
+ * the panel's existing `overflow-y-auto` scrolls the field into view, which
+ * is what `interactiveWidget: "resizes-content"` exists to make possible.
+ *
+ * Only the vertical half is undone. Tailwind v4's `translate-*` utilities
+ * compile to the `translate` PROPERTY, not `transform`
+ * (`.translate-x-[-50%]{--tw-translate-x:-50%;translate:var(--tw-translate-x)
+ * var(--tw-translate-y)}`), so zeroing `--tw-translate-y` leaves `translate:
+ * -50% 0` and the horizontal centring intact. Writing `transform:
+ * translateX(-50%)` here instead would apply on top of the untouched
+ * `translate` and push the panel a further half-width off the left edge.
+ */
+body.cap [data-slot="dialog-content"] {
+  top: calc(env(safe-area-inset-top, 0px) + 1rem);
+  --tw-translate-y: 0;
+  max-height: calc(
+    100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 2rem
+  );
+}
+
+/* ── The software keyboard ──────────────────────────────────────────── */
+
+/*
+ * iOS zooms the page in on focus for any field whose computed font-size is
+ * under 16px, and never zooms back out. Every `Input` is `text-sm` (14px).
+ * 16px here rather than `maximumScale: 1` in the viewport, which would fix it
+ * by taking pinch-zoom away from the web app as well.
+ *
+ * No `!important` needed: `text-sm` lives in Tailwind's `@layer utilities`
+ * and this file is unlayered, and an unlayered rule beats every layer no
+ * matter what its specificity is.
+ */
+body.cap input,
+body.cap textarea,
+body.cap select {
+  font-size: 16px;
+}
+
+/* ── Touch targets ──────────────────────────────────────────────────── */
+
+/*
+ * 44pt, Apple's minimum, on the controls the start/stop/edit loop touches.
+ * Opt-in, so the calendar toolbar, the catalog tables and the timesheet keep
+ * their dense desktop layout on a phone rather than being silently relaid out
+ * by a blanket `button { min-height }` sweep.
+ */
+body.cap .cap-touch {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+/* ── The tracker composer ───────────────────────────────────────────── */
+
+/*
+ * The composer is one wrapping flex row: at 390pt the description field, the
+ * project picker, the tag picker, the billable toggle, the elapsed clock and
+ * Start all compete for it, and the description — the only field anyone types
+ * into — ends up a few characters wide. Give it the whole first line and let
+ * the controls wrap under it. Start gets the full remaining width, because a
+ * 6rem button next to a 24pt clock is the thumb target that matters most.
+ *
+ * The bar's own ResizeObserver publishes `--tracker-bar-height` from its
+ * border box, so the day headings in entry-list.tsx follow this taller layout
+ * with no second number to keep in step.
+ */
+body.cap [data-testid="tracker-composer"] [data-testid="tracker-description"] {
+  flex-basis: 100%;
+  min-height: 2.75rem;
+}
+
+body.cap [data-testid="tracker-composer"] [data-testid="tracker-toggle"] {
+  min-height: 2.75rem;
+  width: 7rem;
+}

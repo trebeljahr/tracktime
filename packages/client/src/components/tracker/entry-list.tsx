@@ -27,13 +27,18 @@ import { trpc } from "@/lib/trpc";
 /**
  * Where a day heading comes to rest when it sticks.
  *
- * The app header is a fixed 3.5rem; the tracker bar under it is not — it grows
- * a second line for the offline badges. `--tracker-bar-height` is
+ * The app header is a fixed 3.5rem on web; the tracker bar under it is not —
+ * it grows a second line for the offline badges. `--tracker-bar-height` is
  * published by the bar itself via a ResizeObserver, and the fallback is the
  * bar's one-line height, so the heading still lands correctly on the first
  * paint before the observer has measured anything.
+ *
+ * `--app-header-offset` is the header's height including the status-bar
+ * inset, and is set only by styles/native.css under `body.cap`. On web it is
+ * undefined and the fallback makes this the same string it always was.
  */
-const STICKY_TOP = "calc(3.5rem + var(--tracker-bar-height, 4.1rem))";
+const STICKY_TOP =
+  "calc(var(--app-header-offset, 3.5rem) + var(--tracker-bar-height, 4.1rem))";
 
 /** Rough rendered height of one row and one heading, in px. */
 const ROW_HEIGHT = 45;

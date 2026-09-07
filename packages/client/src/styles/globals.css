@@ -1,6 +1,16 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/*
+ * Native shell chrome. Every selector in it is under `body.cap`, which only
+ * the Capacitor shell ever sets, so importing it into the shared stylesheet
+ * costs the web build a few hundred inert bytes and nothing else. Its rules
+ * are unlayered while Tailwind's are in `@layer utilities`, and an unlayered
+ * rule beats any layer — which is what lets it override utilities on the
+ * elements it targets without `!important` and without import-order games.
+ */
+@import "./native.css";
+
 /* Dark mode via .dark class on a parent (matches shadcn convention). */
 @custom-variant dark (&:is(.dark *));
 

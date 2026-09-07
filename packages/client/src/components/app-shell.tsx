@@ -355,7 +355,10 @@ export function AppShell({ children }: AppShellProps): React.JSX.Element {
         ) : null}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b border-border bg-background/95 px-3 backdrop-blur md:px-6">
+          <header
+            className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b border-border bg-background/95 px-3 backdrop-blur md:px-6"
+            data-testid="app-header"
+          >
             <Button
               variant="ghost"
               size="icon"

@@ -47,6 +47,11 @@ const DialogContent = React.forwardRef<
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // styles/native.css anchors this to the top under the safe area on the
+      // phone. Radix puts no stable class or attribute on it, and matching
+      // `[role="dialog"]` would also catch the nav drawer and any popover
+      // that borrows the role.
+      data-slot="dialog-content"
       className={cn(
         // `max-h` + scroll, not a fixed height: a dialog is centred and
         // translated, so one taller than the viewport overflows off BOTH
