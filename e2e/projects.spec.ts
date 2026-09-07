@@ -119,6 +119,9 @@ test.describe("Projects catalog", () => {
       CLIENT_NAME,
     );
 
+    // Billing and limits are folded away on create.
+    await expect(page.getByTestId("project-rate-input")).toBeHidden();
+    await page.getByTestId("project-advanced-toggle").click();
     await page.getByTestId("project-rate-input").fill(PROJECT_RATE);
     await page.getByTestId("project-submit").click();
 
@@ -349,13 +352,21 @@ test.describe("Projects catalog", () => {
     await page.getByTestId("project-color-hex").press("Enter");
     await expect(page.getByTestId("project-color")).toContainText("#ff6b9d");
 
-    // Client, created from within the project being defined.
+    // Client, coined from within the project being defined — one path, the
+    // combobox's own create row, and the new client's colour is editable
+    // right there rather than being whatever the server assigned.
     await page.getByTestId("project-client-combobox").click();
-    await page.getByTestId("project-client-new").click();
-    await page.getByTestId("project-client-name-input").fill("Globex");
-    await page.getByTestId("project-client-name-save").click();
+    await page.getByTestId("combobox-search").fill("Globex");
+    await page.getByTestId("combobox-create").click();
     await expect(page.getByTestId("project-client-combobox")).toContainText(
       "Globex",
+    );
+
+    await page.getByTestId("project-client-color").click();
+    await page.getByTestId("project-client-color-hex").fill("#22d3ee");
+    await page.getByTestId("project-client-color-hex").press("Enter");
+    await expect(page.getByTestId("project-client-color")).toContainText(
+      "#22d3ee",
     );
 
     // Tasks: one via Enter, one via the button — both paths must work.

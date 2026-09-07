@@ -98,6 +98,7 @@ async function createClientAndProject(page: Page): Promise<void> {
     CLIENT_NAME,
   );
 
+  await page.getByTestId("project-advanced-toggle").click();
   await page.getByTestId("project-rate-input").fill(PROJECT_RATE);
   await page.getByTestId("project-submit").click();
   await expect(page.getByTestId("project-dialog")).toBeHidden();

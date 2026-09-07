@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { ChevronRight } from "lucide-react";
 import {
   IDLE_BEHAVIORS,
   idleBehaviorLabel,
@@ -25,6 +26,7 @@ import { toast } from "@/components/ui/sonner";
 import { ORIGIN_ID } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 import {
   useClientMutations,
   useProjectMutations,
@@ -110,34 +112,45 @@ function ProjectForm({
   const [name, setName] = React.useState(project?.name ?? "");
   const [color, setColor] = React.useState(project?.color ?? FALLBACK_COLOR);
   const [clientId, setClientId] = React.useState<string | null>(
-    project?.clientId ?? null,
+    project?.clientId ?? null
   );
   const [billableDefault, setBillableDefault] = React.useState(
-    project?.billableDefault ?? true,
+    project?.billableDefault ?? true
   );
   const [rate, setRate] = React.useState(
     project?.hourlyRate === null || project?.hourlyRate === undefined
       ? ""
-      : String(project.hourlyRate),
+      : String(project.hourlyRate)
   );
   const [estimate, setEstimate] = React.useState(
     project?.estimatedHours === null || project?.estimatedHours === undefined
       ? ""
-      : String(project.estimatedHours),
+      : String(project.estimatedHours)
   );
   const [budget, setBudget] = React.useState(
     project?.budgetAmount === null || project?.budgetAmount === undefined
       ? ""
-      : String(project.budgetAmount),
+      : String(project.budgetAmount)
   );
   const [idleBehavior, setIdleBehavior] = React.useState<IdleBehavior | "">(
-    project?.idleBehavior ?? "",
+    project?.idleBehavior ?? ""
   );
   const [pendingTasks, setPendingTasks] = React.useState<string[]>([]);
   const [nameError, setNameError] = React.useState<string | null>(null);
   const [rateError, setRateError] = React.useState<string | null>(null);
   const [estimateError, setEstimateError] = React.useState<string | null>(null);
   const [budgetError, setBudgetError] = React.useState<string | null>(null);
+
+  // Only a name is needed to make a project. Billing and limits open on their
+  // own for a project that already carries one, so editing never hides a value
+  // that is in force.
+  const [showAdvanced, setShowAdvanced] = React.useState(
+    !billableDefault ||
+      rate !== "" ||
+      estimate !== "" ||
+      budget !== "" ||
+      idleBehavior !== ""
+  );
 
   // A budget keeps the currency it was agreed in. Only a project without one
   // yet picks up today's workspace currency.
@@ -146,7 +159,7 @@ function ProjectForm({
   const { createProject, updateProject, isSaving } = useProjectMutations({
     onConflict: setNameError,
   });
-  const { createClient } = useClientMutations();
+  const { createClient, updateClient } = useClientMutations();
   const utils = trpc.useUtils();
   const createTaskForNewProject = trpc.tasks.create.useMutation();
 
@@ -159,19 +172,13 @@ function ProjectForm({
           label: client.archived ? `${client.name} (archived)` : client.name,
           color: client.color,
         })),
-    [clients, project?.clientId],
+    [clients, project?.clientId]
   );
 
-  const [creatingClient, setCreatingClient] = React.useState(false);
-  const [newClientName, setNewClientName] = React.useState("");
-
-  const confirmNewClient = (): void => {
-    const name = newClientName.trim();
-    if (name === "") return;
-    handleCreateClient(name);
-    setNewClientName("");
-    setCreatingClient(false);
-  };
+  const selectedClient = React.useMemo(
+    () => clients.find((client) => client.id === clientId) ?? null,
+    [clients, clientId]
+  );
 
   const handleCreateClient = (rawName: string): void => {
     void createClient({ name: rawName.trim() }).then((created) => {
@@ -197,6 +204,7 @@ function ProjectForm({
       const parsed = Number(rate.trim().replace(",", "."));
       if (!Number.isFinite(parsed) || parsed < 0) {
         setRateError("Enter a rate of 0 or more, or leave it empty");
+        setShowAdvanced(true);
         return;
       }
       hourlyRate = parsed;
@@ -207,11 +215,13 @@ function ProjectForm({
     const estimatedHours = parseTarget(estimate);
     if (estimatedHours === INVALID) {
       setEstimateError("Enter hours of 0 or more, or leave it empty");
+      setShowAdvanced(true);
       return;
     }
     const budgetAmount = parseTarget(budget);
     if (budgetAmount === INVALID) {
       setBudgetError("Enter an amount of 0 or more, or leave it empty");
+      setShowAdvanced(true);
       return;
     }
     // "" is the inherit option, and has to reach the server as null rather
@@ -309,7 +319,10 @@ function ProjectForm({
           />
         </div>
         {nameError ? (
-          <p className="text-sm text-destructive" data-testid="project-name-error">
+          <p
+            className="text-sm text-destructive"
+            data-testid="project-name-error"
+          >
             {nameError}
           </p>
         ) : null}
@@ -317,58 +330,37 @@ function ProjectForm({
 
       <div className="space-y-2">
         <Label htmlFor="project-client">Client</Label>
-        <Combobox
-          id="project-client"
-          className="w-full"
-          options={clientOptions}
-          value={clientId}
-          onChange={setClientId}
-          placeholder="No client"
-          searchPlaceholder="Search clients..."
-          emptyText="No clients yet."
-          allowClear
-          clearLabel="No client"
-          onCreate={handleCreateClient}
-          data-testid="project-client-combobox"
-          footerActions={[
-            {
-              label: "New client…",
-              onSelect: () => setCreatingClient(true),
-              testId: "project-client-new",
-            },
-          ]}
-        />
-        {creatingClient ? (
-          <div className="flex gap-2">
-            <Input
-              autoFocus
-              value={newClientName}
-              placeholder="Client name"
-              onChange={(event) => setNewClientName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  confirmNewClient();
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setCreatingClient(false);
-                  setNewClientName("");
-                }
+        {/* The swatch is only rendered once a client is chosen: with none
+            selected there is no colour to show, and a picker standing in for
+            one would edit nothing. Typing a name and taking the "Create"
+            row is the single way to coin a client from here — it lands
+            selected, and its colour is then editable in place rather than
+            being whatever the server happened to assign. */}
+        <div className="flex items-center gap-2">
+          {selectedClient ? (
+            <ColorPicker
+              value={selectedClient.color}
+              onChange={(next) => {
+                void updateClient({ id: selectedClient.id, color: next });
               }}
-              data-testid="project-client-name-input"
+              testId="project-client-color"
             />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={confirmNewClient}
-              disabled={newClientName.trim() === ""}
-              data-testid="project-client-name-save"
-            >
-              Add
-            </Button>
-          </div>
-        ) : null}
+          ) : null}
+          <Combobox
+            id="project-client"
+            className="min-w-0 flex-1"
+            options={clientOptions}
+            value={clientId}
+            onChange={setClientId}
+            placeholder="No client"
+            searchPlaceholder="Search or type a new name…"
+            emptyText="No clients yet."
+            allowClear
+            clearLabel="No client"
+            onCreate={handleCreateClient}
+            data-testid="project-client-combobox"
+          />
+        </div>
       </div>
 
       <ProjectTasksField
@@ -377,139 +369,183 @@ function ProjectForm({
         onPendingChange={setPendingTasks}
       />
 
-      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-        <div className="space-y-0.5">
-          <Label htmlFor="project-billable">Billable by default</Label>
-          <p className="text-xs text-muted-foreground">
-            New entries on this project start as billable.
-          </p>
-        </div>
-        <Switch
-          id="project-billable"
-          checked={billableDefault}
-          onCheckedChange={setBillableDefault}
-          data-testid="project-billable-switch"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="project-rate">Hourly rate ({currency})</Label>
-        <Input
-          id="project-rate"
-          inputMode="decimal"
-          value={rate}
-          placeholder="Workspace default"
-          aria-invalid={rateError !== null}
-          onChange={(event) => {
-            setRate(event.target.value);
-            if (rateError) setRateError(null);
-          }}
-          data-testid="project-rate-input"
-        />
-        <p className="text-xs text-muted-foreground">
-          Leave empty to fall back to the workspace default rate.
-        </p>
-        {rateError ? (
-          <p className="text-sm text-destructive" data-testid="project-rate-error">
-            {rateError}
-          </p>
-        ) : null}
-      </div>
-
-      <fieldset className="space-y-3 rounded-md border border-border p-3">
-        <legend className="px-1 text-sm font-medium">Estimate &amp; budget</legend>
-        <p className="text-xs text-muted-foreground">
-          Lifetime targets for the whole project, not a monthly allowance.
-          Leave a field empty for no target — that is not the same as a target
-          of zero.
-        </p>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="project-estimate">Estimated hours</Label>
-            <Input
-              id="project-estimate"
-              inputMode="decimal"
-              value={estimate}
-              placeholder="No estimate"
-              aria-invalid={estimateError !== null}
-              onChange={(event) => {
-                setEstimate(event.target.value);
-                if (estimateError) setEstimateError(null);
-              }}
-              data-testid="project-estimate-input"
-            />
-            {estimateError ? (
-              <p
-                className="text-sm text-destructive"
-                data-testid="project-estimate-error"
-              >
-                {estimateError}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="project-budget">Budget ({budgetCurrency})</Label>
-            <Input
-              id="project-budget"
-              inputMode="decimal"
-              value={budget}
-              placeholder="No budget"
-              aria-invalid={budgetError !== null}
-              onChange={(event) => {
-                setBudget(event.target.value);
-                if (budgetError) setBudgetError(null);
-              }}
-              data-testid="project-budget-input"
-            />
-            {budgetError ? (
-              <p
-                className="text-sm text-destructive"
-                data-testid="project-budget-error"
-              >
-                {budgetError}
-              </p>
-            ) : null}
-          </div>
-        </div>
-
-        {project?.budgetCurrency !== null &&
-        project?.budgetCurrency !== undefined &&
-        project.budgetCurrency !== currency ? (
-          <p
-            className="text-xs text-muted-foreground"
-            data-testid="project-budget-currency-note"
-          >
-            This budget is in {project.budgetCurrency}, the workspace currency
-            when it was set. Time tracked in {currency} is reported separately
-            rather than converted.
-          </p>
-        ) : null}
-      </fieldset>
-      <div className="space-y-2">
-        <Label htmlFor="project-idle">When you go idle</Label>
-        <select
-          id="project-idle"
-          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          value={idleBehavior}
-          onChange={(event) =>
-            setIdleBehavior(event.target.value as IdleBehavior | "")
-          }
-          data-testid="project-idle-behavior"
+      {/* Everything below is optional and inherits a workspace default when
+          left alone, so it is folded away on create — a new project needs a
+          name and nothing else. It opens by itself whenever a value is
+          actually set, so an edit never hides one that is in force, and a
+          validation error in here forces it open rather than reporting a
+          problem the user cannot see. */}
+      <div className="rounded-md border border-border">
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-full justify-start gap-1 px-3 font-normal"
+          aria-expanded={showAdvanced}
+          aria-controls="project-advanced"
+          onClick={() => setShowAdvanced((shown) => !shown)}
+          data-testid="project-advanced-toggle"
         >
-          <option value="">Use the workspace setting</option>
-          {IDLE_BEHAVIORS.map((behavior) => (
-            <option key={behavior} value={behavior}>
-              {idleBehaviorLabel(behavior)}
-            </option>
-          ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          Pick “Keep running” for work that produces no typing — meetings,
-          calls, reading. It never switches idle detection on; that stays a
-          workspace setting.
-        </p>
+          <ChevronRight
+            aria-hidden="true"
+            className={cn(
+              "size-4 transition-transform",
+              showAdvanced && "rotate-90"
+            )}
+          />
+          Billing &amp; limits
+          <span className="ml-auto text-xs text-muted-foreground">
+            Rate, targets, idle
+          </span>
+        </Button>
+
+        {showAdvanced ? (
+          <div
+            id="project-advanced"
+            className="space-y-4 border-t border-border p-3"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="project-billable">Billable by default</Label>
+                <p className="text-xs text-muted-foreground">
+                  New entries on this project start as billable.
+                </p>
+              </div>
+              <Switch
+                id="project-billable"
+                checked={billableDefault}
+                onCheckedChange={setBillableDefault}
+                data-testid="project-billable-switch"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="project-rate">Hourly rate ({currency})</Label>
+              <Input
+                id="project-rate"
+                inputMode="decimal"
+                value={rate}
+                placeholder="Workspace default"
+                aria-invalid={rateError !== null}
+                onChange={(event) => {
+                  setRate(event.target.value);
+                  if (rateError) setRateError(null);
+                }}
+                data-testid="project-rate-input"
+              />
+              <p className="text-xs text-muted-foreground">
+                Leave empty to fall back to the workspace default rate.
+              </p>
+              {rateError ? (
+                <p
+                  className="text-sm text-destructive"
+                  data-testid="project-rate-error"
+                >
+                  {rateError}
+                </p>
+              ) : null}
+            </div>
+
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-medium">
+                Estimate &amp; budget
+              </legend>
+              <p className="text-xs text-muted-foreground">
+                Lifetime targets for the whole project, not a monthly allowance.
+                Leave a field empty for no target — that is not the same as a
+                target of zero.
+              </p>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="project-estimate">Estimated hours</Label>
+                  <Input
+                    id="project-estimate"
+                    inputMode="decimal"
+                    value={estimate}
+                    placeholder="No estimate"
+                    aria-invalid={estimateError !== null}
+                    onChange={(event) => {
+                      setEstimate(event.target.value);
+                      if (estimateError) setEstimateError(null);
+                    }}
+                    data-testid="project-estimate-input"
+                  />
+                  {estimateError ? (
+                    <p
+                      className="text-sm text-destructive"
+                      data-testid="project-estimate-error"
+                    >
+                      {estimateError}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="project-budget">
+                    Budget ({budgetCurrency})
+                  </Label>
+                  <Input
+                    id="project-budget"
+                    inputMode="decimal"
+                    value={budget}
+                    placeholder="No budget"
+                    aria-invalid={budgetError !== null}
+                    onChange={(event) => {
+                      setBudget(event.target.value);
+                      if (budgetError) setBudgetError(null);
+                    }}
+                    data-testid="project-budget-input"
+                  />
+                  {budgetError ? (
+                    <p
+                      className="text-sm text-destructive"
+                      data-testid="project-budget-error"
+                    >
+                      {budgetError}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              {project?.budgetCurrency !== null &&
+              project?.budgetCurrency !== undefined &&
+              project.budgetCurrency !== currency ? (
+                <p
+                  className="text-xs text-muted-foreground"
+                  data-testid="project-budget-currency-note"
+                >
+                  This budget is in {project.budgetCurrency}, the workspace
+                  currency when it was set. Time tracked in {currency} is
+                  reported separately rather than converted.
+                </p>
+              ) : null}
+            </fieldset>
+            <div className="space-y-2">
+              <Label htmlFor="project-idle">When you go idle</Label>
+              <select
+                id="project-idle"
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={idleBehavior}
+                onChange={(event) =>
+                  setIdleBehavior(event.target.value as IdleBehavior | "")
+                }
+                data-testid="project-idle-behavior"
+              >
+                <option value="">Use the workspace setting</option>
+                {IDLE_BEHAVIORS.map((behavior) => (
+                  <option key={behavior} value={behavior}>
+                    {idleBehaviorLabel(behavior)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Pick “Keep running” for work that produces no typing — meetings,
+                calls, reading. It never switches idle detection on; that stays
+                a workspace setting.
+              </p>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <DialogFooter>
