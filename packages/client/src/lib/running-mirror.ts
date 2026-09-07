@@ -1,0 +1,130 @@
+"use client";
+
+/**
+ * The running timer, written somewhere it survives the app being killed.
+ *
+ * Without this, a cold launch with no network shows no timer at all — not a
+ * stale one, not a spinner: `trpc.entries.current` has no persisted React
+ * Query cache, so it never answers, and the store stays at its `null` initial
+ * state. The user force-quits a running timer on the train, opens the app
+ * again, and the app they are using to track time says nothing is running.
+ *
+ * So every server answer about the running entry is mirrored into Capacitor
+ * Preferences, and the store is seeded from that mirror at boot, before the
+ * query fires. `packages/core/src/timer-store.ts` derives elapsed seconds from
+ * `entry.start` against the wall clock — it never accumulates — so a seeded
+ * entry ticks correctly straight away no matter how long the app was dead.
+ *
+ * Two rules:
+ *
+ *  - **Native only.** On web a reload is online by definition and the query
+ *    answers in milliseconds; seeding there would mean every reload flashes
+ *    the previous timer before the server has a say.
+ *  - **The seed is provisional.** It is what the server said last time, not
+ *    what the server says now. `useRunningEntry` replaces it the moment the
+ *    query actually succeeds — including with `null`, which is how a timer
+ *    stopped from another device disappears — and only a real success is
+ *    allowed to overwrite it.
+ */
+
+import type { KeyValueStorage, TimerStore } from "@starter/core";
+import type { TimeEntry } from "@starter/shared";
+
+import { isNative } from "@/mobile/bridge";
+import { preferencesStorage } from "@/mobile/preferences-storage";
+
+const MIRROR_KEY = "tracktime.running-entry";
+
+let storage: KeyValueStorage | null = null;
+
+const store = (): KeyValueStorage => {
+  storage ??= preferencesStorage();
+  return storage;
+};
+
+/**
+ * Whether the entry in the timer store came from the mirror rather than from
+ * the server this launch. Nothing may treat a provisional entry as
+ * authoritative — in particular the seed itself, which must never overwrite a
+ * fresher answer.
+ */
+let provisional = false;
+
+export const isRunningProvisional = (): boolean => provisional;
+
+/**
+ * A mirrored entry has to look like a running entry to be worth restoring.
+ * Anything else — a finished entry left behind by an older build, a truncated
+ * write — is treated as "nothing was running", which is the safe reading.
+ */
+const parseMirrored = (raw: string | null): TimeEntry | null => {
+  if (raw === null || raw === "") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const entry = parsed as Partial<TimeEntry>;
+  if (typeof entry.id !== "string" || entry.id === "") return null;
+  if (typeof entry.start !== "string" || Number.isNaN(Date.parse(entry.start))) {
+    return null;
+  }
+  if (entry.end !== null) return null;
+  return parsed as TimeEntry;
+};
+
+/** Record what the server last said is running. `null` clears the mirror. */
+export const writeRunningMirror = async (
+  entry: TimeEntry | null,
+): Promise<void> => {
+  if (!isNative()) return;
+  provisional = false;
+  if (entry === null || entry.end !== null) {
+    await store().removeItem(MIRROR_KEY);
+    return;
+  }
+  await store().setItem(MIRROR_KEY, JSON.stringify(entry));
+};
+
+/** Read the mirror back. Null on web, and whenever it holds nothing usable. */
+export const readRunningMirror = async (): Promise<TimeEntry | null> => {
+  if (!isNative()) return null;
+  return parseMirrored(await store().getItem(MIRROR_KEY));
+};
+
+/**
+ * Put the mirrored entry into the timer store, if the store is still empty.
+ *
+ * The emptiness check is the whole safety argument: this read is asynchronous,
+ * so by the time it lands the query may already have answered — with a
+ * different entry, or with `null` because the timer was stopped elsewhere.
+ * Seeding over that would resurrect a stopped timer, which is worse than the
+ * blank screen this exists to fix.
+ */
+export const seedRunningFromMirror = async (
+  timerStore: TimerStore,
+): Promise<TimeEntry | null> => {
+  if (!isNative()) return null;
+
+  const entry = await readRunningMirror();
+  if (entry === null) return null;
+  if (timerStore.getState().running !== null) return null;
+
+  provisional = true;
+  timerStore.getState().setRunning(entry);
+  return entry;
+};
+
+/**
+ * Test seam. Passing a storage also pins the backing store, so a spec can put
+ * a malformed value in front of the parser without knowing how Capacitor's own
+ * web fallback names its keys.
+ */
+export const __resetRunningMirrorForTests = (
+  next: KeyValueStorage | null = null,
+): void => {
+  storage = next;
+  provisional = false;
+};

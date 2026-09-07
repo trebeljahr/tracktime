@@ -31,6 +31,14 @@ export type SyncClientOptions = {
 export type SyncClient = {
   connect(): void;
   close(): void;
+  /**
+   * Drop the current socket and open a new one immediately, without waiting
+   * for a close event or a backoff. The native shells call this on resume: the
+   * server pings every 10s and terminates on the first missed pong, so the
+   * connection a backgrounded phone comes back to is usually already gone
+   * server-side while the client still believes it is open.
+   */
+  reconnect(): void;
   status(): SyncStatus;
 };
 
@@ -124,26 +132,46 @@ export const createSyncClient = ({
     if (socket) return;
 
     setStatus("connecting");
+    let created: WebSocket;
     try {
       const protocols = subprotocols(token);
-      socket = protocols
+      created = protocols
         ? new SocketCtor(url, protocols)
         : new SocketCtor(url);
+      socket = created;
     } catch {
       socket = null;
       scheduleReconnect();
       return;
     }
 
-    socket.onopen = () => {
+    /*
+     * Every handler checks that it still speaks for the live socket.
+     *
+     * `close()` followed immediately by `connect()` — what a native shell does
+     * on resume, because a socket the OS froze is dead server-side within ~20s
+     * and may never deliver an `onclose` — leaves the OLD socket's close event
+     * still in flight. Without this guard that event fires after the new
+     * socket exists, nulls the reference to it, reports "closed" and schedules
+     * a reconnect, which then opens a THIRD socket. Two live connections, and
+     * a status that no longer describes either.
+     */
+    const isCurrent = (): boolean => socket === created;
+
+    created.onopen = () => {
+      if (!isCurrent()) return;
       attempt = 0;
       setStatus("open");
     };
-    socket.onmessage = (event: MessageEvent) => handleMessage(event.data);
-    socket.onerror = () => {
+    created.onmessage = (event: MessageEvent) => {
+      if (!isCurrent()) return;
+      handleMessage(event.data);
+    };
+    created.onerror = () => {
       /* the close handler drives reconnection */
     };
-    socket.onclose = () => {
+    created.onclose = () => {
+      if (!isCurrent()) return;
       socket = null;
       setStatus("closed");
       scheduleReconnect();
@@ -152,6 +180,21 @@ export const createSyncClient = ({
 
   return {
     connect: () => {
+      closedByCaller = false;
+      open();
+    },
+    reconnect: () => {
+      closedByCaller = true;
+      if (retryHandle) {
+        clearTimeout(retryHandle);
+        retryHandle = null;
+      }
+      const current = socket;
+      socket = null;
+      current?.close();
+      // Straight back up: `attempt` is reset so the new connection is not
+      // charged for the backoff the old one had accumulated.
+      attempt = 0;
       closedByCaller = false;
       open();
     },

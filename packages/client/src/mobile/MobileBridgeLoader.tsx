@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 
 import { hydrateNativeSession } from "@/lib/native-session";
+import { seedRunningFromMirror } from "@/lib/running-mirror";
+import { timerStore } from "@/hooks/use-sync";
 import { startNetworkWatch } from "@/mobile/network";
 
 /*
@@ -27,6 +29,7 @@ export function MobileBridgeLoader() {
     // including ones made on /login, and the running-timer seed has to be in
     // the store before the first screen asks what is running.
     startNetworkWatch();
+    void seedRunningFromMirror(timerStore);
 
     const cap = (window as unknown as { Capacitor?: unknown }).Capacitor;
     if (!cap) return;

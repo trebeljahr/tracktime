@@ -7,6 +7,7 @@ import {
   createTimerStore,
   resolveSyncUrl,
   startTicking,
+  type SyncClient,
   type SyncEvent,
   type SyncStatus,
   type TimeEntry,
@@ -15,6 +16,7 @@ import {
 import { useNativeSession } from "@/hooks/use-native-session";
 import { idleWatcher } from "@/lib/idle-watcher";
 import { getNativeToken } from "@/lib/native-session";
+import { writeRunningMirror } from "@/lib/running-mirror";
 import { trpc } from "@/lib/trpc";
 
 /**
@@ -50,6 +52,33 @@ const getServerStatus = (): SyncStatus => "closed";
 /** The live WebSocket status. Safe to call from anywhere under the shell. */
 export const useSyncStatus = (): SyncStatus =>
   React.useSyncExternalStore(subscribeStatus, getStatus, getServerStatus);
+
+// ── the one live client, reachable from outside React ────────────────
+
+/**
+ * The client `useSync` currently owns. Held at module scope so a native
+ * resume can force a reconnect without a ref threaded through the tree —
+ * `initMobile`'s `appStateChange` handler is not a React consumer, and the
+ * shell mounts `useSync` exactly once, so there is never more than one.
+ */
+let activeClient: SyncClient | null = null;
+
+/**
+ * Drop the socket and open a new one now.
+ *
+ * The server pings every 10s and terminates on the first missed pong
+ * (`ws/handler.ts`), so a socket the OS froze while the app was backgrounded
+ * is dead server-side within ~20s — while the client still reports "open",
+ * because a frozen connection delivers no close event. Reconnection in
+ * `sync-client.ts` runs off `onclose` alone, so without this the status stays
+ * a lie and, worse, `use-offline-queue`'s flush trigger (`status === "open"`)
+ * never fires again. Reconnecting also re-runs the server's
+ * `enforceMaxEntryDuration` on upgrade, so a timer left running overnight is
+ * caught for free.
+ */
+export const reconnectSync = (): void => {
+  activeClient?.reconnect();
+};
 
 // ── URL derivation ───────────────────────────────────────────────────
 
@@ -175,7 +204,9 @@ export const useSync = (): SyncStatus => {
     });
 
     client.connect();
+    activeClient = client;
     return () => {
+      if (activeClient === client) activeClient = null;
       client.close();
     };
   }, [sessionReady, nativeToken]);
@@ -185,8 +216,15 @@ export const useSync = (): SyncStatus => {
 
 // ── running timer ────────────────────────────────────────────────────
 
-/** One store per tab — every consumer of `useRunningEntry` shares this clock. */
-const timerStore = createTimerStore();
+/**
+ * One store per tab — every consumer of `useRunningEntry` shares this clock.
+ *
+ * Exported because two things outside React drive it: the boot seed from
+ * `lib/running-mirror.ts`, which puts a timer on screen before any query has
+ * answered, and the native resume handler, which ticks it so the clock is
+ * right on the first frame after 90 seconds in the background.
+ */
+export const timerStore = createTimerStore();
 
 let tickers = 0;
 let stopTicking: (() => void) | null = null;
@@ -226,10 +264,22 @@ export const useRunningEntry = (): RunningEntry => {
   });
 
   const entry = query.data ?? null;
+  // `isSuccess`, not "we rendered": on a cold offline launch the query never
+  // answers, `query.data` is `undefined`, and an ungated effect would call
+  // `setRunning(null)` on the first render — wiping the entry the mirror
+  // seeded microseconds earlier and showing no timer on exactly the launch
+  // this whole path exists for. A paused or failed read is not a statement
+  // that nothing is running; only an answer is.
+  const answered = query.isSuccess;
 
   React.useEffect(() => {
+    if (!answered) return;
     timerStore.getState().setRunning(entry);
-  }, [entry]);
+    // Mirrored from here rather than from the mutations, so there is one
+    // writer and it is the authoritative one. `null` clears the mirror, which
+    // is how a timer stopped on another device stops coming back.
+    void writeRunningMirror(entry);
+  }, [answered, entry]);
 
   React.useEffect(() => retainTicker(), []);
 
