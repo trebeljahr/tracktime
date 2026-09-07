@@ -9,13 +9,11 @@ import { BillingSettings } from "@/components/settings/billing-settings";
 import { GeneralSettings } from "@/components/settings/general-settings";
 import { IdleSettingsPanel } from "@/components/settings/idle-settings";
 import { MaxDurationSettingsPanel } from "@/components/settings/max-duration-settings";
-import { PomodoroSettingsPanel } from "@/components/settings/pomodoro-settings";
 import { useWorkspaceSettings } from "@/components/settings/use-workspace-settings";
 
 const TABS = [
   { value: "general", label: "General" },
   { value: "billing", label: "Billing" },
-  { value: "pomodoro", label: "Pomodoro" },
   { value: "idle", label: "Idle" },
   { value: "limits", label: "Limits" },
   { value: "devices", label: "Devices" },
@@ -23,8 +21,8 @@ const TABS = [
 ];
 
 export default function SettingsPage() {
-  // One controller for the whole screen: General, Billing, Pomodoro, Idle and
-  // Limits all write through the same optimistic `settings.update` path.
+  // One controller for the whole screen: General, Billing, Idle and Limits
+  // all write through the same optimistic `settings.update` path.
   const controller = useWorkspaceSettings();
 
   return (
@@ -58,9 +56,6 @@ export default function SettingsPage() {
         </TabsContent>
         <TabsContent value="billing" data-testid="settings-panel-billing">
           <BillingSettings controller={controller} />
-        </TabsContent>
-        <TabsContent value="pomodoro" data-testid="settings-panel-pomodoro">
-          <PomodoroSettingsPanel controller={controller} />
         </TabsContent>
         <TabsContent value="idle" data-testid="settings-panel-idle">
           <IdleSettingsPanel controller={controller} />

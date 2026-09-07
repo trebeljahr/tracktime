@@ -376,16 +376,6 @@ export type MaxDurationSettings = {
   behavior: RunawayBehavior;
 };
 
-/** Pomodoro configuration, nested inside workspace settings. */
-export type PomodoroSettings = {
-  enabled: boolean;
-  workMinutes: number;
-  breakMinutes: number;
-  longBreakMinutes: number;
-  cyclesBeforeLongBreak: number;
-  notify: boolean;
-};
-
 /**
  * Money and calendar config, shared by everyone in a workspace.
  *
@@ -414,7 +404,6 @@ export type UserPreferences = {
   userId: string;
   timeFormat: TimeFormat;
   durationFormat: DurationFormat;
-  pomodoro: PomodoroSettings;
   idle: IdleSettings;
   maxDuration: MaxDurationSettings;
 };

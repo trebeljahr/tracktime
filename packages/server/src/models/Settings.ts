@@ -24,22 +24,12 @@ import type {
   DurationFormat,
   IdleSettings,
   MaxDurationSettings,
-  PomodoroSettings,
   ResolvedSettings,
   TimeFormat,
   UserPreferences,
   WeekStart,
   WorkspaceSettings,
 } from "@starter/shared";
-
-export const DEFAULT_POMODORO: PomodoroSettings = {
-  enabled: false,
-  workMinutes: 25,
-  breakMinutes: 5,
-  longBreakMinutes: 15,
-  cyclesBeforeLongBreak: 4,
-  notify: true,
-};
 
 export const DEFAULT_WORKSPACE_SETTINGS: Omit<WorkspaceSettings, "workspaceId"> = {
   defaultHourlyRate: 0,
@@ -61,7 +51,6 @@ export const DEFAULT_MAX_DURATION: MaxDurationSettings =
 export const DEFAULT_USER_PREFERENCES: Omit<UserPreferences, "userId"> = {
   timeFormat: "24h",
   durationFormat: "hms",
-  pomodoro: DEFAULT_POMODORO,
   idle: DEFAULT_IDLE,
   maxDuration: DEFAULT_MAX_DURATION,
 };
@@ -112,7 +101,6 @@ export interface IUserPreferences extends Document {
   userId: string;
   timeFormat: TimeFormat;
   durationFormat: DurationFormat;
-  pomodoro: PomodoroSettings;
   /** Absent on documents written before idle detection existed. */
   idle?: IdleSettings | null;
   /** Absent on documents written before the runaway guard existed. */
@@ -170,34 +158,6 @@ const maxDurationSchema = new Schema<MaxDurationSettings>(
   { _id: false },
 );
 
-const pomodoroSchema = new Schema<PomodoroSettings>(
-  {
-    enabled: { type: Boolean, required: true, default: DEFAULT_POMODORO.enabled },
-    workMinutes: {
-      type: Number,
-      required: true,
-      default: DEFAULT_POMODORO.workMinutes,
-    },
-    breakMinutes: {
-      type: Number,
-      required: true,
-      default: DEFAULT_POMODORO.breakMinutes,
-    },
-    longBreakMinutes: {
-      type: Number,
-      required: true,
-      default: DEFAULT_POMODORO.longBreakMinutes,
-    },
-    cyclesBeforeLongBreak: {
-      type: Number,
-      required: true,
-      default: DEFAULT_POMODORO.cyclesBeforeLongBreak,
-    },
-    notify: { type: Boolean, required: true, default: DEFAULT_POMODORO.notify },
-  },
-  { _id: false },
-);
-
 const userPreferencesSchema = new Schema<IUserPreferences>(
   {
     userId: { type: String, required: true, unique: true },
@@ -212,11 +172,6 @@ const userPreferencesSchema = new Schema<IUserPreferences>(
       enum: ["hms", "decimal"],
       required: true,
       default: DEFAULT_USER_PREFERENCES.durationFormat,
-    },
-    pomodoro: {
-      type: pomodoroSchema,
-      required: true,
-      default: (): PomodoroSettings => ({ ...DEFAULT_POMODORO }),
     },
     idle: {
       type: idleSchema,
@@ -286,7 +241,6 @@ export async function getOrCreateUserPreferences(
       userId,
       timeFormat: existing.timeFormat,
       durationFormat: existing.durationFormat,
-      pomodoro: { ...existing.pomodoro },
       // A preferences document written before idle detection existed has no
       // `idle` sub-document; fall back field by field rather than dropping it.
       idle: {
@@ -319,7 +273,6 @@ export async function getOrCreateUserPreferences(
         userId,
         timeFormat: created.timeFormat,
         durationFormat: created.durationFormat,
-        pomodoro: { ...created.pomodoro },
         idle: { ...DEFAULT_IDLE, ...(created.idle ?? {}) },
         maxDuration: {
           ...DEFAULT_MAX_DURATION,
@@ -329,7 +282,6 @@ export async function getOrCreateUserPreferences(
     : {
         userId,
         ...DEFAULT_USER_PREFERENCES,
-        pomodoro: { ...DEFAULT_POMODORO },
         idle: { ...DEFAULT_IDLE },
         maxDuration: { ...DEFAULT_MAX_DURATION },
       };
@@ -353,7 +305,6 @@ export async function getResolvedSettings(
     weekStartsOn: workspace.weekStartsOn,
     timeFormat: user.timeFormat,
     durationFormat: user.durationFormat,
-    pomodoro: user.pomodoro,
     idle: user.idle,
     maxDuration: user.maxDuration,
   };

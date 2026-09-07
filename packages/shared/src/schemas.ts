@@ -467,15 +467,6 @@ export const invoicePdfSchema = z.object({ id: idString });
 
 // ── settings & tokens ────────────────────────────────────────────────
 
-export const pomodoroSettingsSchema = z.object({
-  enabled: z.boolean(),
-  workMinutes: z.number().int().min(1).max(180),
-  breakMinutes: z.number().int().min(1).max(120),
-  longBreakMinutes: z.number().int().min(1).max(180),
-  cyclesBeforeLongBreak: z.number().int().min(1).max(12),
-  notify: z.boolean(),
-});
-
 export const idleSettingsSchema = z.object({
   enabled: z.boolean(),
   thresholdMinutes: z
@@ -514,7 +505,6 @@ export const updateSettingsSchema = z.object({
   weekStartsOn: z.union([z.literal(0), z.literal(1)]).optional(),
   timeFormat: z.enum(["12h", "24h"]).optional(),
   durationFormat: z.enum(["hms", "decimal"]).optional(),
-  pomodoro: pomodoroSettingsSchema.partial().optional(),
   idle: idleSettingsSchema.partial().optional(),
   maxDuration: maxDurationSettingsSchema.partial().optional(),
   originId,

@@ -12,7 +12,6 @@ import {
   isoDateOrDateTimeSchema,
   isoDateTimeSchema,
   maxDurationSettingsSchema,
-  pomodoroSettingsSchema,
   resolveRunawaySchema,
   startTimerSchema,
   stopTimerSchema,
@@ -216,33 +215,13 @@ test("updateSettingsSchema demands an uppercase ISO 4217 code", () => {
   assert.ok(!accepts(updateSettingsSchema, { currency: "€" }));
 });
 
-test("updateSettingsSchema keeps every field optional and patches pomodoro", () => {
+test("updateSettingsSchema keeps every field optional", () => {
   assert.ok(accepts(updateSettingsSchema, {}));
-  assert.ok(accepts(updateSettingsSchema, { pomodoro: { workMinutes: 50 } }));
   assert.ok(accepts(updateSettingsSchema, { weekStartsOn: 0 }));
   assert.ok(accepts(updateSettingsSchema, { weekStartsOn: 1 }));
   assert.ok(!accepts(updateSettingsSchema, { weekStartsOn: 2 }));
   assert.ok(!accepts(updateSettingsSchema, { timeFormat: "48h" }));
   assert.ok(!accepts(updateSettingsSchema, { durationFormat: "clock" }));
-});
-
-test("pomodoroSettingsSchema bounds every interval", () => {
-  const valid = {
-    enabled: true,
-    workMinutes: 25,
-    breakMinutes: 5,
-    longBreakMinutes: 15,
-    cyclesBeforeLongBreak: 4,
-    notify: true,
-  };
-  assert.ok(accepts(pomodoroSettingsSchema, valid));
-  assert.ok(!accepts(pomodoroSettingsSchema, { ...valid, workMinutes: 0 }));
-  assert.ok(!accepts(pomodoroSettingsSchema, { ...valid, workMinutes: 181 }));
-  assert.ok(!accepts(pomodoroSettingsSchema, { ...valid, workMinutes: 25.5 }));
-  assert.ok(!accepts(pomodoroSettingsSchema, { ...valid, cyclesBeforeLongBreak: 13 }));
-  assert.ok(!accepts(pomodoroSettingsSchema, { ...valid, notify: "yes" }));
-  const { notify: _notify, ...missingNotify } = valid;
-  assert.ok(!accepts(pomodoroSettingsSchema, missingNotify));
 });
 
 test("maxDurationSettingsSchema allows 0 as the off switch but nothing below the minimum", () => {

@@ -14,6 +14,5 @@ export * from "./sync-client.js";
 export * from "./sync-url.js";
 export * from "./api-client.js";
 export * from "./session-auth.js";
-export * from "./pomodoro.js";
 export * from "./idle.js";
 export * from "./entry-fields.js";

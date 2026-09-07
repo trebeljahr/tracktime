@@ -44,6 +44,6 @@ describe("applySettingsPatch", () => {
     const next = applySettingsPatch(FALLBACK_SETTINGS, { currency: "USD" });
     expect(next.currency).toBe("USD");
     expect(next.maxDuration).toEqual(FALLBACK_SETTINGS.maxDuration);
-    expect(next.pomodoro).toEqual(FALLBACK_SETTINGS.pomodoro);
+    expect(next.idle).toEqual(FALLBACK_SETTINGS.idle);
   });
 });

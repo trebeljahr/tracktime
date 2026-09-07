@@ -30,7 +30,6 @@ import {
 } from "../auth/personal-workspace.js";
 import { WorkspaceMember } from "../models/WorkspaceMember.js";
 import {
-  DEFAULT_POMODORO,
   UserPreferencesModel,
   WorkspaceSettingsModel,
 } from "../models/Settings.js";
@@ -176,7 +175,6 @@ async function migrateOwner(
             userId: ownerId,
             timeFormat: legacy.timeFormat ?? "24h",
             durationFormat: legacy.durationFormat ?? "hms",
-            pomodoro: legacy.pomodoro ?? { ...DEFAULT_POMODORO },
           },
         },
         { upsert: true },

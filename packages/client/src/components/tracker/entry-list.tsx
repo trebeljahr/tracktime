@@ -27,7 +27,7 @@ import { trpc } from "@/lib/trpc";
  * Where a day heading comes to rest when it sticks.
  *
  * The app header is a fixed 3.5rem; the tracker bar under it is not — it grows
- * a second line for the pomodoro and offline badges. `--tracker-bar-height` is
+ * a second line for the offline badges. `--tracker-bar-height` is
  * published by the bar itself via a ResizeObserver, and the fallback is the
  * bar's one-line height, so the heading still lands correctly on the first
  * paint before the observer has measured anything.

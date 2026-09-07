@@ -42,7 +42,6 @@ export const applySettingsPatch = (
     return next;
   };
 
-  const pomodoro = mergeBlock(current.pomodoro, patch.pomodoro);
   const idle = mergeBlock(current.idle, patch.idle);
   const maxDuration = mergeBlock(current.maxDuration, patch.maxDuration);
 
@@ -61,7 +60,6 @@ export const applySettingsPatch = (
     durationFormat: isDefined(patch.durationFormat)
       ? patch.durationFormat
       : current.durationFormat,
-    pomodoro,
     idle,
     maxDuration,
   };

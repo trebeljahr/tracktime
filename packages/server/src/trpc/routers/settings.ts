@@ -9,7 +9,6 @@ import {
   updateSettingsSchema,
   type IdleSettings,
   type MaxDurationSettings,
-  type PomodoroSettings,
   type ResolvedSettings,
 } from "@starter/shared";
 import {
@@ -74,16 +73,11 @@ export const settingsRouter = router({
       const touchesUser =
         input.timeFormat !== undefined ||
         input.durationFormat !== undefined ||
-        input.pomodoro !== undefined ||
         input.idle !== undefined ||
         input.maxDuration !== undefined;
 
       if (touchesUser) {
         const current = await getResolvedSettings(ctx.workspaceId, ctx.user.id);
-        const pomodoro: PomodoroSettings = {
-          ...current.pomodoro,
-          ...(input.pomodoro ?? {}),
-        };
         const idle: IdleSettings = {
           ...current.idle,
           ...(input.idle ?? {}),
@@ -103,7 +97,6 @@ export const settingsRouter = router({
             $set: {
               timeFormat: input.timeFormat ?? current.timeFormat,
               durationFormat: input.durationFormat ?? current.durationFormat,
-              pomodoro,
               idle,
               maxDuration,
             },

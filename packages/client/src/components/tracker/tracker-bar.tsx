@@ -14,10 +14,6 @@ import { TagPicker } from "@/components/tags/tag-picker";
 import { BillableGlyph } from "@/components/tracker/billable-glyph";
 import { ManualEntryDialog } from "@/components/tracker/manual-entry-dialog";
 import { QuickStartMenu } from "@/components/tracker/quick-start-menu";
-import {
-  requestPomodoroPermission,
-  usePomodoro,
-} from "@/components/tracker/use-pomodoro";
 import { useEntryMutations } from "@/components/tracker/use-entry-mutations";
 import { useIdleGuard } from "@/components/tracker/use-idle-guard";
 import { useRunawayGuard } from "@/components/tracker/use-runaway-guard";
@@ -64,18 +60,13 @@ export function TrackerBar(): React.JSX.Element {
     setTagIds(running?.tagIds ?? []);
   }
 
-  const pomodoro = usePomodoro({
-    config: format.settings.pomodoro,
-    running: isRunning,
-  });
-
   // Mounted here rather than in the app shell so the detector lives exactly as
   // long as the screen that owns the timer.
   useIdleGuard();
 
   // Publish this bar's height so the day headings below it know where to come
-  // to rest when they stick. The bar grows a second line for the pomodoro and
-  // offline badges, so a constant would be wrong exactly when it matters.
+  // to rest when they stick. The bar grows a second line for the offline
+  // badges, so a constant would be wrong exactly when it matters.
   const barRef = React.useRef<HTMLDivElement | null>(null);
   React.useLayoutEffect(() => {
     const node = barRef.current;
@@ -172,7 +163,6 @@ export function TrackerBar(): React.JSX.Element {
   }, [description, isRunning, mutations, running]);
 
   const start = React.useCallback((): void => {
-    requestPomodoroPermission(format.settings.pomodoro);
     mutations.startTimer({ description, projectId, taskId, billable, tagIds });
   }, [billable, description, mutations, projectId, tagIds, taskId]);
 
@@ -344,22 +334,8 @@ export function TrackerBar(): React.JSX.Element {
         </div>
       </div>
 
-      {pomodoro.active || pending > 0 || !online ? (
+      {pending > 0 || !online ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          {pomodoro.active ? (
-            <Badge
-              variant="secondary"
-              className="gap-1.5 font-mono tabular-nums"
-              data-testid="pomodoro-indicator"
-              data-phase={pomodoro.phase}
-            >
-              <span className="font-sans">{pomodoro.label}</span>
-              <span data-testid="pomodoro-remaining">
-                {formatDuration(pomodoro.remainingSec, "hms")}
-              </span>
-            </Badge>
-          ) : null}
-
           {!online ? (
             <Badge variant="outline" className="gap-1.5" data-testid="offline-indicator">
               <WifiOff className="size-3" /> Offline

@@ -24,14 +24,6 @@ export const FALLBACK_SETTINGS: ResolvedSettings = {
   weekStartsOn: 1,
   timeFormat: "24h",
   durationFormat: "hms",
-  pomodoro: {
-    enabled: false,
-    workMinutes: 25,
-    breakMinutes: 5,
-    longBreakMinutes: 15,
-    cyclesBeforeLongBreak: 4,
-    notify: true,
-  },
   idle: DEFAULT_IDLE_SETTINGS,
   maxDuration: DEFAULT_MAX_DURATION_SETTINGS,
 };
