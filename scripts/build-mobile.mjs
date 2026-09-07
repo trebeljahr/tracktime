@@ -1,0 +1,333 @@
+#!/usr/bin/env node
+/*
+ * Build the Capacitor web bundle and sync it into the native projects —
+ * as ONE operation, because the two halves are only correct together.
+ *
+ * Why this is a script and not `pnpm build:client && cap sync`:
+ *
+ *   1. `cap sync` copies whatever is sitting in `webDir` right now. The web
+ *      build and the Playwright E2E build both write `packages/client/out`
+ *      (playwright.config.ts bakes NEXT_PUBLIC_API_URL=http://127.0.0.1:<port>
+ *      into it), and `cap run` syncs implicitly. So a bare `cap run ios` after
+ *      a test run installs an app permanently pointed at a dead E2E port, with
+ *      no error anywhere. The mobile export therefore gets its OWN directory —
+ *      `packages/client/out-mobile` — and nothing else ever writes there.
+ *
+ *   2. `NEXT_PUBLIC_API_URL` is baked in at build time. Unset, it ships a
+ *      binary that resolves the API against `capacitor://localhost` and fails
+ *      every request on device while the build stays green. So it is required,
+ *      and the built chunks are searched for the literal afterwards.
+ *
+ *   3. Under SPM the Capacitor CLI DROPS any plugin without a Package.swift
+ *      with a warning and exits 0 (@capacitor/cli/dist/util/spm.js), so a
+ *      missing plugin is a device-only runtime error after a green build.
+ *      Checked here instead.
+ *
+ * Output directory mechanics: with `output: "export"`, Next treats a custom
+ * `distDir` as the EXPORT directory and forces the internal build directory
+ * back to `.next` (next/dist/export/utils.js `hasCustomExportOutput`). That is
+ * why `NEXT_DIST_DIR=out-mobile` relocates the artifact but the build still
+ * uses `packages/client/.next` — which is also why a dev server running out of
+ * this checkout blocks a mobile build (see the dev-lock preflight below).
+ *
+ * Usage:
+ *   NEXT_PUBLIC_API_URL=http://localhost:51590 node scripts/build-mobile.mjs
+ *   node scripts/build-mobile.mjs ios          # sync only iOS
+ *   node scripts/build-mobile.mjs --require-api  # unreachable API = error
+ */
+import { spawnSync } from "node:child_process";
+import { createConnection } from "node:net";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(here, "..");
+
+/** The mobile export's own directory — never shared with web or E2E builds. */
+const MOBILE_OUT_DIR = "out-mobile";
+const outPath = resolve(repoRoot, "packages/client", MOBILE_OUT_DIR);
+
+const ALL_PLATFORMS = ["ios", "android"];
+
+const args = process.argv.slice(2);
+const requireApi = args.includes("--require-api");
+const requestedPlatforms = args.filter((a) => ALL_PLATFORMS.includes(a));
+
+function fail(message) {
+  console.error(`\n  build:mobile — ${message}\n`);
+  process.exit(1);
+}
+
+function step(message) {
+  console.log(`\n  ${message}`);
+}
+
+function run(command, cmdArgs, env = {}) {
+  const result = spawnSync(command, cmdArgs, {
+    cwd: repoRoot,
+    stdio: "inherit",
+    env: { ...process.env, ...env },
+  });
+  if (result.status !== 0) {
+    fail(`\`${command} ${cmdArgs.join(" ")}\` exited with ${result.status ?? "a signal"}.`);
+  }
+}
+
+function capture(command, cmdArgs) {
+  const result = spawnSync(command, cmdArgs, { cwd: repoRoot, encoding: "utf8" });
+  return {
+    ok: result.status === 0,
+    out: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+  };
+}
+
+// ── 1. The baked API URL ─────────────────────────────────────────────
+
+const apiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+if (!apiUrl) {
+  fail(
+    "NEXT_PUBLIC_API_URL is not set.\n" +
+      "  It is baked into the bundle at build time — an unset value ships an app\n" +
+      "  that resolves every request against capacitor://localhost and fails on\n" +
+      "  device with a green build.\n\n" +
+      "  Local dev in a worktree (see CLAUDE.md):\n" +
+      "    API_PORT=51590 PORT=33920 pnpm run dev\n" +
+      "    NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile",
+  );
+}
+
+let apiOrigin;
+try {
+  apiOrigin = new URL(apiUrl);
+} catch {
+  fail(`NEXT_PUBLIC_API_URL is not a valid URL: ${apiUrl}`);
+}
+if (apiOrigin.pathname !== "/") {
+  fail(
+    `NEXT_PUBLIC_API_URL must be an origin with no path — got ${apiUrl}.\n` +
+      "  The clients append /api/trpc, /api/auth and /api/ws themselves.",
+  );
+}
+
+// ── 2. Which platforms ───────────────────────────────────────────────
+
+const presentPlatforms = ALL_PLATFORMS.filter((p) => existsSync(resolve(repoRoot, p)));
+const platforms = requestedPlatforms.length ? requestedPlatforms : presentPlatforms;
+
+for (const platform of requestedPlatforms) {
+  if (!presentPlatforms.includes(platform)) {
+    fail(`No ${platform}/ directory — run \`pnpm cap:add:${platform}\` first.`);
+  }
+}
+
+// Syncing every present platform would make a pure-iOS task require a working
+// Android SDK the moment android/ exists, so an explicit argument narrows it.
+if (platforms.length === 0) {
+  console.warn(
+    "\n  No native platform directories yet — building the export only.\n" +
+      "  Add one with `pnpm cap:add:ios` / `pnpm cap:add:android`.",
+  );
+}
+
+// ── 3. Preflight ─────────────────────────────────────────────────────
+
+step("Preflight");
+
+// 3a. A dev server for this checkout owns packages/client/.next, and a
+// production build writes there too (see the header). Sharing it either
+// discards the dev cache or deadlocks on Next 16's dev lock.
+const devLock = resolve(repoRoot, "packages/client/.next/dev/lock");
+if (existsSync(devLock)) {
+  let pid = NaN;
+  try {
+    pid = Number(JSON.parse(readFileSync(devLock, "utf8"))?.pid);
+  } catch {
+    pid = NaN;
+  }
+  let running = false;
+  if (Number.isFinite(pid)) {
+    try {
+      process.kill(pid, 0);
+      running = true;
+    } catch {
+      running = false; // stale lock
+    }
+  }
+  if (running) {
+    fail(
+      `A Next dev server for this checkout is running (PID ${pid}) and owns\n` +
+        "  packages/client/.next, which this build also needs.\n\n" +
+        `  Stop it:                 kill ${pid}\n` +
+        "  Or give dev its own:     INSTANCE_ID=<name> pnpm run dev",
+    );
+  }
+}
+
+// 3b. capacitor.config.ts is covered by no tsconfig, so `cap ls` loading it is
+// the only thing that validates it before a native command runs.
+const capLs = capture("npx", ["cap", "ls"]);
+if (!capLs.ok) {
+  fail(`\`npx cap ls\` failed — capacitor.config.ts is not loading:\n\n${capLs.out}`);
+}
+console.log("    capacitor.config.ts loads");
+
+// 3c. Every installed Capacitor plugin must ship a Package.swift, or the CLI
+// drops it silently under SPM and the app throws "not implemented on ios".
+if (platforms.includes("ios")) {
+  const rootPkg = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8"));
+  const deps = Object.keys({ ...rootPkg.dependencies, ...rootPkg.devDependencies });
+  const missing = [];
+  let checked = 0;
+  for (const dep of deps) {
+    const pkgPath = resolve(repoRoot, "node_modules", dep, "package.json");
+    if (!existsSync(pkgPath)) continue;
+    let meta;
+    try {
+      meta = JSON.parse(readFileSync(pkgPath, "utf8"));
+    } catch {
+      continue;
+    }
+    if (!meta.capacitor?.ios) continue; // not an iOS-capable Capacitor plugin
+    checked += 1;
+    if (!existsSync(resolve(repoRoot, "node_modules", dep, "Package.swift"))) {
+      missing.push(dep);
+    }
+  }
+  if (missing.length) {
+    fail(
+      "These Capacitor plugins ship no Package.swift, so the SPM sync drops them\n" +
+        "  with a warning and still exits 0 — they would be missing on device:\n" +
+        missing.map((m) => `    ${m}`).join("\n"),
+    );
+  }
+  console.log(`    ${checked} iOS plugin(s), all SPM-compatible`);
+}
+
+// 3d. Xcode toolchain. `cap run ios` shells out to xcodebuild; a
+// CommandLineTools-only selection fails hundreds of lines deep.
+if (platforms.includes("ios")) {
+  const xcodePath = capture("xcode-select", ["-p"]);
+  if (!xcodePath.ok || !xcodePath.out.includes("Xcode.app")) {
+    fail(
+      `xcode-select points at ${xcodePath.out.trim() || "nothing"} — the iOS build needs a full\n` +
+        "  Xcode install:  sudo xcode-select -s /Applications/Xcode.app",
+    );
+  }
+  const sims = capture("xcrun", ["simctl", "list", "devices", "available"]);
+  if (!sims.ok || !/^\s+iPhone .*\(/m.test(sims.out)) {
+    fail(
+      "No available iPhone simulator. Install a Simulator runtime in\n" +
+        "  Xcode → Settings → Components.",
+    );
+  }
+  console.log("    Xcode selected, iPhone simulator available");
+}
+
+// 3e. Is anything listening on the baked API? A dead localhost port is nearly
+// always a mistake, but a build machine legitimately may not reach a remote
+// API — so this warns by default and only hard-fails under --require-api.
+const port = Number(apiOrigin.port || (apiOrigin.protocol === "https:" ? 443 : 80));
+const reachable = await new Promise((done) => {
+  const socket = createConnection({ host: apiOrigin.hostname, port, timeout: 2500 });
+  const settle = (value) => {
+    socket.destroy();
+    done(value);
+  };
+  socket.on("connect", () => settle(true));
+  socket.on("error", () => settle(false));
+  socket.on("timeout", () => settle(false));
+});
+if (reachable) {
+  console.log(`    API reachable at ${apiOrigin.hostname}:${port}`);
+} else if (requireApi) {
+  fail(`Nothing is listening on ${apiOrigin.hostname}:${port} (--require-api).`);
+} else {
+  console.warn(
+    `    WARNING: nothing is listening on ${apiOrigin.hostname}:${port} right now.\n` +
+      `    The bundle will still be built against ${apiUrl} — make sure that is the\n` +
+      "    port the API will actually be on when the app runs.",
+  );
+}
+
+// ── 4. Build the export ──────────────────────────────────────────────
+
+step(`Building the mobile export against ${apiUrl}`);
+
+run("pnpm", ["build:client"], {
+  // Its own output directory (see the header): never the web/E2E `out`.
+  NEXT_DIST_DIR: MOBILE_OUT_DIR,
+  // Capacitor resolves assets root-absolutely, so the relative prefix the
+  // Electron/Tauri builds need would blank the screen here. Never inherit it.
+  RELATIVE_ASSET_PREFIX: "",
+  NEXT_PUBLIC_API_URL: apiUrl,
+});
+
+// ── 5. Verify the artifact ───────────────────────────────────────────
+
+step("Verifying the export");
+
+if (!existsSync(join(outPath, "index.html"))) {
+  fail(`No index.html in ${outPath} — the export did not land where expected.`);
+}
+
+function walk(dir, predicate, hits = []) {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) walk(full, predicate, hits);
+    else if (predicate(full)) hits.push(full);
+  }
+  return hits;
+}
+
+const htmlFiles = walk(outPath, (f) => f.endsWith(".html"));
+const relativeRefs = htmlFiles.filter((f) => readFileSync(f, "utf8").includes('"./_next'));
+if (relativeRefs.length) {
+  fail(
+    'Emitted HTML references "./_next" — Capacitor resolves assets from the bundle\n' +
+      "  root, so a relative prefix 404s on every route but /. Is RELATIVE_ASSET_PREFIX\n" +
+      `  leaking into this build?\n${relativeRefs.slice(0, 5).map((f) => `    ${f}`).join("\n")}`,
+  );
+}
+console.log(`    ${htmlFiles.length} HTML files, all root-absolute`);
+
+const chunkDir = join(outPath, "_next/static/chunks");
+const chunks = existsSync(chunkDir) ? walk(chunkDir, (f) => f.endsWith(".js")) : [];
+const baked = chunks.some((f) => readFileSync(f, "utf8").includes(apiUrl));
+if (!baked) {
+  fail(
+    `The literal ${apiUrl} does not appear in any emitted chunk.\n` +
+      "  NEXT_PUBLIC_API_URL did not reach the client bundle — the app would fall\n" +
+      "  back to its own origin (capacitor://localhost) on device.",
+  );
+}
+console.log(`    ${apiUrl} is baked into the bundle`);
+
+// A marker so a human (or a later script) can tell what these bytes are bound
+// to without grepping a minified chunk.
+writeFileSync(
+  join(outPath, ".build-target.json"),
+  `${JSON.stringify({ apiUrl, builtAt: new Date().toISOString(), platforms }, null, 2)}\n`,
+);
+
+// ── 6. Sync ──────────────────────────────────────────────────────────
+
+for (const platform of platforms) {
+  step(`Syncing ${platform}`);
+  run("npx", ["cap", "sync", platform]);
+}
+
+// ios/App/CapApp-SPM/Package.swift is regenerated by every sync and IS tracked,
+// so a diff there after a build is expected rather than a bug. Say so, because
+// the alternative is somebody stashing it away.
+if (platforms.includes("ios")) {
+  const spmDiff = capture("git", ["status", "--porcelain", "ios/App/CapApp-SPM/Package.swift"]);
+  if (spmDiff.ok && spmDiff.out.trim()) {
+    console.log(
+      "\n  Note: ios/App/CapApp-SPM/Package.swift changed — it is regenerated by every\n" +
+        "  sync. Commit it when the plugin set changed; otherwise checkout it back.",
+    );
+  }
+}
+
+console.log(`\n  Mobile bundle ready — ${apiUrl} → ${platforms.join(", ") || "no platform"}\n`);
