@@ -360,9 +360,11 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   opening cover the unloaded case. Staying loaded means owning freshness:
   `entries.current` every 4s while ticking, because a stop made elsewhere would
   leave a clock counting up on an ended entry, and the whole snapshot every
-  20s; mutations call `refreshMenuBar()` rather than waiting for either. The
-  idle title is `36m`, not `0:36` — the running clock owns the colon, and a
-  total that borrowed it was read as a timer still going. The `Timer` view
+  20s; mutations call `refreshMenuBar()` rather than waiting for either. Idle
+  and running are separate preferences: `idleTitle` (bare mark by default,
+  "Start timer", or the total) and `titleMode` (how much of a running timer).
+  A total shown idle is `36m`, never `0:36` — the running clock owns the
+  colon, and a total that borrowed it was read as a timer still going. The `Timer` view
   command is the surface that can push forms, which a menu bar item cannot.
   Both read `lib/timer-data.ts`, so the two surfaces cannot disagree about what
   is running.

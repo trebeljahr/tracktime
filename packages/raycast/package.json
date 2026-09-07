@@ -33,6 +33,19 @@
           ]
         },
         {
+          "name": "idleTitle",
+          "title": "When Nothing Runs",
+          "description": "What the menu bar shows while no timer is running.",
+          "type": "dropdown",
+          "required": false,
+          "default": "none",
+          "data": [
+            { "title": "Just the icon", "value": "none" },
+            { "title": "Start timer", "value": "prompt" },
+            { "title": "Today's total", "value": "total" }
+          ]
+        },
+        {
           "name": "tickSeconds",
           "title": "Clock",
           "label": "Count the seconds up while a timer runs",

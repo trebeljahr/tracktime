@@ -111,9 +111,12 @@ not merely stale — and the whole snapshot every 20 seconds for the rest of the
 dropdown. Commands that change the timer themselves call `refreshMenuBar()`
 rather than waiting for either.
 
-Idle, the title is today's total spelled `36m`, never `0:36`. The running clock
-is `m:ss`, so a colon means a timer is going; a total wearing the same shape
-was read as one.
+Idle, the item is the bare mark by default (`idleTitle`), because a tracker
+that is not tracking has nothing urgent to say and the total sitting there
+read as a timer still going. "Start timer" makes it a button instead, and
+today's total is still an option — spelled `36m`, never `0:36`, since the
+running clock is `m:ss` and a colon in the menu bar means a timer is going.
+`titleMode` is the separate question of how much of a *running* timer to show.
 
 **Timer** remains the richer surface: a view command can push a form, which a
 menu bar item cannot. That is why **Edit Timer…** in the dropdown hands off to

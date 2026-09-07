@@ -63,7 +63,7 @@ const openTimer = (): void => {
 };
 
 export default function MenuBar(): React.JSX.Element | null {
-  const { titleMode, hideWhenIdle, tickSeconds } =
+  const { titleMode, idleTitle, hideWhenIdle, tickSeconds } =
     getPreferenceValues<Preferences.MenuBar>();
   const { data, isLoading, signedOut, revalidate } = useApi("menu-bar", (api) =>
     loadTimerSnapshot(api, { recentLimit: RECENT_LIMIT }),
@@ -113,21 +113,20 @@ export default function MenuBar(): React.JSX.Element | null {
   const pinned = running ? favoriteFor(running, favorites) : undefined;
 
   const title = ((): string | undefined => {
-    if (titleMode === "icon") return undefined;
-
-    // Idle used to render as a bare glyph with no text at all, which is
-    // indistinguishable from the dozen other icons up there — the item was
-    // present and simply could not be found. Today's total is the number
-    // worth glancing at when nothing is running, and it is spelled "36m"
-    // rather than "0:36" so it cannot be misread as a timer still going.
-    // "Description only" stays empty: there is no description to show, and
-    // that mode asked for nothing else.
+    // Idle and running are separate settings because they answer separate
+    // questions. `titleMode` is about how much of a running timer to show;
+    // this is about whether an idle menu bar should carry a number at all.
+    // Default is the bare mark: the total sat there looking like a running
+    // clock, and a tracker that is not tracking has nothing urgent to say.
+    // "Start timer" is for anyone who wants the item to read as a button,
+    // and the total stays available for anyone who was using it.
     if (!running) {
-      return titleMode === "description"
-        ? undefined
-        : formatMenuBarTotal(data?.todaySec ?? 0);
+      if (idleTitle === "prompt") return "Start timer";
+      if (idleTitle === "total") return formatMenuBarTotal(data?.todaySec ?? 0);
+      return undefined;
     }
 
+    if (titleMode === "icon") return undefined;
     if (titleMode === "duration") return clock;
     if (titleMode === "description") return label;
     return `${label} · ${clock}`;
