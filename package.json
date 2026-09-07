@@ -60,7 +60,7 @@
     "build:ios:release": "node scripts/build-mobile.mjs ios && cap open ios",
     "build:android:release": "node scripts/build-mobile.mjs android && cd android && ./gradlew bundleRelease",
     "build:android:apk": "node scripts/build-mobile.mjs android && cd android && ./gradlew assembleRelease",
-    "mobile:assets": "capacitor-assets generate --iconBackgroundColor '#4F46E5' --iconBackgroundColorDark '#4F46E5' --splashBackgroundColor '#FFFFFF' --splashBackgroundColorDark '#0A0A0A'",
+    "mobile:assets": "capacitor-assets generate --ios --android --iconBackgroundColor '#4F46E5' --iconBackgroundColorDark '#4F46E5' --splashBackgroundColor '#FFFFFF' --splashBackgroundColorDark '#0A0A0A'",
     "newsletter:send": "tsx scripts/newsletter-send.ts",
     "newsletter:draft": "tsx scripts/newsletter-draft.ts",
     "newsletter:test-tx": "tsx scripts/newsletter-test-tx.ts",

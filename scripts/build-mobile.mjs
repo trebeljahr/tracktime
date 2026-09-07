@@ -204,6 +204,52 @@ if (platforms.includes("ios")) {
   console.log(`    ${checked} iOS plugin(s), all SPM-compatible`);
 }
 
+// 3c-bis. The native identifiers and version live in project.pbxproj, which
+// nothing else reads — so drift between it and package.json is invisible until
+// App Store Connect rejects the upload. `cap sync` does not rewrite them.
+if (platforms.includes("ios")) {
+  const pbxproj = readFileSync(
+    resolve(repoRoot, "ios/App/App.xcodeproj/project.pbxproj"),
+    "utf8",
+  );
+  const rootVersion = JSON.parse(
+    readFileSync(resolve(repoRoot, "package.json"), "utf8"),
+  ).version;
+  const capConfig = readFileSync(resolve(repoRoot, "capacitor.config.ts"), "utf8");
+  const appId = capConfig.match(/appId:\s*"([^"]+)"/)?.[1];
+
+  const placeholder = ["com.getcapacitor", "com.example"].find((p) =>
+    pbxproj.includes(p),
+  );
+  if (placeholder) {
+    fail(
+      `ios/ still carries the template identifier "${placeholder}". \`cap add\` does not\n` +
+        "  always write appId into the native project — set PRODUCT_BUNDLE_IDENTIFIER in\n" +
+        "  BOTH the Debug and Release build configurations by hand.",
+    );
+  }
+  const bundleIds = [...pbxproj.matchAll(/PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/g)].map(
+    (m) => m[1].trim(),
+  );
+  if (appId && bundleIds.some((id) => id !== appId)) {
+    fail(
+      `PRODUCT_BUNDLE_IDENTIFIER (${[...new Set(bundleIds)].join(", ")}) disagrees with\n` +
+        `  capacitor.config.ts appId (${appId}).`,
+    );
+  }
+  const marketing = [...pbxproj.matchAll(/MARKETING_VERSION = ([^;]+);/g)].map((m) =>
+    m[1].trim(),
+  );
+  if (marketing.some((v) => v !== rootVersion)) {
+    fail(
+      `MARKETING_VERSION (${[...new Set(marketing)].join(", ")}) disagrees with\n` +
+        `  package.json version (${rootVersion}). Update both build configurations in\n` +
+        "  ios/App/App.xcodeproj/project.pbxproj.",
+    );
+  }
+  console.log(`    ios/ is ${appId} ${rootVersion}`);
+}
+
 // 3d. Xcode toolchain. `cap run ios` shells out to xcodebuild; a
 // CommandLineTools-only selection fails hundreds of lines deep.
 if (platforms.includes("ios")) {
