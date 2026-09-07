@@ -5,6 +5,7 @@ WORKDIR /app
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/server/package.json packages/server/
+COPY packages/core/package.json packages/core/
 COPY packages/client/package.json packages/client/
 # Install all workspace deps (build stage is discarded)
 RUN pnpm install --frozen-lockfile
@@ -14,13 +15,13 @@ FROM deps AS build
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY packages/server packages/server
+COPY packages/core packages/core
 COPY packages/client packages/client
 
 # Next.js inlines NEXT_PUBLIC_* into the browser bundle at BUILD time —
 # runtime env on the deployed container has no effect on browser code.
-# CI passes these as --build-arg (see .github/workflows/build-and-deploy.yml).
-# HATCHKIT_IMAGE_BUILD makes next.config.ts fail the build loudly when
-# NEXT_PUBLIC_API_URL is missing, instead of baking a broken fallback.
+# CI passes these as --build-arg (see .github/workflows/build-and-deploy.yml),
+# where the api.<domain> literals live.
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_WS_URL
 ARG NEXT_PUBLIC_OPENPANEL_CLIENT_ID
@@ -32,10 +33,10 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     NEXT_PUBLIC_OPENPANEL_CLIENT_ID=$NEXT_PUBLIC_OPENPANEL_CLIENT_ID \
     NEXT_PUBLIC_PLAUSIBLE_DOMAIN=$NEXT_PUBLIC_PLAUSIBLE_DOMAIN \
     NEXT_PUBLIC_PLAUSIBLE_SCRIPT_URL=$NEXT_PUBLIC_PLAUSIBLE_SCRIPT_URL \
-    NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN \
-    HATCHKIT_IMAGE_BUILD=1
+    NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 
 RUN pnpm --filter @starter/shared run build
+RUN pnpm --filter @starter/core run build
 RUN pnpm --filter @starter/client run build
 
 # ── Stage 3: Production runtime ─────────────────────────────────────
@@ -45,10 +46,17 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=6477
 
-# Next.js standalone output
-COPY --from=build /app/packages/client/.next/standalone ./
-COPY --from=build /app/packages/client/.next/static ./packages/client/.next/static
-COPY --from=build /app/packages/client/public ./packages/client/public
+# The client is `output: "export"` — there is no `.next/standalone` and no
+# `server.js`, because the desktop and mobile shells load this same bundle from
+# file:// and from the Capacitor container. What ships to the web is therefore
+# the exported tree plus a static file server.
+#
+# serve.mjs resolves its root relative to itself, so /app/serve.mjs finds
+# /app/out here exactly as packages/client/serve.mjs finds packages/client/out
+# in the repo. It is also what the E2E suite runs, so the deployed server and
+# the tested server cannot drift apart.
+COPY --from=build /app/packages/client/out ./out
+COPY --from=build /app/packages/client/serve.mjs ./serve.mjs
 
 USER node
 EXPOSE 6477
@@ -56,4 +64,4 @@ EXPOSE 6477
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||'6477')).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
-CMD ["node", "packages/client/server.js"]
+CMD ["node", "serve.mjs"]
