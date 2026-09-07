@@ -295,7 +295,7 @@ function EntryRowImpl({
         type="button"
         variant="ghost"
         size="icon"
-        className="size-8"
+        className="size-8 cap-touch"
         disabled={syncing}
         aria-label={entry.billable ? "Billable" : "Not billable"}
         aria-pressed={entry.billable}
@@ -395,7 +395,7 @@ function EntryRowImpl({
           type="button"
           variant="ghost"
           size="icon"
-          className="size-8 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
+          className="size-8 cap-touch bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
           aria-label="Stop this entry"
           onClick={() => mutations.stopTimer()}
           data-testid="entry-stop"
@@ -407,7 +407,7 @@ function EntryRowImpl({
           type="button"
           variant="ghost"
           size="icon"
-          className="size-8 text-primary"
+          className="size-8 cap-touch text-primary"
           aria-label="Continue this entry"
           onClick={() => mutations.continueEntry(entry)}
           data-testid="entry-continue"
@@ -422,7 +422,7 @@ function EntryRowImpl({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-8"
+            className="size-8 cap-touch"
             aria-label="Entry actions"
             data-testid="entry-menu"
           >

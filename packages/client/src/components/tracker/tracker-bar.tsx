@@ -20,6 +20,7 @@ import { useRunawayGuard } from "@/components/tracker/use-runaway-guard";
 import { useOfflineQueue } from "@/hooks/use-offline-queue";
 import { useRunningEntry } from "@/hooks/use-sync";
 import { useFormatSettings } from "@/lib/format";
+import { isNative } from "@/mobile/bridge";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 
@@ -214,10 +215,22 @@ export function TrackerBar(): React.JSX.Element {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div
+        className="flex flex-wrap items-center gap-2"
+        data-testid="tracker-composer"
+      >
         <Input
           value={description}
-          autoFocus
+          /* On a phone this opened the software keyboard on every mount of
+             /track — half the screen gone, over the entries the user came to
+             read, before they had done anything. Focus-on-mount is a
+             keyboard-first affordance and a phone has no keyboard to be first
+             with. Evaluated at render rather than baked in: under
+             `output: "export"` the prerender runs in Node where `isNative()`
+             is false, but React never serialises `autoFocus` into the markup
+             — it focuses imperatively on mount — so the native value is the
+             one that decides. */
+          autoFocus={!isNative()}
           placeholder="What are you working on?"
           aria-label="Description"
           className="h-10 min-w-0 flex-1 basis-64 border-0 bg-transparent px-2 text-base shadow-none focus-visible:ring-0"
@@ -267,6 +280,7 @@ export function TrackerBar(): React.JSX.Element {
           aria-label={billable ? "Billable" : "Not billable"}
           aria-pressed={billable}
           title={billable ? "Billable" : "Not billable"}
+          className="cap-touch"
           onClick={handleBillableToggle}
           data-testid="tracker-billable"
           data-billable={billable ? "true" : "false"}
@@ -322,7 +336,7 @@ export function TrackerBar(): React.JSX.Element {
               type="button"
               variant="outline"
               size="icon"
-              className="shrink-0"
+              className="cap-touch shrink-0"
               aria-label="Add time entry"
               title="Add time entry"
               onClick={() => setManualOpen(true)}
