@@ -202,6 +202,26 @@ const messagesOf = (error: unknown): string[] => {
 };
 
 /**
+ * True when the server refused the mutation because it does not believe the
+ * caller is signed in.
+ *
+ * This is deliberately NOT a network error — the request arrived and was
+ * answered — but it must not be treated as "the server has spoken, drop the
+ * row" either. A queue that outlives an expired or revoked session would
+ * otherwise delete a whole day of offline-tracked entries one 401 at a time,
+ * invalidate the caches, and leave the user looking at an empty day with no
+ * error anywhere. The flush stops instead, and everything keeps its place
+ * until there is a session to replay it with.
+ */
+export const isAuthError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null) return false;
+  const data = (error as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return false;
+  const code = (data as { code?: unknown }).code;
+  return code === "UNAUTHORIZED" || code === "FORBIDDEN";
+};
+
+/**
  * True when the mutation never reached the server, so it is safe to keep the
  * optimistic update and replay later. A server rejection (validation,
  * conflict, auth) is never a network error — those must roll back.

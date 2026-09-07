@@ -7,6 +7,7 @@ import {
   flushOfflineQueue,
   getPendingCount,
   getServerPendingCount,
+  isAuthError,
   isNetworkError,
   isOnline,
   refreshPendingCount,
@@ -25,6 +26,12 @@ export type OfflineQueueState = {
   pending: number;
   online: boolean;
   isFlushing: boolean;
+  /**
+   * The queue stopped because the server does not recognise this client's
+   * session. Nothing was dropped — the rows are still there and will replay
+   * after a sign-in.
+   */
+  authBlocked: boolean;
   /** Replay the queue now. Safe to call when it is empty or already running. */
   flush: () => Promise<void>;
 };
@@ -77,6 +84,7 @@ export const useOfflineQueue = (): OfflineQueueState => {
   );
 
   const [isFlushing, setIsFlushing] = React.useState(false);
+  const [authBlocked, setAuthBlocked] = React.useState(false);
 
   const startMutation = trpc.entries.start.useMutation();
   const stopMutation = trpc.entries.stop.useMutation();
@@ -136,6 +144,7 @@ export const useOfflineQueue = (): OfflineQueueState => {
 
     let applied = 0;
     let rejected = 0;
+    let blocked = false;
 
     try {
       const result = await flushOfflineQueue(async (mutation) => {
@@ -145,11 +154,23 @@ export const useOfflineQueue = (): OfflineQueueState => {
         } catch (error) {
           // Still unreachable — stop here so the rest keeps its order.
           if (isNetworkError(error)) throw error;
-          // The server refused it. The server wins: drop the mutation and
-          // let the invalidation below pull the authoritative state back.
+          // The session is gone (expired, or signed out from another device).
+          // Also a stop, not a drop: the request arrived, but "we do not know
+          // who you are" is no verdict on the user's tracked time. Throwing
+          // leaves this row and everything behind it in the queue — see
+          // `createOfflineQueue.flush`, which writes the remainder back.
+          if (isAuthError(error)) {
+            blocked = true;
+            throw error;
+          }
+          // The server refused it on the merits (validation, a workspace the
+          // user has left). The server wins: drop the mutation and let the
+          // invalidation below pull the authoritative state back.
           rejected += 1;
         }
       });
+
+      setAuthBlocked(blocked);
 
       if (applied > 0 || rejected > 0 || result.flushed > 0) {
         await utilsRef.current.entries.invalidate();
@@ -185,5 +206,5 @@ export const useOfflineQueue = (): OfflineQueueState => {
     void flushRef.current();
   }, [syncStatus]);
 
-  return { pending, online, isFlushing, flush };
+  return { pending, online, isFlushing, authBlocked, flush };
 };

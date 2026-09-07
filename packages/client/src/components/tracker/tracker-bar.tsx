@@ -33,7 +33,7 @@ export function TrackerBar(): React.JSX.Element {
   const format = useFormatSettings();
   const mutations = useEntryMutations();
   useRunawayGuard(mutations);
-  const { pending, online } = useOfflineQueue();
+  const { pending, online, authBlocked } = useOfflineQueue();
   const projects = trpc.projects.list.useQuery({});
 
   const [manualOpen, setManualOpen] = React.useState(false);
@@ -336,6 +336,21 @@ export function TrackerBar(): React.JSX.Element {
 
       {pending > 0 || !online ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
+          {/*
+            Nothing was thrown away — the queue stopped rather than replaying
+            into a session the server no longer knows. Say so, because the
+            alternative reading of a stuck pending count is "my time is lost".
+          */}
+          {authBlocked ? (
+            <Badge
+              variant="outline"
+              className="gap-1.5 border-destructive/50 text-destructive"
+              data-testid="offline-auth-blocked"
+            >
+              <CloudOff className="size-3" /> Signed out — sign in to sync
+            </Badge>
+          ) : null}
+
           {!online ? (
             <Badge variant="outline" className="gap-1.5" data-testid="offline-indicator">
               <WifiOff className="size-3" /> Offline
