@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import type { Tag } from "@starter/core";
 import { Combobox } from "./combobox";
+import { useSelectWhenCreated } from "./use-created-row";
 
 /**
  * Multi-select tags, built out of the single-select {@link Combobox} rather
@@ -16,8 +17,12 @@ export type TagPickerProps = {
   tags: Tag[];
   value: string[];
   onChange: (tagIds: string[]) => void;
-  /** Creates the tag server-side; the parent re-renders with it available. */
-  onCreate: (name: string) => Promise<void>;
+  /**
+   * Creates the tag server-side. The parent re-renders with it available and
+   * this picker then puts it ON the entry — creating a tag from here is a
+   * request for that tag, not for a row in a list.
+   */
+  onCreate: (name: string) => Promise<boolean>;
   testId?: string;
 };
 
@@ -28,6 +33,13 @@ export function TagPicker({
   onCreate,
   testId = "tracker-tags",
 }: TagPickerProps): JSX.Element {
+  const createTag = useSelectWhenCreated(tags, (tag) => {
+    // Guarded, because nothing stops the same name being created twice from
+    // two surfaces before either snapshot lands.
+    if (value.includes(tag.id)) return;
+    onChange([...value, tag.id]);
+  });
+
   const selectedIds = new Set(value);
   const selected = value
     .map((id) => tags.find((tag) => tag.id === id))
@@ -73,7 +85,9 @@ export function TagPicker({
         placeholder={
           selected.length === 0 ? "Search or add tags…" : "Add another tag…"
         }
-        onCreate={onCreate}
+        onCreate={async (name) => {
+          await createTag(name, () => onCreate(name));
+        }}
         createLabel={(name) => `Create tag “${name}”`}
         testId={testId}
       />

@@ -5,7 +5,6 @@ import {
   formatDuration,
   withProject,
   withTask,
-  type Client,
   type DescriptionSuggestion,
   type DurationFormat,
   type EntryFields,
@@ -15,16 +14,18 @@ import {
   type TimeEntry,
 } from "@starter/core";
 import type { BackgroundState } from "../lib/messaging";
-import { Combobox, type ComboboxOption } from "./combobox";
+import { Combobox } from "./combobox";
 import { DescriptionField } from "./description-field";
 import { formatElapsed } from "./entry-format";
 import { Header } from "./header";
 import { TagPicker } from "./tag-picker";
 import { IdlePanel } from "./idle-panel";
 import { Menu } from "./menu";
+import { ProjectPicker } from "./project-picker";
 import { QuickStartList } from "./quick-start-list";
 import { Switch } from "./switch";
 import { describeSync } from "./sync-label";
+import { useSelectWhenCreated } from "./use-created-row";
 import { useElapsedSec } from "./use-elapsed";
 
 /** An edit to the running entry. Absent fields are left alone. */
@@ -118,23 +119,6 @@ const provisionalEntry = (
   };
 };
 
-const clientName = (
-  clients: Client[],
-  clientId: string | null,
-): string | undefined =>
-  clients.find((candidate) => candidate.id === clientId)?.name;
-
-const projectOptions = (
-  projects: Project[],
-  clients: Client[],
-): ComboboxOption[] =>
-  projects.map((project) => ({
-    id: project.id,
-    label: project.name,
-    color: project.color,
-    hint: clientName(clients, project.clientId),
-  }));
-
 /**
  * The rule the server applies to an omitted `billable`, reproduced here.
  *
@@ -177,9 +161,8 @@ export function TrackerScreen({
   const [billable, setBillable] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  /** Set while a new project is being named, holding the client to file it under. */
-  const [pendingProject, setPendingProject] = useState<string | null>(null);
-  const [pendingClientId, setPendingClientId] = useState<string | null>(null);
+  /** True while {@link ProjectPicker} has its new-project panel open. */
+  const [namingProject, setNamingProject] = useState(false);
 
   // While a start/stop is in flight this holds the timer the user just asked
   // for. `null` (the outer one) means "no override" — the inner `running` is
@@ -267,6 +250,11 @@ export function TrackerScreen({
     patchRunning({ taskId: updated.taskId });
   };
 
+  // A task made from the picker is the task this entry wants — see the hook.
+  const createTask = useSelectWhenCreated(state.tasks, (task) => {
+    selectTask(task.id);
+  });
+
   const selectTags = (next: string[]): void => {
     setTagIds(next);
     patchRunning({ tagIds: next });
@@ -313,31 +301,6 @@ export function TrackerScreen({
       tagIds: suggestion.tagIds,
       billable: suggestion.billable,
     });
-  };
-
-  const beginProject = async (name: string): Promise<void> => {
-    // Two fields, so it cannot be done from inside the picker: naming it is
-    // step one, filing it under a client is step two.
-    setPendingProject(name);
-    setPendingClientId(null);
-  };
-
-  const confirmProject = async (): Promise<void> => {
-    if (pendingProject === null) return;
-    setBusy(true);
-    const created = await onCreateProject(pendingProject, pendingClientId);
-    setBusy(false);
-    if (!created) return;
-    setPendingProject(null);
-    setPendingClientId(null);
-  };
-
-  const createTag = async (name: string): Promise<void> => {
-    await onCreateTag(name);
-  };
-
-  const createTask = async (name: string): Promise<void> => {
-    await onCreateTask(name);
   };
 
   /**
@@ -526,67 +489,17 @@ export function TrackerScreen({
             testId="tracker-description"
           />
 
-          {pendingProject === null ? (
-            <Combobox
-              label="Project"
-              options={projectOptions(state.projects, state.clients)}
-              value={projectId}
-              onChange={selectProject}
-              emptyLabel="No project"
-              placeholder="Search projects…"
-              onCreate={beginProject}
-              createLabel={(name) => `Create project “${name}”`}
-              testId="tracker-project"
-            />
-          ) : (
-            <div className="panel" data-testid="tracker-new-project">
-              <p className="panel__title">New project “{pendingProject}”</p>
-
-              <Combobox
-                label="Client"
-                options={state.clients.map((client) => ({
-                  id: client.id,
-                  label: client.name,
-                  color: client.color,
-                }))}
-                value={pendingClientId}
-                onChange={setPendingClientId}
-                emptyLabel="No client"
-                placeholder="Search clients…"
-                onCreate={async (name) => {
-                  await onCreateClient(name);
-                }}
-                createLabel={(name) => `Create client “${name}”`}
-                testId="tracker-new-project-client"
-              />
-
-              <div className="panel__actions">
-                <button
-                  className="button"
-                  type="button"
-                  onClick={() => {
-                    setPendingProject(null);
-                    setPendingClientId(null);
-                  }}
-                  disabled={busy}
-                  data-testid="tracker-new-project-cancel"
-                >
-                  Cancel
-                </button>
-                <button
-                  className="button button--primary"
-                  type="button"
-                  onClick={() => {
-                    void confirmProject();
-                  }}
-                  disabled={busy}
-                  data-testid="tracker-new-project-create"
-                >
-                  Create
-                </button>
-              </div>
-            </div>
-          )}
+          <ProjectPicker
+            projects={state.projects}
+            clients={state.clients}
+            value={projectId}
+            onChange={selectProject}
+            busy={busy}
+            onCreateClient={onCreateClient}
+            onCreateProject={onCreateProject}
+            onPendingChange={setNamingProject}
+            testId="tracker-project"
+          />
 
           <Combobox
             label="Task"
@@ -595,7 +508,9 @@ export function TrackerScreen({
             onChange={selectTask}
             emptyLabel="No task"
             placeholder="Search tasks…"
-            onCreate={createTask}
+            onCreate={async (name) => {
+              await createTask(name, () => onCreateTask(name));
+            }}
             createLabel={(name) => `Create task “${name}”`}
             testId="tracker-task"
           />
@@ -604,7 +519,7 @@ export function TrackerScreen({
             tags={state.tags}
             value={tagIds}
             onChange={selectTags}
-            onCreate={createTag}
+            onCreate={onCreateTag}
             testId="tracker-tags"
           />
 
@@ -623,7 +538,7 @@ export function TrackerScreen({
                 : "button button--danger button--block"
             }
             type="submit"
-            disabled={busy || pendingProject !== null}
+            disabled={busy || namingProject}
             data-testid={running === null ? "tracker-start" : "tracker-stop"}
           >
             {running === null ? "Start" : "Stop"}

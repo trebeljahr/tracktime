@@ -562,7 +562,10 @@ export function App(): JSX.Element {
             onUpdateEntry: updateEntry,
             onDeleteEntry: deleteEntry,
             onSearchDescriptions: searchDescriptions,
+            onCreateClient: createClient,
+            onCreateProject: createProject,
             onCreateTag: createTag,
+            onCreateTask: createTask,
             onMissing: entryMissing,
           }}
           entryNew={{
@@ -574,7 +577,10 @@ export function App(): JSX.Element {
             onDraftChange: changeDraft,
             onCreateEntry: createEntry,
             onSearchDescriptions: searchDescriptions,
+            onCreateClient: createClient,
+            onCreateProject: createProject,
             onCreateTag: createTag,
+            onCreateTask: createTask,
           }}
         />
       ) : (

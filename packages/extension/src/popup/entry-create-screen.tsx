@@ -36,7 +36,10 @@ export type EntryCreateScreenProps = {
   onDraftChange: (draft: EntryDraft) => void;
   onCreateEntry: (draft: EntryDraft) => Promise<boolean>;
   onSearchDescriptions: (query: string) => void;
+  onCreateClient: (name: string) => Promise<boolean>;
+  onCreateProject: (name: string, clientId: string | null) => Promise<boolean>;
   onCreateTag: (name: string) => Promise<boolean>;
+  onCreateTask: (name: string) => Promise<boolean>;
 };
 
 export function EntryCreateScreen({
@@ -49,9 +52,14 @@ export function EntryCreateScreen({
   onDraftChange,
   onCreateEntry,
   onSearchDescriptions,
+  onCreateClient,
+  onCreateProject,
   onCreateTag,
+  onCreateTask,
 }: EntryCreateScreenProps): JSX.Element {
   const [busy, setBusy] = useState(false);
+  /** True while the project picker is naming a new project. */
+  const [namingProject, setNamingProject] = useState(false);
   const alertRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
@@ -133,7 +141,11 @@ export function EntryCreateScreen({
             zone={deviceTimeZone()}
             onChange={(next) => onDraftChange(next)}
             onSearchDescriptions={onSearchDescriptions}
+            onNamingProject={setNamingProject}
+            onCreateClient={onCreateClient}
+            onCreateProject={onCreateProject}
             onCreateTag={onCreateTag}
+            onCreateTask={onCreateTask}
           />
 
           <p className="detail__note" data-testid="entry-new-duration">
@@ -145,7 +157,7 @@ export function EntryCreateScreen({
           <button
             type="button"
             className="button button--primary button--block"
-            disabled={busy || !valid}
+            disabled={busy || !valid || namingProject}
             onClick={() => {
               void submit();
             }}

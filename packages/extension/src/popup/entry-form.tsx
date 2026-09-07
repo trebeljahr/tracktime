@@ -7,7 +7,6 @@ import {
   rollEndAfterStart,
   withDayInZone,
   zoneLabel,
-  type Client,
   type DayKey,
   type DescriptionSuggestion,
   type DurationFormat,
@@ -15,12 +14,14 @@ import {
   type TimeFormat,
 } from "@starter/core";
 import type { BackgroundState } from "../lib/messaging";
-import { Combobox, type ComboboxOption } from "./combobox";
+import { Combobox } from "./combobox";
 import { DayStepper } from "./day-stepper";
 import { DescriptionField } from "./description-field";
+import { ProjectPicker } from "./project-picker";
 import { Switch } from "./switch";
 import { TagPicker } from "./tag-picker";
 import { TimeField } from "./time-field";
+import { useSelectWhenCreated } from "./use-created-row";
 import type { EntryDraft } from "./route";
 
 /**
@@ -73,6 +74,16 @@ export type EntryFormProps = {
   /** Asks the worker what this person has called work like this before. */
   onSearchDescriptions: (query: string) => void;
   /**
+   * True while the project picker is naming a new project.
+   *
+   * The create screen has a submit button, and pressing it mid-panel would
+   * write the entry against the project the user is still describing.
+   */
+  onNamingProject?: (naming: boolean) => void;
+  onCreateClient: (name: string) => Promise<boolean>;
+  onCreateProject: (name: string, clientId: string | null) => Promise<boolean>;
+  onCreateTask: (name: string) => Promise<boolean>;
+  /**
    * Loads the task list for a project into the worker's snapshot.
    *
    * Must keep a stable identity across renders — a `useCallback`, as the
@@ -82,23 +93,6 @@ export type EntryFormProps = {
    */
   onCreateTag: (name: string) => Promise<boolean>;
 };
-
-const clientName = (
-  clients: Client[],
-  clientId: string | null,
-): string | undefined =>
-  clients.find((candidate) => candidate.id === clientId)?.name;
-
-const projectOptions = (
-  projects: Project[],
-  clients: Client[],
-): ComboboxOption[] =>
-  projects.map((project) => ({
-    id: project.id,
-    label: project.name,
-    color: project.color,
-    hint: clientName(clients, project.clientId),
-  }));
 
 /** The rule the server applies to an omitted `billable`, reproduced here. */
 const billableDefaultFor = (
@@ -198,7 +192,11 @@ export function EntryForm({
   readOnly = false,
   onChange,
   onSearchDescriptions,
+  onNamingProject,
+  onCreateClient,
+  onCreateProject,
   onCreateTag,
+  onCreateTask,
 }: EntryFormProps): JSX.Element {
   const timeFormat: TimeFormat = state.settings?.timeFormat ?? "24h";
   const durationFormat: DurationFormat = state.settings?.durationFormat ?? "hms";
@@ -298,6 +296,15 @@ export function EntryForm({
     change({ projectId: next }, { projectId: next });
   };
 
+  const selectTask = (next: string | null): void => {
+    change({ taskId: next }, { taskId: next });
+  };
+
+  // A task made from the picker is the task this entry wants — see the hook.
+  const createTask = useSelectWhenCreated(tasks, (task) => {
+    selectTask(task.id);
+  });
+
   const setDay = (dayKey: DayKey): void => {
     const start = withDayInZone(values.start, dayKey, zone);
     const delta = Date.parse(start) - Date.parse(values.start);
@@ -369,15 +376,16 @@ export function EntryForm({
         testId="entry-description"
       />
 
-      <Combobox
-        label="Project"
-        options={projectOptions(state.projects, state.clients)}
+      <ProjectPicker
+        projects={state.projects}
+        clients={state.clients}
         value={values.projectId}
         onChange={selectProject}
-        emptyLabel="No project"
-        placeholder="Search projects…"
         disabled={factsLocked}
         disabledHint={locked ? "On an invoice" : "Not sent yet"}
+        onCreateClient={onCreateClient}
+        onCreateProject={onCreateProject}
+        onPendingChange={onNamingProject}
         testId="entry-project"
       />
 
@@ -385,11 +393,15 @@ export function EntryForm({
         label="Task"
         options={tasks.map((task) => ({ id: task.id, label: task.name }))}
         value={values.taskId}
-        onChange={(next) => change({ taskId: next }, { taskId: next })}
+        onChange={selectTask}
         emptyLabel="No task"
         placeholder="Search tasks…"
         disabled={factsLocked}
         disabledHint={locked ? "On an invoice" : "Not sent yet"}
+        onCreate={async (name) => {
+          await createTask(name, () => onCreateTask(name));
+        }}
+        createLabel={(name) => `Create task “${name}”`}
         testId="entry-task"
       />
 
@@ -397,9 +409,7 @@ export function EntryForm({
         tags={state.tags}
         value={values.tagIds}
         onChange={(next) => change({ tagIds: next }, { tagIds: next })}
-        onCreate={async (name) => {
-          await onCreateTag(name);
-        }}
+        onCreate={onCreateTag}
         testId="entry-tags"
       />
 

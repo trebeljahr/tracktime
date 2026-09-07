@@ -43,7 +43,10 @@ export type EntryDetailScreenProps = {
   onUpdateEntry: (id: string, patch: EntryFieldPatch) => Promise<boolean>;
   onDeleteEntry: (id: string) => Promise<boolean>;
   onSearchDescriptions: (query: string) => void;
+  onCreateClient: (name: string) => Promise<boolean>;
+  onCreateProject: (name: string, clientId: string | null) => Promise<boolean>;
   onCreateTag: (name: string) => Promise<boolean>;
+  onCreateTask: (name: string) => Promise<boolean>;
   /** The window has loaded and no longer holds this id — deleted elsewhere. */
   onMissing: () => void;
 };
@@ -72,7 +75,10 @@ export function EntryDetailScreen({
   onUpdateEntry,
   onDeleteEntry,
   onSearchDescriptions,
+  onCreateClient,
+  onCreateProject,
   onCreateTag,
+  onCreateTask,
   onMissing,
 }: EntryDetailScreenProps): JSX.Element {
   const [confirming, setConfirming] = useState(false);
@@ -223,7 +229,10 @@ export function EntryDetailScreen({
               readOnly={queued}
               onChange={commit}
                 onSearchDescriptions={onSearchDescriptions}
+                onCreateClient={onCreateClient}
+                onCreateProject={onCreateProject}
                 onCreateTag={onCreateTag}
+                onCreateTask={onCreateTask}
             />
 
             {confirming ? (
