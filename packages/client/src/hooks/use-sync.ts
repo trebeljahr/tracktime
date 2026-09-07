@@ -244,6 +244,38 @@ const retainTicker = (): (() => void) => {
 export type RunningEntry = {
   entry: TimeEntry | null;
   elapsedSec: number;
+  /**
+   * The device's clock is behind the entry's own start, so elapsed time cannot
+   * be computed. See `clockLooksWrong`.
+   */
+  clockSkewed: boolean;
+};
+
+/**
+ * How far behind the running entry's start the device clock has to be before
+ * we say so. A start stamped by another device, or by the server, is a
+ * different clock; a minute of tolerance covers ordinary drift between two
+ * honest ones.
+ */
+const CLOCK_SKEW_TOLERANCE_MS = 60_000;
+
+/**
+ * True when this device thinks "now" is before the timer started.
+ *
+ * `entryDurationSec` clamps with `Math.max(0, …)`, so a phone whose clock is
+ * behind — set by hand, or back from a dead battery before NTP catches up —
+ * shows a clock frozen at 0:00 while the entry genuinely runs. The clamp is
+ * right (a negative duration is worse) but the result reads as a broken app
+ * and is unexplainable from the outside, so it is worth naming.
+ */
+export const clockLooksWrong = (
+  entry: TimeEntry | null,
+  nowMs: number
+): boolean => {
+  if (entry === null || entry.end !== null) return false;
+  const startMs = Date.parse(entry.start);
+  if (Number.isNaN(startMs)) return false;
+  return nowMs < startMs - CLOCK_SKEW_TOLERANCE_MS;
 };
 
 const selectTimerState = (): TimerState => timerStore.getState();
@@ -289,5 +321,9 @@ export const useRunningEntry = (): RunningEntry => {
     selectInitialTimerState
   );
 
-  return { entry: state.running, elapsedSec: state.elapsedSec };
+  return {
+    entry: state.running,
+    elapsedSec: state.elapsedSec,
+    clockSkewed: clockLooksWrong(state.running, Date.now()),
+  };
 };

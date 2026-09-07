@@ -1,7 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { CloudOff, Play, Plus, Square, WifiOff } from "lucide-react";
+import {
+  AlertTriangle,
+  CloudOff,
+  Play,
+  Plus,
+  Square,
+  WifiOff,
+} from "lucide-react";
 import type { EntryFields } from "@starter/core";
 import { formatDuration } from "@starter/shared";
 
@@ -30,7 +37,7 @@ import { cn } from "@/lib/utils";
  * button that opens the dialog for logging time that was never timed.
  */
 export function TrackerBar(): React.JSX.Element {
-  const { entry: running, elapsedSec } = useRunningEntry();
+  const { entry: running, elapsedSec, clockSkewed } = useRunningEntry();
   const format = useFormatSettings();
   const mutations = useEntryMutations();
   useRunawayGuard(mutations);
@@ -350,7 +357,7 @@ export function TrackerBar(): React.JSX.Element {
         </div>
       </div>
 
-      {pending > 0 || !online ? (
+      {pending > 0 || !online || clockSkewed ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {/*
             Nothing was thrown away — the queue stopped rather than replaying
@@ -364,6 +371,23 @@ export function TrackerBar(): React.JSX.Element {
               data-testid="offline-auth-blocked"
             >
               <CloudOff className="size-3" /> Signed out — sign in to sync
+            </Badge>
+          ) : null}
+
+          {/*
+            A clock stuck at 0:00 while the timer genuinely runs is the most
+            unexplainable-looking bug this app can show. It is not ours: the
+            device thinks "now" is before the entry started, so every elapsed
+            calculation clamps to zero. Naming it turns a support ticket into
+            a settings change.
+          */}
+          {clockSkewed ? (
+            <Badge
+              variant="outline"
+              className="gap-1.5 border-destructive/50 text-destructive"
+              data-testid="clock-skew-warning"
+            >
+              <AlertTriangle className="size-3" /> Device clock looks wrong
             </Badge>
           ) : null}
 
