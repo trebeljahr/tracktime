@@ -4,9 +4,35 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
+import { useOverlay } from "@/mobile/overlay-stack";
 import { cn } from "@/lib/utils";
 
-const Dialog = DialogPrimitive.Root;
+/**
+ * Radix's Root, plus one line of native shell: while it is open it is on the
+ * overlay stack, so Android's hardware back button closes it instead of
+ * navigating away underneath it.
+ *
+ * Registered here rather than in each of the app's eleven dialogs, so a
+ * twelfth cannot forget. On web the whole thing is an array push and pop —
+ * nothing reads the stack except a `backButton` listener, which only Android
+ * ever fires.
+ *
+ * Only a CONTROLLED dialog registers: an uncontrolled one owns its open state
+ * inside Radix and has no `onOpenChange` to close it with. Every dialog in
+ * this app is controlled.
+ */
+function Dialog({
+  open,
+  onOpenChange,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>): React.JSX.Element {
+  useOverlay(open === true && onOpenChange !== undefined, () =>
+    onOpenChange?.(false),
+  );
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} {...props} />
+  );
+}
 const DialogTrigger = DialogPrimitive.Trigger;
 const DialogPortal = DialogPrimitive.Portal;
 const DialogClose = DialogPrimitive.Close;
