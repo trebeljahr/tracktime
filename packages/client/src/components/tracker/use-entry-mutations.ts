@@ -29,6 +29,7 @@ import {
   cancelQueuedForTemp,
   createTempId,
   enqueueOffline,
+  isDocumentUnloading,
   isNetworkError,
   isTempId,
   type OfflineCreateInput,
@@ -306,6 +307,12 @@ export const useEntryMutations = (): EntryMutations => {
       fallbackMessage: string
     ): Promise<void> => {
       if (isNetworkError(error)) {
+        // The document is being torn down, so this "failure" is an aborted
+        // request whose bytes the server almost certainly already has. See
+        // `isDocumentUnloading` — queueing it would duplicate the entry
+        // rather than recover it, and the reload about to happen asks the
+        // server what is really there.
+        if (isDocumentUnloading()) return;
         if (context) context.queued = true;
         await enqueue(context?.tempId);
         return;

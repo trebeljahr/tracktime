@@ -55,6 +55,7 @@ import {
   shouldUseNativeStorage,
 } from "@/mobile/preferences-storage";
 import { getNetworkOnline } from "@/mobile/network";
+import { isNative } from "@/mobile/bridge";
 
 // ── the queue itself ─────────────────────────────────────────────────
 
@@ -192,6 +193,64 @@ export const flushOfflineQueue = async (
 export const clearOfflineQueue = async (): Promise<void> => {
   await getOfflineQueue().clear();
   await refreshPendingCount();
+};
+
+// ── the document going away ──────────────────────────────────────────
+
+/*
+ * A full page navigation aborts every request in flight, and an aborted fetch
+ * is indistinguishable from a failed one — `isNetworkError()` says "network",
+ * the mutation is queued, and the next document replays it.
+ *
+ * That guess is usually WRONG. The request was fully written before the
+ * document died; aborting a fetch does not un-send the bytes, so the server
+ * has almost always processed it and only the response was lost. Replaying it
+ * therefore does not recover a lost entry — it creates a second one, and the
+ * user is left deleting duplicates they did not make.
+ *
+ * So a mutation that fails while the document is being torn down is not
+ * queued. The app is a moment away from reloading and asking the server what
+ * is actually there, which is a better answer than a blind replay.
+ *
+ * **Web only.** There is no navigation-teardown on the native shells — the
+ * document is loaded once and lives for the process — and `pagehide` fires
+ * there for other reasons (backgrounding, the back-forward cache). A latched
+ * flag on a phone would silently stop queueing offline work, which is the one
+ * thing that must never happen. `persisted` is checked as well, so even on web
+ * a bfcache suspension does not count.
+ */
+let documentUnloading = false;
+let unwatchUnload: (() => void) | null = null;
+
+export const isDocumentUnloading = (): boolean => documentUnloading;
+
+export const watchDocumentUnload = (): void => {
+  if (unwatchUnload !== null || typeof window === "undefined") return;
+  if (isNative()) return;
+
+  const onHide = (event: PageTransitionEvent): void => {
+    if (event.persisted) return;
+    documentUnloading = true;
+  };
+  // A restored page is alive again, and everything it does from here is a real
+  // mutation by a real user.
+  const onShow = (): void => {
+    documentUnloading = false;
+  };
+
+  window.addEventListener("pagehide", onHide);
+  window.addEventListener("pageshow", onShow);
+  unwatchUnload = () => {
+    window.removeEventListener("pagehide", onHide);
+    window.removeEventListener("pageshow", onShow);
+  };
+};
+
+/** Test seam. */
+export const __resetDocumentUnloadForTests = (): void => {
+  documentUnloading = false;
+  unwatchUnload?.();
+  unwatchUnload = null;
 };
 
 // ── error classification ─────────────────────────────────────────────
