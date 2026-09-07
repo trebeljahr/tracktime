@@ -52,8 +52,8 @@ test.describe("web app at phone width", () => {
 
   test("gets the drawer, not native chrome", async ({ page }) => {
     // The web app's own narrow-screen affordance is the hamburger + drawer,
-    // and it still is one: the native tab bar arrives in stage 3 behind the
-    // same `body.cap` gate.
+    // and it still is one: the native tab bar is behind the same `body.cap`
+    // gate as everything else.
     const toggle = page.getByTestId("sidebar-toggle");
     await expect(toggle).toBeVisible();
 
@@ -61,6 +61,47 @@ test.describe("web app at phone width", () => {
     await expect(page.getByTestId("sidebar-mobile")).toBeVisible();
     await page.getByTestId("sidebar-close").click();
     await expect(page.getByTestId("sidebar-mobile")).toHaveCount(0);
+  });
+
+  test("renders the tab bar into the DOM but never shows it", async ({
+    page,
+  }) => {
+    // Both halves matter, and they are the reason the bar is CSS-gated
+    // rather than gated on `isNative()`.
+    //
+    // Present: under `output: "export"` the markup is prerendered in Node,
+    // where `window.Capacitor` cannot exist. A component that returns null
+    // unless native therefore ships in the HTML on web and disappears at
+    // hydration on the phone — a mismatch React resolves by discarding the
+    // served DOM. So it must be here, in every build.
+    //
+    // Invisible: and it must cost the web app nothing at 393pt, which is
+    // exactly the width where a bottom bar would do the most damage.
+    const bar = page.getByTestId("mobile-tab-bar");
+    await expect(bar).toHaveCount(1);
+    await expect(bar).toBeHidden();
+    expect(await bar.evaluate((el) => getComputedStyle(el).display)).toBe(
+      "none",
+    );
+  });
+
+  test("keeps the web page bottom padding — no tab bar to clear", async ({
+    page,
+  }) => {
+    // native.css pads app-main by the bar's height plus the home indicator.
+    // On web the padding has to stay the layout's own `py-4`.
+    const main = page.getByTestId("app-main");
+    const padding = await main.evaluate(
+      (el) => getComputedStyle(el).paddingBottom,
+    );
+    expect(padding).toBe("16px");
+
+    const offset = await page.evaluate(() =>
+      getComputedStyle(document.body)
+        .getPropertyValue("--app-tab-bar-offset")
+        .trim(),
+    );
+    expect(offset).toBe("");
   });
 
   test("keeps the web input size — no 16px override", async ({ page }) => {
