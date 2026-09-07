@@ -1,0 +1,917 @@
+// Getting a whole history in, and getting a whole workspace out.
+//
+// Import is an onboarding feature first: somebody arriving with years of
+// tracked time elsewhere keeps their reports instead of starting from zero.
+// Export is its mirror, and the reason the import is worth trusting — data
+// that can leave is data nobody is locked into.
+//
+// Three rules shape everything here:
+//
+//  - `analyze` and `commit` take the SAME input and run the SAME parser. The
+//    preview is a description, never a token: nothing a client sends back is
+//    authority to write, so a tampered preview cannot make the commit write
+//    something the user never saw.
+//  - Duplicates are detected, not assumed. Re-importing an overlapping range
+//    is the normal way a backfill is finished, so the second pass has to
+//    recognise what the first one already wrote.
+//  - Every import is one batch, and a batch can be undone. A wrong column
+//    mapping is discovered after the import, not before it.
+import { TRPCError } from "@trpc/server";
+import {
+  IMPORT_PREVIEW_ISSUES,
+  IMPORT_PREVIEW_ROWS,
+  MAX_IMPORT_ROWS,
+  importInputSchema,
+  importUndoSchema,
+  resolveHourlyRate,
+  resolveTimeZone,
+  workspaceExportSchema,
+  type ImportBatchSummary,
+  type ImportColumnRole,
+  type ImportInput,
+  type ImportPreview,
+  type ImportResult,
+  type ImportRow,
+  type ImportUndoResult,
+  type WorkspaceExport,
+  type WorkspaceExportEntry,
+} from "@starter/shared";
+import { Client, DEFAULT_CLIENT_COLOR } from "../../models/Client.js";
+import { ImportBatch, toClientImportBatch } from "../../models/ImportBatch.js";
+import { Project, DEFAULT_PROJECT_COLOR } from "../../models/Project.js";
+import { Tag, DEFAULT_TAG_COLOR } from "../../models/Tag.js";
+import { Task } from "../../models/Task.js";
+import { TimeEntry } from "../../models/TimeEntry.js";
+import { getOrCreateWorkspaceSettings } from "../../models/Settings.js";
+import { authorScopeFilter } from "../../models/WorkspaceMember.js";
+import {
+  importFingerprint,
+  parseImportFile,
+  workspaceJsonCatalog,
+  type ParsedFile,
+} from "../../services/import/parse.js";
+import { csvFilename, toCsv, type CsvColumn } from "../../services/csv.js";
+import { publishSync } from "../../ws/sync.js";
+import {
+  assertObjectId,
+  pickCatalogColor,
+  PROJECT_COLOR_OFFSET,
+} from "./clients.js";
+import { router, workspaceProcedure } from "../trpc.js";
+
+/** Entries are written in batches this size — one round trip per chunk. */
+const INSERT_CHUNK = 500;
+
+/**
+ * Ceiling on a single export. Well past a decade of full-time tracking, and
+ * low enough that one request cannot pull a whole database into memory.
+ */
+const MAX_EXPORT_ENTRIES = 200_000;
+
+const badRequest = (message: string): TRPCError =>
+  new TRPCError({ code: "BAD_REQUEST", message });
+
+const lower = (value: string): string => value.trim().toLowerCase();
+
+/** The catalog, indexed the way the importer looks things up: by name. */
+type CatalogIndex = {
+  clients: Map<string, string>;
+  projects: Map<string, ProjectRef>;
+  /** Keyed `${projectId}::${lowercased task name}`. */
+  tasks: Map<string, string>;
+  tags: Map<string, string>;
+  /** Names by id, for turning existing entries back into fingerprints. */
+  projectNameById: Map<string, string>;
+};
+
+type ProjectRef = {
+  id: string;
+  clientId: string | null;
+  hourlyRate: number | null;
+  billableDefault: boolean;
+};
+
+async function loadCatalog(workspaceId: string): Promise<CatalogIndex> {
+  const [clients, projects, tasks, tags] = await Promise.all([
+    Client.find({ workspaceId }, { name: 1 }).lean(),
+    Project.find(
+      { workspaceId },
+      { name: 1, clientId: 1, hourlyRate: 1, billableDefault: 1 },
+    ).lean(),
+    Task.find({ workspaceId }, { name: 1, projectId: 1 }).lean(),
+    Tag.find({ workspaceId }, { name: 1 }).lean(),
+  ]);
+
+  const index: CatalogIndex = {
+    clients: new Map(),
+    projects: new Map(),
+    tasks: new Map(),
+    tags: new Map(),
+    projectNameById: new Map(),
+  };
+
+  for (const client of clients) index.clients.set(lower(client.name), String(client._id));
+  for (const project of projects) {
+    const id = String(project._id);
+    index.projects.set(lower(project.name), {
+      id,
+      clientId: project.clientId ?? null,
+      hourlyRate: project.hourlyRate ?? null,
+      billableDefault: project.billableDefault ?? true,
+    });
+    index.projectNameById.set(id, project.name);
+  }
+  for (const task of tasks) {
+    index.tasks.set(`${task.projectId}::${lower(task.name)}`, String(task._id));
+  }
+  for (const tag of tags) index.tags.set(lower(tag.name), String(tag._id));
+
+  return index;
+}
+
+/**
+ * Mark the rows this workspace already has.
+ *
+ * Only the file's own date range is read back, and only the four fields the
+ * fingerprint uses — a backfill covering one month must not read a decade of
+ * entries to find out it is new.
+ */
+async function markWorkspaceDuplicates(
+  workspaceId: string,
+  rows: ImportRow[],
+  catalog: CatalogIndex,
+): Promise<number> {
+  const candidates = rows.filter((row) => row.duplicateOf === null);
+  if (candidates.length === 0) return 0;
+
+  let minStart = Number.POSITIVE_INFINITY;
+  let maxStart = Number.NEGATIVE_INFINITY;
+  for (const row of candidates) {
+    const ms = Date.parse(row.start);
+    if (ms < minStart) minStart = ms;
+    if (ms > maxStart) maxStart = ms;
+  }
+
+  const existing = await TimeEntry.find(
+    {
+      workspaceId,
+      start: { $gte: new Date(minStart), $lte: new Date(maxStart) },
+    },
+    { start: 1, durationSec: 1, description: 1, projectId: 1 },
+  ).lean();
+
+  const seen = new Set<string>();
+  for (const entry of existing) {
+    seen.add(
+      importFingerprint({
+        start: entry.start.toISOString(),
+        durationSec: entry.durationSec,
+        description: entry.description ?? "",
+        projectName: entry.projectId
+          ? (catalog.projectNameById.get(entry.projectId) ?? null)
+          : null,
+      }),
+    );
+  }
+
+  let duplicates = 0;
+  for (const row of candidates) {
+    if (seen.has(importFingerprint(row))) {
+      row.duplicateOf = "workspace";
+      duplicates += 1;
+    }
+  }
+  return duplicates;
+}
+
+/** Parse the file exactly as both procedures must, or refuse it. */
+function readFile(input: ImportInput): {
+  parsed: ParsedFile;
+  timeZone: string;
+} {
+  const timeZone = resolveTimeZone(input.timeZone);
+  const overrides = new Map<number, ImportColumnRole>(
+    (input.columns ?? []).map((column) => [column.index, column.role]),
+  );
+  const parsed = parseImportFile(input.text, {
+    timeZone,
+    dateOrder: input.dateOrder,
+    overrides,
+  });
+
+  if (parsed.totalRows > MAX_IMPORT_ROWS) {
+    throw badRequest(
+      `That file has ${parsed.totalRows} rows; the limit is ${MAX_IMPORT_ROWS} per import. Split it by date range and import the parts.`,
+    );
+  }
+  if (parsed.shape === "unusable") {
+    throw badRequest(
+      "No start time could be found in that file. Point a column at Start (or at Date and Duration) and try again.",
+    );
+  }
+
+  return { parsed, timeZone };
+}
+
+/** Names in the file that the workspace does not have yet. */
+function missingNames(
+  rows: readonly ImportRow[],
+  catalog: CatalogIndex,
+): {
+  clients: string[];
+  projects: string[];
+  tasks: string[];
+  tags: string[];
+} {
+  const clients = new Map<string, string>();
+  const projects = new Map<string, string>();
+  const tasks = new Map<string, string>();
+  const tags = new Map<string, string>();
+
+  for (const row of rows) {
+    if (row.clientName && !catalog.clients.has(lower(row.clientName))) {
+      clients.set(lower(row.clientName), row.clientName);
+    }
+    if (row.projectName && !catalog.projects.has(lower(row.projectName))) {
+      projects.set(lower(row.projectName), row.projectName);
+    }
+    if (row.taskName && row.projectName) {
+      const project = catalog.projects.get(lower(row.projectName));
+      const key = project
+        ? `${project.id}::${lower(row.taskName)}`
+        : `new:${lower(row.projectName)}::${lower(row.taskName)}`;
+      if (!catalog.tasks.has(key)) tasks.set(key, row.taskName);
+    }
+    for (const tag of row.tagNames) {
+      if (!catalog.tags.has(lower(tag))) tags.set(lower(tag), tag);
+    }
+  }
+
+  return {
+    clients: [...clients.values()],
+    projects: [...projects.values()],
+    tasks: [...tasks.values()],
+    tags: [...tags.values()],
+  };
+}
+
+/** Catalog settings a JSON export carries that a delimited file cannot. */
+type CatalogHints = {
+  clientColor: Map<string, string>;
+  projectColor: Map<string, string>;
+  projectRate: Map<string, number | null>;
+  projectBillable: Map<string, boolean>;
+  tagColor: Map<string, string>;
+};
+
+const emptyHints = (): CatalogHints => ({
+  clientColor: new Map(),
+  projectColor: new Map(),
+  projectRate: new Map(),
+  projectBillable: new Map(),
+  tagColor: new Map(),
+});
+
+function hintsFromJson(text: string): CatalogHints {
+  const hints = emptyHints();
+  const doc = workspaceJsonCatalog(text);
+  if (!doc) return hints;
+
+  for (const client of doc.clients) {
+    if (client?.name) hints.clientColor.set(lower(client.name), client.color);
+  }
+  for (const project of doc.projects) {
+    if (!project?.name) continue;
+    const key = lower(project.name);
+    hints.projectColor.set(key, project.color);
+    hints.projectRate.set(key, project.hourlyRate ?? null);
+    hints.projectBillable.set(key, project.billableDefault ?? true);
+  }
+  for (const tag of doc.tags) {
+    if (tag?.name) hints.tagColor.set(lower(tag.name), tag.color);
+  }
+  return hints;
+}
+
+type CreatedCatalog = {
+  clientIds: string[];
+  projectIds: string[];
+  taskIds: string[];
+  tagIds: string[];
+};
+
+/**
+ * Create everything the rows name that does not exist yet, updating the index
+ * in place so the entry loop can look every reference up by name.
+ *
+ * Order matters: a project needs its client's id, and a task needs its
+ * project's, so the three passes cannot be collapsed into one.
+ */
+async function createMissingCatalog(args: {
+  workspaceId: string;
+  createdBy: string;
+  rows: readonly ImportRow[];
+  catalog: CatalogIndex;
+  hints: CatalogHints;
+}): Promise<CreatedCatalog> {
+  const { workspaceId, createdBy, rows, catalog, hints } = args;
+  const created: CreatedCatalog = {
+    clientIds: [],
+    projectIds: [],
+    taskIds: [],
+    tagIds: [],
+  };
+
+  const clientNames = new Map<string, string>();
+  const projectNames = new Map<string, string>();
+  const tagNames = new Map<string, string>();
+  /** Which client each new project belongs to, from the first row naming it. */
+  const projectClient = new Map<string, string | null>();
+
+  for (const row of rows) {
+    if (row.clientName) clientNames.set(lower(row.clientName), row.clientName);
+    if (row.projectName) {
+      const key = lower(row.projectName);
+      projectNames.set(key, row.projectName);
+      if (!projectClient.has(key)) {
+        projectClient.set(key, row.clientName ? lower(row.clientName) : null);
+      }
+    }
+    for (const tag of row.tagNames) tagNames.set(lower(tag), tag);
+  }
+
+  let colorSeed = catalog.clients.size;
+  for (const [key, name] of clientNames) {
+    if (catalog.clients.has(key)) continue;
+    const doc = await Client.create({
+      workspaceId,
+      createdBy,
+      name,
+      color:
+        hints.clientColor.get(key) ??
+        pickCatalogColor(colorSeed) ??
+        DEFAULT_CLIENT_COLOR,
+    });
+    colorSeed += 1;
+    const id = String(doc._id);
+    catalog.clients.set(key, id);
+    created.clientIds.push(id);
+  }
+
+  let projectSeed = catalog.projects.size;
+  for (const [key, name] of projectNames) {
+    if (catalog.projects.has(key)) continue;
+    const clientKey = projectClient.get(key) ?? null;
+    const clientId = clientKey ? (catalog.clients.get(clientKey) ?? null) : null;
+    const hourlyRate = hints.projectRate.get(key) ?? null;
+    const billableDefault = hints.projectBillable.get(key) ?? true;
+    const doc = await Project.create({
+      workspaceId,
+      createdBy,
+      name,
+      color:
+        hints.projectColor.get(key) ??
+        pickCatalogColor(projectSeed, PROJECT_COLOR_OFFSET) ??
+        DEFAULT_PROJECT_COLOR,
+      clientId,
+      hourlyRate,
+      billableDefault,
+    });
+    projectSeed += 1;
+    const id = String(doc._id);
+    catalog.projects.set(key, { id, clientId, hourlyRate, billableDefault });
+    catalog.projectNameById.set(id, name);
+    created.projectIds.push(id);
+  }
+
+  for (const [key, name] of tagNames) {
+    if (catalog.tags.has(key)) continue;
+    const doc = await Tag.create({
+      workspaceId,
+      createdBy,
+      name,
+      color: hints.tagColor.get(key) ?? DEFAULT_TAG_COLOR,
+    });
+    const id = String(doc._id);
+    catalog.tags.set(key, id);
+    created.tagIds.push(id);
+  }
+
+  // Tasks last: a task without a project has nowhere to live, so a row naming
+  // one but no project simply has no task rather than an orphaned one.
+  for (const row of rows) {
+    if (!row.taskName || !row.projectName) continue;
+    const project = catalog.projects.get(lower(row.projectName));
+    if (!project) continue;
+    const key = `${project.id}::${lower(row.taskName)}`;
+    if (catalog.tasks.has(key)) continue;
+    const doc = await Task.create({
+      workspaceId,
+      createdBy,
+      projectId: project.id,
+      name: row.taskName,
+    });
+    const id = String(doc._id);
+    catalog.tasks.set(key, id);
+    created.taskIds.push(id);
+  }
+
+  return created;
+}
+
+const summarize = (
+  rows: readonly ImportRow[],
+): { totalSec: number; firstStart: string | null; lastStart: string | null } => {
+  let totalSec = 0;
+  let first: string | null = null;
+  let last: string | null = null;
+  for (const row of rows) {
+    totalSec += row.durationSec;
+    if (first === null || row.start < first) first = row.start;
+    if (last === null || row.start > last) last = row.start;
+  }
+  return { totalSec, firstStart: first, lastStart: last };
+};
+
+/** The CSV this app writes — and the one its own importer reads back. */
+const EXPORT_COLUMNS: CsvColumn[] = [
+  { key: "start", header: "Start" },
+  { key: "end", header: "End" },
+  { key: "duration", header: "Duration" },
+  { key: "description", header: "Description" },
+  { key: "project", header: "Project" },
+  { key: "client", header: "Client" },
+  { key: "task", header: "Task" },
+  { key: "tags", header: "Tags" },
+  { key: "billable", header: "Billable" },
+  { key: "rate", header: "Rate" },
+  { key: "currency", header: "Currency" },
+];
+
+const hms = (seconds: number): string => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${pad(hours)}:${pad(minutes)}:${pad(rest)}`;
+};
+
+/**
+ * Read the whole workspace into the portable shape.
+ *
+ * Catalog references travel BY NAME (see `WorkspaceExportEntry`), which is
+ * what makes an export importable into a different workspace — or back into
+ * an empty one after the database it came from is gone.
+ */
+async function buildWorkspaceExport(args: {
+  workspaceId: string;
+  from?: string;
+  to?: string;
+  authorScope: { authorId: string } | null;
+}): Promise<WorkspaceExport> {
+  const { workspaceId, from, to, authorScope } = args;
+  const [catalogClients, catalogProjects, catalogTasks, catalogTags, settings] =
+    await Promise.all([
+      Client.find({ workspaceId }).lean(),
+      Project.find({ workspaceId }).lean(),
+      Task.find({ workspaceId }).lean(),
+      Tag.find({ workspaceId }).lean(),
+      getOrCreateWorkspaceSettings(workspaceId),
+    ]);
+
+  const clientNameById = new Map(
+    catalogClients.map((client) => [String(client._id), client.name]),
+  );
+  const projectById = new Map(
+    catalogProjects.map((project) => [String(project._id), project]),
+  );
+  const taskNameById = new Map(
+    catalogTasks.map((task) => [String(task._id), task.name]),
+  );
+  const tagNameById = new Map(
+    catalogTags.map((tag) => [String(tag._id), tag.name]),
+  );
+
+  const range: Record<string, Date> = {};
+  if (from) range.$gte = new Date(`${from}T00:00:00.000Z`);
+  if (to) range.$lte = new Date(`${to}T23:59:59.999Z`);
+
+  const entries = await TimeEntry.find({
+    workspaceId,
+    ...(authorScope ?? {}),
+    ...(from || to ? { start: range } : {}),
+    // A running timer has no end and no duration yet; exporting it would
+    // write a zero-length entry that the importer then refuses.
+    end: { $ne: null },
+  })
+    .sort({ start: 1 })
+    .limit(MAX_EXPORT_ENTRIES)
+    .lean();
+
+  const exportEntries: WorkspaceExportEntry[] = entries.map((entry) => {
+    const project = entry.projectId ? projectById.get(entry.projectId) : null;
+    return {
+      description: entry.description ?? "",
+      clientName: project?.clientId
+        ? (clientNameById.get(project.clientId) ?? null)
+        : null,
+      projectName: project?.name ?? null,
+      taskName: entry.taskId ? (taskNameById.get(entry.taskId) ?? null) : null,
+      tagNames: (entry.tagIds ?? [])
+        .map((id) => tagNameById.get(id))
+        .filter((name): name is string => Boolean(name)),
+      billable: entry.billable,
+      start: entry.start.toISOString(),
+      end: entry.end ? entry.end.toISOString() : null,
+      durationSec: entry.durationSec,
+      hourlyRate: entry.hourlyRate ?? null,
+      currency: entry.currency,
+      timeZone: entry.timeZone ?? null,
+    };
+  });
+
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    workspaceId,
+    currency: settings.currency,
+    clients: catalogClients.map((client) => ({
+      name: client.name,
+      color: client.color,
+      archived: client.archived,
+    })),
+    projects: catalogProjects.map((project) => ({
+      name: project.name,
+      color: project.color,
+      clientName: project.clientId
+        ? (clientNameById.get(project.clientId) ?? null)
+        : null,
+      billableDefault: project.billableDefault,
+      hourlyRate: project.hourlyRate ?? null,
+      estimatedHours: project.estimatedHours ?? null,
+      archived: project.archived,
+    })),
+    tasks: catalogTasks.flatMap((task) => {
+      const project = projectById.get(task.projectId);
+      if (!project) return [];
+      return [
+        {
+          name: task.name,
+          projectName: project.name,
+          done: task.done,
+          archived: task.archived,
+        },
+      ];
+    }),
+    tags: catalogTags.map((tag) => ({
+      name: tag.name,
+      color: tag.color,
+      archived: tag.archived,
+    })),
+    entries: exportEntries,
+  };
+}
+
+export const dataRouter = router({
+  /**
+   * What this file would do, computed without writing anything.
+   *
+   * A mutation rather than a query despite changing nothing: the payload is a
+   * whole file, and a query would put it in a URL and in every cache between
+   * here and the browser.
+   */
+  analyze: workspaceProcedure
+    .input(importInputSchema)
+    .mutation(async ({ ctx, input }): Promise<ImportPreview> => {
+      const { parsed, timeZone } = readFile(input);
+      const catalog = await loadCatalog(ctx.workspaceId);
+      const duplicates = await markWorkspaceDuplicates(
+        ctx.workspaceId,
+        parsed.rows,
+        catalog,
+      );
+
+      const fileDuplicates = parsed.rows.filter(
+        (row) => row.duplicateOf === "file",
+      ).length;
+      const ready = parsed.rows.filter((row) => row.duplicateOf === null);
+      const missing = missingNames(ready, catalog);
+      const totals = summarize(ready);
+
+      return {
+        format: parsed.format,
+        delimiter: parsed.delimiter,
+        shape: parsed.shape,
+        dateOrder: parsed.dateOrder,
+        dateOrderAmbiguous: parsed.dateOrderAmbiguous,
+        columns: parsed.columns,
+        timeZone,
+        totalRows: parsed.totalRows,
+        readyRows: ready.length,
+        skippedRows: parsed.totalRows - parsed.rows.length,
+        duplicateRows: duplicates + fileDuplicates,
+        totalSec: totals.totalSec,
+        firstStart: totals.firstStart,
+        lastStart: totals.lastStart,
+        newClients: missing.clients,
+        newProjects: missing.projects,
+        newTasks: missing.tasks,
+        newTags: missing.tags,
+        issues: parsed.issues.slice(0, IMPORT_PREVIEW_ISSUES),
+        sample: ready.slice(0, IMPORT_PREVIEW_ROWS),
+      };
+    }),
+
+  /** Write the file. Same input, same parser, same rows as the preview. */
+  commit: workspaceProcedure
+    .input(importInputSchema)
+    .mutation(async ({ ctx, input }): Promise<ImportResult> => {
+      const { parsed, timeZone } = readFile(input);
+      const workspaceId = ctx.workspaceId;
+      const catalog = await loadCatalog(workspaceId);
+      await markWorkspaceDuplicates(workspaceId, parsed.rows, catalog);
+
+      const skipDuplicates = input.skipDuplicates ?? true;
+      const rows = skipDuplicates
+        ? parsed.rows.filter((row) => row.duplicateOf === null)
+        : parsed.rows;
+
+      if (rows.length === 0) {
+        throw badRequest(
+          "Nothing to import — every row in that file is already here.",
+        );
+      }
+
+      const settings = await getOrCreateWorkspaceSettings(workspaceId);
+      const hints =
+        parsed.format === "workspace-json"
+          ? hintsFromJson(input.text)
+          : emptyHints();
+
+      const created =
+        (input.createMissing ?? true)
+          ? await createMissingCatalog({
+              workspaceId,
+              createdBy: ctx.user.id,
+              rows,
+              catalog,
+              hints,
+            })
+          : { clientIds: [], projectIds: [], taskIds: [], tagIds: [] };
+
+      const totals = summarize(rows);
+
+      // The batch is written FIRST so every entry can carry its id. A crash
+      // halfway through then leaves a batch that undo can still clean up,
+      // rather than orphan entries nothing points at.
+      const batch = await ImportBatch.create({
+        workspaceId,
+        createdBy: ctx.user.id,
+        filename: input.filename ?? null,
+        format: parsed.format,
+        shape: parsed.shape,
+        dateOrder: parsed.dateOrder,
+        timeZone,
+        clientIds: created.clientIds,
+        projectIds: created.projectIds,
+        taskIds: created.taskIds,
+        tagIds: created.tagIds,
+        entriesSkipped: parsed.rows.length - rows.length,
+        totalSec: totals.totalSec,
+        firstStart: totals.firstStart ? new Date(totals.firstStart) : null,
+        lastStart: totals.lastStart ? new Date(totals.lastStart) : null,
+      });
+      const batchId = String(batch._id);
+
+      const defaultBillable = input.defaultBillable ?? false;
+      const docs = rows.map((row) => {
+        const project = row.projectName
+          ? (catalog.projects.get(lower(row.projectName)) ?? null)
+          : null;
+        const taskId =
+          project && row.taskName
+            ? (catalog.tasks.get(`${project.id}::${lower(row.taskName)}`) ??
+              null)
+            : null;
+        const billable =
+          row.billable ?? project?.billableDefault ?? defaultBillable;
+        return {
+          workspaceId,
+          authorId: ctx.user.id,
+          description: row.description,
+          projectId: project?.id ?? null,
+          taskId,
+          billable,
+          start: new Date(row.start),
+          end: new Date(row.end),
+          durationSec: row.durationSec,
+          // The file's own rate wins over the project's: it is what the work
+          // was actually billed at, and re-deriving it here would silently
+          // reprice imported history against today's rate card.
+          hourlyRate: billable
+            ? (row.hourlyRate ??
+              resolveHourlyRate({
+                billable,
+                projectRate: project?.hourlyRate ?? null,
+                defaultRate: settings.defaultHourlyRate,
+              }))
+            : null,
+          currency: settings.currency,
+          source: "import" as const,
+          timeZone,
+          tagIds: row.tagNames
+            .map((name) => catalog.tags.get(lower(name)))
+            .filter((id): id is string => Boolean(id)),
+          importId: batchId,
+        };
+      });
+
+      let entriesCreated = 0;
+      for (let index = 0; index < docs.length; index += INSERT_CHUNK) {
+        const chunk = docs.slice(index, index + INSERT_CHUNK);
+        // `ordered: false` so one rejected document does not abandon the rest
+        // of the chunk — a single unparseable row must not cost the import.
+        const written = await TimeEntry.insertMany(chunk, { ordered: false });
+        entriesCreated += written.length;
+      }
+
+      await ImportBatch.updateOne(
+        { _id: batch._id },
+        { $set: { entriesCreated } },
+      );
+
+      void publishSync(
+        workspaceId,
+        { kind: "data.imported", batchId, undone: false },
+        input.originId,
+      );
+
+      return {
+        batchId,
+        entriesCreated,
+        entriesSkipped: parsed.rows.length - rows.length,
+        clientsCreated: created.clientIds.length,
+        projectsCreated: created.projectIds.length,
+        tasksCreated: created.taskIds.length,
+        tagsCreated: created.tagIds.length,
+        totalSec: totals.totalSec,
+        firstStart: totals.firstStart,
+        lastStart: totals.lastStart,
+      };
+    }),
+
+  /** Past imports, newest first. */
+  history: workspaceProcedure
+    .input(workspaceExportSchema.pick({ workspaceId: true }))
+    .query(async ({ ctx }): Promise<ImportBatchSummary[]> => {
+      const docs = await ImportBatch.find({ workspaceId: ctx.workspaceId })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
+      return docs.map(toClientImportBatch);
+    }),
+
+  /**
+   * Roll one import back.
+   *
+   * Entries go unconditionally — they came from the file and nothing else
+   * created them. Catalog documents only go if nothing else has come to use
+   * them since, because a project invented by an import is an ordinary project
+   * the moment somebody tracks against it by hand.
+   */
+  undo: workspaceProcedure
+    .input(importUndoSchema)
+    .mutation(async ({ ctx, input }): Promise<ImportUndoResult> => {
+      const workspaceId = ctx.workspaceId;
+      const batch = await ImportBatch.findOne({
+        _id: assertObjectId(input.batchId),
+        workspaceId,
+      });
+      if (!batch) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const invoiced = await TimeEntry.exists({
+        workspaceId,
+        importId: input.batchId,
+        invoiceId: { $ne: null },
+      });
+      if (invoiced) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message:
+            "Some of these entries are on an invoice. Delete the invoice first, then undo the import.",
+        });
+      }
+
+      const removed = await TimeEntry.deleteMany({
+        workspaceId,
+        importId: input.batchId,
+      });
+
+      const result: ImportUndoResult = {
+        batchId: input.batchId,
+        entriesDeleted: removed.deletedCount ?? 0,
+        clientsDeleted: 0,
+        projectsDeleted: 0,
+        tasksDeleted: 0,
+        tagsDeleted: 0,
+      };
+
+      if (input.includeCatalog) {
+        for (const id of batch.tagIds) {
+          const used = await TimeEntry.exists({ workspaceId, tagIds: id });
+          if (used) continue;
+          await Tag.deleteOne({ _id: id, workspaceId });
+          result.tagsDeleted += 1;
+        }
+        for (const id of batch.taskIds) {
+          const used = await TimeEntry.exists({ workspaceId, taskId: id });
+          if (used) continue;
+          await Task.deleteOne({ _id: id, workspaceId });
+          result.tasksDeleted += 1;
+        }
+        for (const id of batch.projectIds) {
+          const used = await TimeEntry.exists({ workspaceId, projectId: id });
+          if (used) continue;
+          await Task.deleteMany({ workspaceId, projectId: id });
+          await Project.deleteOne({ _id: id, workspaceId });
+          result.projectsDeleted += 1;
+        }
+        for (const id of batch.clientIds) {
+          const used = await Project.exists({ workspaceId, clientId: id });
+          if (used) continue;
+          await Client.deleteOne({ _id: id, workspaceId });
+          result.clientsDeleted += 1;
+        }
+      }
+
+      await ImportBatch.updateOne(
+        { _id: batch._id },
+        { $set: { undoneAt: new Date() } },
+      );
+
+      void publishSync(
+        workspaceId,
+        { kind: "data.imported", batchId: input.batchId, undone: true },
+        input.originId,
+      );
+
+      return result;
+    }),
+
+  /** The whole workspace as one JSON document — backup, and portability. */
+  exportJson: workspaceProcedure
+    .input(workspaceExportSchema)
+    .query(async ({ ctx, input }): Promise<WorkspaceExport> =>
+      buildWorkspaceExport({
+        workspaceId: ctx.workspaceId,
+        from: input.from,
+        to: input.to,
+        authorScope: authorScopeFilter(ctx.visibility),
+      }),
+    ),
+
+  /**
+   * Every entry as one CSV, in the column shape this app's own importer reads
+   * back — so a spreadsheet round-trip is a supported way to bulk-edit
+   * history, not an accident that happens to work.
+   */
+  exportCsv: workspaceProcedure
+    .input(workspaceExportSchema)
+    .query(
+      async ({
+        ctx,
+        input,
+      }): Promise<{ filename: string; csv: string; mimeType: string }> => {
+        const data = await buildWorkspaceExport({
+          workspaceId: ctx.workspaceId,
+          from: input.from,
+          to: input.to,
+          authorScope: authorScopeFilter(ctx.visibility),
+        });
+
+        const rows = data.entries.map((entry) => ({
+          start: entry.start,
+          end: entry.end ?? "",
+          duration: hms(entry.durationSec),
+          description: entry.description,
+          project: entry.projectName ?? "",
+          client: entry.clientName ?? "",
+          task: entry.taskName ?? "",
+          tags: entry.tagNames.join(", "),
+          billable: entry.billable ? "Yes" : "No",
+          rate: entry.hourlyRate ?? "",
+          currency: entry.currency,
+        }));
+
+        return {
+          filename: csvFilename(
+            "entries",
+            input.from ?? "all",
+            input.to ?? "all",
+          ),
+          csv: toCsv(rows, EXPORT_COLUMNS),
+          mimeType: "text/csv",
+        };
+      },
+    ),
+});

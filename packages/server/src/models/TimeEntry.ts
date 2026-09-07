@@ -29,6 +29,8 @@ export interface ITimeEntry extends Document {
   tagIds: string[];
   /** The Invoice this entry was billed on, or null while still billable. */
   invoiceId: string | null;
+  /** The ImportBatch that created this entry, or null when a person did. */
+  importId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,6 +70,8 @@ export type TimeEntryDocLike = {
   runaway?: RunawayDoc | null;
   tagIds: string[];
   invoiceId: string | null;
+  /** Absent on every entry written before imports existed. */
+  importId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -116,7 +120,7 @@ const timeEntrySchema = new Schema<ITimeEntry>(
       type: String,
       // Must stay in lockstep with EntrySource — Mongoose rejects the write
       // silently-looking (a ValidationError deep in a mutation) if it drifts.
-      enum: ["web", "desktop", "mobile", "extension", "api"],
+      enum: ["web", "desktop", "mobile", "extension", "api", "import"],
       required: true,
       default: "web",
     },
@@ -137,6 +141,14 @@ const timeEntrySchema = new Schema<ITimeEntry>(
      * one code path, so they cannot drift: never set one without the other.
      */
     invoiceId: { type: String, default: null },
+    /**
+     * The batch a backfilled entry arrived in, so one bad import can be undone
+     * as a unit. Stored on the entry rather than as a list of ids on the batch
+     * because a year of history is tens of thousands of rows: "delete this
+     * import" must be one indexed query, not a document that grows towards
+     * Mongo's 16MB ceiling.
+     */
+    importId: { type: String, default: null },
   },
   { timestamps: true },
 );
@@ -153,6 +165,16 @@ timeEntrySchema.index({ workspaceId: 1, tagIds: 1 });
 
 /** "What is still un-invoiced here" — the double-billing guard. */
 timeEntrySchema.index({ workspaceId: 1, invoiceId: 1 });
+
+/**
+ * "Everything one import wrote" — undo, and the duplicate check that runs
+ * before a re-import. Partial, because every hand-tracked entry has no batch
+ * and there is no question this index answers about those.
+ */
+timeEntrySchema.index(
+  { workspaceId: 1, importId: 1 },
+  { partialFilterExpression: { importId: { $type: "string" } } },
+);
 
 /**
  * At most ONE running entry (`end === null`) per PERSON, across every
@@ -210,6 +232,7 @@ export function toClientTimeEntry(doc: TimeEntryDocLike): TimeEntryWire {
     // fallbacks are load-bearing, not defensive noise.
     tagIds: doc.tagIds ?? [],
     invoiceId: doc.invoiceId ?? null,
+    importId: doc.importId ?? null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

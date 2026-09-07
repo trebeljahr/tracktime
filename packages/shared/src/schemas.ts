@@ -60,6 +60,7 @@ export const entrySourceSchema = z.enum([
   "mobile",
   "extension",
   "api",
+  "import",
 ]);
 /**
  * Declared from the shared behaviour lists rather than repeating the literals,

@@ -67,16 +67,20 @@ test("hourlyRateSchema takes a non-negative rate", () => {
 
 test("entrySourceSchema names every first-party client, extension included", () => {
   // The extension used to have to claim "api" to get an entry accepted, which
-  // made its rows indistinguishable from third-party callers'. Order is part
-  // of the assertion so a drifting Mongoose enum shows up here first.
+  // made its rows indistinguishable from third-party callers'. Same reason
+  // "import" is its own source: a backfilled entry was never measured by a
+  // timer here. Order is part of the assertion so a drifting Mongoose enum
+  // shows up here first.
   assert.deepEqual(entrySourceSchema.options, [
     "web",
     "desktop",
     "mobile",
     "extension",
     "api",
+    "import",
   ]);
   assert.ok(accepts(entrySourceSchema, "extension"));
+  assert.ok(accepts(entrySourceSchema, "import"));
   assert.ok(!accepts(entrySourceSchema, "watch"));
 });
 

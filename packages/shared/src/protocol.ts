@@ -55,7 +55,15 @@ export type SyncEvent =
    * an invoice carries money and must never be rendered from stale gossip.
    */
   | { kind: "invoice.changed"; id: string }
-  | { kind: "settings.changed" };
+  | { kind: "settings.changed" }
+  /**
+   * A bulk import landed or was undone. One event for the whole batch, not one
+   * per entry: an import writes thousands of rows at once, and a client that
+   * received thousands of `entry.upserted` events would spend the import
+   * re-rendering instead of showing the result. Every cache is stale after
+   * this, so clients invalidate rather than patch.
+   */
+  | { kind: "data.imported"; batchId: string; undone: boolean };
 
 /** Room name every sync event for a given owner is published to. */
 export const userRoomId = (ownerId: string): string => `user:${ownerId}`;

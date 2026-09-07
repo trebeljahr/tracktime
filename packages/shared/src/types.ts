@@ -91,13 +91,19 @@ export type Visibility = {
  * Where a time entry was created. The browser extension is its own source
  * rather than folding into "api", so an entry can be traced back to the thing
  * that actually made it; "api" stays the catch-all for third-party callers.
+ *
+ * "import" is likewise its own source rather than "api": a backfilled entry
+ * was never measured by a timer here, so a report that wants to say "tracked
+ * with tracktime" and an undo that wants to remove only what a file brought in
+ * both need to tell it apart from time this app watched tick by.
  */
 export type EntrySource =
   | "web"
   | "desktop"
   | "mobile"
   | "extension"
-  | "api";
+  | "api"
+  | "import";
 
 /** How durations are rendered ("1:23:45" vs "1.40 h"). */
 export type DurationFormat = "hms" | "decimal";
@@ -301,6 +307,12 @@ export type TimeEntry = {
    * the source of truth and this is its denormalized index.
    */
   invoiceId: string | null;
+  /**
+   * The bulk import that created this entry, or null when a person tracked it
+   * here. Null on every entry written before imports existed, which reads the
+   * same way: nothing to undo as a batch.
+   */
+  importId: string | null;
   createdAt: string;
   updatedAt: string;
 };

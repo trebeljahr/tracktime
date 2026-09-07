@@ -12,6 +12,7 @@ import { reportsRouter } from "./routers/reports.js";
 import { settingsRouter } from "./routers/settings.js";
 import { devicesRouter } from "./routers/devices.js";
 import { invoicesRouter } from "./routers/invoices.js";
+import { dataRouter } from "./routers/data.js";
 
 export const appRouter = router({
   health: healthRouter,
@@ -28,6 +29,7 @@ export const appRouter = router({
   settings: settingsRouter,
   devices: devicesRouter,
   invoices: invoicesRouter,
+  data: dataRouter,
 });
 
 export type AppRouter = typeof appRouter;

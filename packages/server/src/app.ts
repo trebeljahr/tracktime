@@ -4,6 +4,7 @@ import cors from "cors";
 import morgan from "morgan";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { toNodeHandler } from "better-auth/node";
+import { MAX_IMPORT_BYTES } from "@starter/shared";
 import { getAuth } from "./auth/auth.js";
 import { appRouter } from "./trpc/router.js";
 import { createContext } from "./trpc/context.js";
@@ -11,6 +12,13 @@ import { registerNewsletterRoutes } from "./services/newsletter/routes.js";
 import { isDatabaseReady } from "./db/connection.js";
 import { notFoundHandler, errorHandler } from "./middleware/error-handler.js";
 import { env, getTrustedOrigins } from "./config/env.js";
+
+/**
+ * Body ceiling for an import request. {@link MAX_IMPORT_BYTES} of file, plus
+ * headroom for JSON escaping of it (a file full of quotes and newlines grows
+ * on the way into a JSON string) and the rest of the envelope.
+ */
+const IMPORT_BODY_LIMIT = `${Math.ceil((MAX_IMPORT_BYTES * 2) / 1_000_000)}mb`;
 
 export function createApp() {
   const app = express();
@@ -51,6 +59,23 @@ export function createApp() {
   // needs the raw body.
 
   // ── 3. Body parsing (for everything else) ──────────────────────────
+  //
+  // The data-import procedures carry a whole exported file in their body, so
+  // they get their own, much larger limit — mounted FIRST, because whichever
+  // json() parser runs first consumes the body and the later one is a no-op.
+  // Scoped to those procedure names rather than raised globally: 100kb is the
+  // right ceiling for every other endpoint, and a limit that only the import
+  // path relaxes is a limit an unauthenticated caller cannot reach through any
+  // other route. tRPC's batch link puts the procedure names in the path, so a
+  // batched call carrying the import still matches.
+  const importJson = express.json({ limit: IMPORT_BODY_LIMIT });
+  app.use("/api/trpc", (req, res, next) => {
+    if (req.path.includes("data.analyze") || req.path.includes("data.commit")) {
+      return importJson(req, res, next);
+    }
+    return next();
+  });
+
   app.use(express.json({ limit: "100kb" }));
   app.use(express.urlencoded({ extended: true }));
 

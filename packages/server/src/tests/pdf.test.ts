@@ -117,6 +117,7 @@ const entry = (overrides: Partial<DetailedEntry> = {}): DetailedEntry => ({
   timeZone: "Europe/Berlin",
   tagIds: [],
   invoiceId: null,
+  importId: null,
   runaway: null,
   createdAt: "2026-08-03T09:30:00.000Z",
   updatedAt: "2026-08-03T09:30:00.000Z",
