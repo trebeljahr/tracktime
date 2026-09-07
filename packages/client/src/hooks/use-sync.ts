@@ -12,7 +12,9 @@ import {
   type TimeEntry,
   type TimerState,
 } from "@starter/core";
+import { useNativeSession } from "@/hooks/use-native-session";
 import { idleWatcher } from "@/lib/idle-watcher";
+import { getNativeToken } from "@/lib/native-session";
 import { trpc } from "@/lib/trpc";
 
 /**
@@ -133,12 +135,21 @@ const invalidateFor = (utils: Utils, event: SyncEvent): void => {
 export const useSync = (): SyncStatus => {
   const utils = trpc.useUtils();
   const utilsRef = React.useRef(utils);
+  // Keyed on, not merely read: the native token arrives from the Keychain
+  // after mount, so an effect with empty deps opens one tokenless socket, is
+  // refused at the upgrade, and then retries that same refusal forever —
+  // which also means `syncStatus` never reaches "open" and the offline queue
+  // never gets its flush trigger. `ready` is in the key too, so the socket is
+  // not opened before we know whether there is a token at all.
+  const { token: nativeToken, ready: sessionReady } = useNativeSession();
 
   React.useEffect(() => {
     utilsRef.current = utils;
   }, [utils]);
 
   React.useEffect(() => {
+    if (!sessionReady) return;
+
     const url = resolveSyncUrl(
       process.env.NEXT_PUBLIC_API_URL ?? "",
       window.location.origin
@@ -147,6 +158,9 @@ export const useSync = (): SyncStatus => {
 
     const client = createSyncClient({
       url,
+      // A getter, so a reconnect re-reads it rather than re-offering the
+      // token this closure was created with.
+      token: () => getNativeToken() ?? undefined,
       onStatus: setStatus,
       onEvent: (event, originId) => {
         // Our own echo — the mutation's optimistic update already landed.
@@ -164,7 +178,7 @@ export const useSync = (): SyncStatus => {
     return () => {
       client.close();
     };
-  }, []);
+  }, [sessionReady, nativeToken]);
 
   return useSyncStatus();
 };

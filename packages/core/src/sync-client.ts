@@ -15,8 +15,13 @@ export type SyncClientOptions = {
    * better-auth session token, for clients with no cookie (Raycast, the
    * extensions, the native shells). Obtain it from `signInWithPassword()` or
    * the device flow — there is no separate credential to mint.
+   *
+   * A getter is read again on every `open()`, which is what a reconnect
+   * needs: a client that captured the token once keeps offering a dead one
+   * after a sign-out/sign-in within the same launch, and never picks up a
+   * token that arrived from secure storage after the socket was created.
    */
-  token?: string;
+  token?: string | (() => string | undefined);
   /** Injectable for Node tests and non-DOM hosts. */
   WebSocketImpl?: typeof WebSocket;
   minBackoffMs?: number;
@@ -37,8 +42,14 @@ const BEARER_SUBPROTOCOL_PREFIX = "bearer.";
  * rides in the subprotocol instead of the query string — a URL is the one
  * place it could end up in an access log or a referrer.
  */
-const subprotocols = (token?: string): string[] | undefined =>
-  token ? [`${BEARER_SUBPROTOCOL_PREFIX}${encodeURIComponent(token)}`] : undefined;
+const subprotocols = (
+  token?: string | (() => string | undefined),
+): string[] | undefined => {
+  const value = typeof token === "function" ? token() : token;
+  return value
+    ? [`${BEARER_SUBPROTOCOL_PREFIX}${encodeURIComponent(value)}`]
+    : undefined;
+};
 
 /**
  * WebSocket subscription to the signed-in user's sync room.
