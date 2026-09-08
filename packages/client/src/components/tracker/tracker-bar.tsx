@@ -7,6 +7,7 @@ import {
   Play,
   Plus,
   Square,
+  UserRoundX,
   WifiOff,
 } from "lucide-react";
 import type { EntryFields } from "@starter/core";
@@ -43,7 +44,7 @@ export function TrackerBar(): React.JSX.Element {
   useRunawayGuard(mutations);
   // The shell owns the queue, so it keeps draining on Reports and Settings
   // too — see providers/offline-queue-provider.tsx.
-  const { pending, online, authBlocked } = useOfflineQueueState();
+  const { pending, foreign, online, authBlocked } = useOfflineQueueState();
   const projects = trpc.projects.list.useQuery({});
 
   const [manualOpen, setManualOpen] = React.useState(false);
@@ -357,7 +358,7 @@ export function TrackerBar(): React.JSX.Element {
         </div>
       </div>
 
-      {pending > 0 || !online || clockSkewed ? (
+      {pending > 0 || foreign > 0 || !online || clockSkewed ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {/*
             Nothing was thrown away — the queue stopped rather than replaying
@@ -406,6 +407,25 @@ export function TrackerBar(): React.JSX.Element {
             >
               <CloudOff className="size-3" />
               {pending} change{pending === 1 ? "" : "s"} pending
+            </Badge>
+          ) : null}
+
+          {/*
+            Somebody else's unsynced time is sitting on this device. It is
+            deliberately not replayed — it would land in the wrong workspace —
+            and just as deliberately not deleted. Neither of those is something
+            to do silently, so the count is on screen with the reason.
+          */}
+          {foreign > 0 ? (
+            <Badge
+              variant="outline"
+              className="gap-1.5"
+              data-testid="offline-foreign"
+              data-foreign={foreign}
+              title="Queued by another account on this device. They are kept, and will sync when that account signs in here."
+            >
+              <UserRoundX className="size-3" />
+              {foreign} change{foreign === 1 ? "" : "s"} from another account
             </Badge>
           ) : null}
         </div>

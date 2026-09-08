@@ -20,6 +20,7 @@ import {
   isNetworkError,
   isOnline,
   refreshPendingCount,
+  setOfflineQueueOwner,
   subscribePending,
   type OfflineMutation,
   type OfflineStartInput,
@@ -39,6 +40,9 @@ const startInput: OfflineStartInput = {
 describe("the client queue", () => {
   beforeEach(async () => {
     await clearOfflineQueue();
+    // A flush replays only the signed-in account's rows, so these need an
+    // account. Ownership itself is covered by offline-owner.test.ts.
+    await setOfflineQueueOwner("user-1");
   });
 
   it("tracks the pending count as mutations are queued and flushed", async () => {
@@ -60,7 +64,7 @@ describe("the client queue", () => {
       "entries.stop",
     ]);
     expect(replayed[0].input).toEqual(startInput);
-    expect(result).toEqual({ flushed: 2, remaining: 0 });
+    expect(result).toEqual({ flushed: 2, skipped: 0, remaining: 0 });
     expect(getPendingCount()).toBe(0);
   });
 

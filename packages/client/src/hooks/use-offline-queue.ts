@@ -7,15 +7,19 @@ import { OFFLINE_QUEUED_MUTATION } from "@/lib/query-client";
 import { trpc } from "@/lib/trpc";
 import {
   flushOfflineQueue,
+  getForeignCount,
   getPendingCount,
+  getServerForeignCount,
   getServerPendingCount,
   isAuthError,
   isNetworkError,
   isOnline,
   refreshPendingCount,
+  setOfflineQueueOwner,
   subscribePending,
   type OfflineMutation,
 } from "@/lib/offline";
+import { useAuth } from "@/providers/auth-provider";
 import { useSyncStatus } from "@/hooks/use-sync";
 import {
   replayOfflineMutation,
@@ -30,8 +34,15 @@ import {
 } from "@/mobile/network";
 
 export type OfflineQueueState = {
-  /** Number of mutations waiting to reach the server. */
+  /** Number of this account's mutations waiting to reach the server. */
   pending: number;
+  /**
+   * Mutations queued by a DIFFERENT account on this device — someone who
+   * signed out (or was signed out) before their queue drained. They are kept,
+   * never replayed under this session, and surfaced so the device does not
+   * quietly sit on somebody's unsynced time.
+   */
+  foreign: number;
   online: boolean;
   isFlushing: boolean;
   /**
@@ -64,11 +75,17 @@ const getOnline = (): boolean => isOnline();
 export const useOfflineQueue = (): OfflineQueueState => {
   const utils = trpc.useUtils();
   const syncStatus = useSyncStatus();
+  const userId = useAuth().user?.id ?? null;
 
   const pending = React.useSyncExternalStore(
     subscribePending,
     getPendingCount,
     getServerPendingCount
+  );
+  const foreign = React.useSyncExternalStore(
+    subscribePending,
+    getForeignCount,
+    getServerForeignCount
   );
   const online = React.useSyncExternalStore(
     subscribeNetwork,
@@ -262,5 +279,33 @@ export const useOfflineQueue = (): OfflineQueueState => {
   // mutation clearing the last row, a sign-out that resets it) would leave the
   // flag stuck true and the tracker bar accusing a signed-in user. Nothing is
   // blocked when nothing is queued, so derive it rather than tracking it.
-  return { pending, online, isFlushing, authBlocked: authBlocked && pending > 0, flush };
+  /*
+   * Tell the queue whose rows it is holding, and flush once it knows.
+   *
+   * Until an account is resolved the flush filter replays nothing at all —
+   * which is the safe default, and also means the socket-open and network-back
+   * flushes above can fire before `useSession()` has answered (routinely, on a
+   * cold native launch waiting on the Keychain) and do nothing. So this effect
+   * owns the flush that follows a sign-in, rather than relying on another
+   * event to come along afterwards.
+   */
+  React.useEffect(() => {
+    let cancelled = false;
+    void setOfflineQueueOwner(userId).then(() => {
+      if (cancelled || userId === null) return;
+      void flushRef.current();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  return {
+    pending,
+    foreign,
+    online,
+    isFlushing,
+    authBlocked: authBlocked && pending > 0,
+    flush,
+  };
 };

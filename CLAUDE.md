@@ -543,6 +543,17 @@ the very thing being replaced.
   (`isAuthError` in `lib/offline.ts`). Dropping them is the default for a server
   refusal and is right for a validation error; it is never right for "we do not
   know who you are".
+- **Because the rows survive a sign-out, every row records who queued it.**
+  `QueuedMutation.owner` is the user id, stamped by `enqueueOffline` and checked
+  by the flush filter, so the next account to sign in on the device cannot
+  replay the previous one's starts and stops into its own workspace. The field
+  is optional and must stay so — `decodeOfflineMutation` reads rows written
+  before it existed, and the first account to sign in adopts them
+  (`adoptUnowned`). A row belonging to somebody else is neither replayed nor
+  deleted: the tracker bar counts it (`foreign`) and says whose it is. The
+  browser extension solves the same problem by **clearing** its queue in
+  `forgetSession()`, which is the right trade there and the wrong one here —
+  these rows are the phone's only copy of the time.
 
 ### Clients without a cookie jar (Raycast, CLI, extensions)
 

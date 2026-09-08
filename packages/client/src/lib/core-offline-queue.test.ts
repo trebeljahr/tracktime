@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   createOfflineQueue,
+  isReplayableBy,
   memoryStorage,
   type KeyValueStorage,
   type QueuedMutation,
@@ -105,7 +106,7 @@ describe("createOfflineQueue", () => {
       });
 
       expect(seen).toEqual(["a", "b", "c"]);
-      expect(result).toEqual({ flushed: 3, remaining: 0 });
+      expect(result).toEqual({ flushed: 3, skipped: 0, remaining: 0 });
       expect(await offline.size()).toBe(0);
     });
 
@@ -147,15 +148,203 @@ describe("createOfflineQueue", () => {
       expect(await offline.size()).toBe(2);
 
       const second = await offline.flush(async () => {});
-      expect(second).toEqual({ flushed: 2, remaining: 0 });
+      expect(second).toEqual({ flushed: 2, skipped: 0, remaining: 0 });
       expect(await offline.size()).toBe(0);
     });
 
     it("reports an empty flush", async () => {
       expect(await queue().flush(async () => {})).toEqual({
         flushed: 0,
+        skipped: 0,
         remaining: 0,
       });
+    });
+  });
+
+  /*
+   * The queue outlives a sign-out on purpose — an auth error stops the flush
+   * and keeps the rows rather than deleting time the server has never seen —
+   * so a row has to say whose it is. Without that, the next account to sign in
+   * on this device replays the previous account's work into its workspace.
+   */
+  describe("ownership", () => {
+    it("stamps the owner it was given and leaves it off when given none", async () => {
+      const offline = queue();
+      const owned = await offline.enqueue("a", 1, "user-a");
+      const legacy = await offline.enqueue("b", 2);
+
+      expect(owned.owner).toBe("user-a");
+      expect(legacy.owner).toBeUndefined();
+
+      const rows = await offline.list();
+      expect(rows.map((row) => row.owner)).toEqual(["user-a", undefined]);
+    });
+
+    it("decides replayability without inventing an owner", () => {
+      expect(isReplayableBy({ owner: "user-a" }, "user-a")).toBe(true);
+      expect(isReplayableBy({ owner: "user-a" }, "user-b")).toBe(false);
+      // Legacy rows belong to whoever claims them first.
+      expect(isReplayableBy({ owner: undefined }, "user-b")).toBe(true);
+      // Signed out, nothing is replayable — not even an unowned row.
+      expect(isReplayableBy({ owner: undefined }, null)).toBe(false);
+      expect(isReplayableBy({ owner: "user-a" }, null)).toBe(false);
+    });
+
+    it("does not replay another account's rows, and does not drop them", async () => {
+      const offline = queue();
+      await offline.enqueue("a-start", 1, "user-a");
+      await offline.enqueue("a-stop", 2, "user-a");
+
+      const seen: string[] = [];
+      const result = await offline.flush(
+        async (mutation) => {
+          seen.push(mutation.op);
+        },
+        { filter: (row) => isReplayableBy(row, "user-b") }
+      );
+
+      expect(seen).toEqual([]);
+      expect(result).toEqual({ flushed: 0, skipped: 2, remaining: 2 });
+      expect((await offline.list()).map((m) => m.op)).toEqual([
+        "a-start",
+        "a-stop",
+      ]);
+    });
+
+    it("replays an account's own rows", async () => {
+      const offline = queue();
+      await offline.enqueue("a-start", 1, "user-a");
+      await offline.enqueue("a-stop", 2, "user-a");
+
+      const seen: string[] = [];
+      const result = await offline.flush(
+        async (mutation) => {
+          seen.push(mutation.op);
+        },
+        { filter: (row) => isReplayableBy(row, "user-a") }
+      );
+
+      expect(seen).toEqual(["a-start", "a-stop"]);
+      expect(result).toEqual({ flushed: 2, skipped: 0, remaining: 0 });
+      expect(await offline.size()).toBe(0);
+    });
+
+    it("keeps the other account's rows in order while draining its own", async () => {
+      const offline = queue();
+      await offline.enqueue("a-1", 1, "user-a");
+      await offline.enqueue("b-1", 2, "user-b");
+      await offline.enqueue("a-2", 3, "user-a");
+      await offline.enqueue("b-2", 4, "user-b");
+
+      const seen: string[] = [];
+      const result = await offline.flush(
+        async (mutation) => {
+          seen.push(mutation.op);
+        },
+        { filter: (row) => isReplayableBy(row, "user-b") }
+      );
+
+      expect(seen).toEqual(["b-1", "b-2"]);
+      expect(result).toEqual({ flushed: 2, skipped: 2, remaining: 2 });
+      expect((await offline.list()).map((m) => m.op)).toEqual(["a-1", "a-2"]);
+    });
+
+    it("writes skipped rows back ahead of the remainder when a flush fails", async () => {
+      const offline = queue();
+      await offline.enqueue("a-1", 1, "user-a");
+      await offline.enqueue("b-1", 2, "user-b");
+      await offline.enqueue("b-2", 3, "user-b");
+
+      const result = await offline.flush(
+        async (mutation) => {
+          if (mutation.op === "b-2") throw new Error("still offline");
+        },
+        { filter: (row) => isReplayableBy(row, "user-b") }
+      );
+
+      expect(result.flushed).toBe(1);
+      expect(result.skipped).toBe(1);
+      expect(result.remaining).toBe(2);
+      expect(result.failed?.op).toBe("b-2");
+      expect((await offline.list()).map((m) => m.op)).toEqual(["a-1", "b-2"]);
+    });
+
+    it("replays a legacy row for whoever is signed in", async () => {
+      const offline = queue();
+      // A row written by a build that predates ownership stamping.
+      const legacy: QueuedMutation = {
+        id: "1",
+        op: "entries.start",
+        payload: { input: {} },
+        createdAt: new Date().toISOString(),
+      };
+      await storage.setItem(KEY, JSON.stringify([legacy]));
+
+      const seen: string[] = [];
+      await offline.flush(
+        async (mutation) => {
+          seen.push(mutation.op);
+        },
+        { filter: (row) => isReplayableBy(row, "user-b") }
+      );
+
+      expect(seen).toEqual(["entries.start"]);
+    });
+
+    it("lets the first account to claim the queue adopt the legacy rows", async () => {
+      const offline = queue();
+      await storage.setItem(
+        KEY,
+        JSON.stringify([
+          { id: "1", op: "a", payload: null, createdAt: "2026-08-21T09:00:00.000Z" },
+          {
+            id: "2",
+            op: "b",
+            payload: null,
+            createdAt: "2026-08-21T09:01:00.000Z",
+            owner: "user-a",
+          },
+        ])
+      );
+
+      expect(await offline.adoptUnowned("user-a")).toBe(1);
+      expect((await offline.list()).map((row) => row.owner)).toEqual([
+        "user-a",
+        "user-a",
+      ]);
+
+      // Adopted rows are then invisible to the next account, which is the
+      // point: after this, user-b can never replay them.
+      const seen: string[] = [];
+      await offline.flush(
+        async (mutation) => {
+          seen.push(mutation.op);
+        },
+        { filter: (row) => isReplayableBy(row, "user-b") }
+      );
+      expect(seen).toEqual([]);
+      expect(await offline.size()).toBe(2);
+    });
+
+    it("adopts nothing when every row already has an owner", async () => {
+      const offline = queue();
+      await offline.enqueue("a", 1, "user-a");
+      expect(await offline.adoptUnowned("user-b")).toBe(0);
+      expect((await offline.list())[0].owner).toBe("user-a");
+    });
+
+    it("treats a non-string owner as no owner at all", async () => {
+      await storage.setItem(
+        KEY,
+        JSON.stringify([
+          { id: "1", op: "a", payload: null, createdAt: "x", owner: 7 },
+          { id: "2", op: "b", payload: null, createdAt: "x", owner: "" },
+        ])
+      );
+      expect((await queue().list()).map((row) => row.owner)).toEqual([
+        undefined,
+        undefined,
+      ]);
     });
   });
 

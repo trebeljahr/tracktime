@@ -18,6 +18,8 @@
 import {
   createOfflineQueue,
   decodeOfflineMutation,
+  isForeignTo,
+  isReplayableBy,
   memoryStorage,
   OFFLINE_QUEUE_STORAGE_KEY,
   webStorage,
@@ -33,6 +35,8 @@ import {
 export {
   createTempId,
   decodeOfflineMutation,
+  isForeignTo,
+  isReplayableBy,
   isTempId,
   OFFLINE_QUEUE_STORAGE_KEY,
   TEMP_ID_PREFIX,
@@ -105,16 +109,69 @@ export const __resetOfflineQueueForTests = (): void => {
   queue = null;
 };
 
+// ── who queued what ──────────────────────────────────────────────────
+
+/*
+ * The account this device is currently signed in as, or null while nobody is
+ * (or while the session is still resolving — on native the Keychain answers
+ * after mount).
+ *
+ * Every row is stamped with it on the way in and checked against it on the way
+ * out, because the queue outlives a sign-out on purpose: `isAuthError` in
+ * `hooks/use-offline-queue.ts` stops the flush and KEEPS the rows rather than
+ * deleting time the server has never seen. Without a stamp, the next account
+ * to sign in on this device replays the previous account's starts and stops
+ * into its own workspace. The browser extension solves the same problem the
+ * other way — `forgetSession()` clears its queue — which is not available
+ * here: the rows we would be destroying are the ones the mobile plan exists to
+ * protect.
+ *
+ * Rows belonging to somebody else are neither replayed nor dropped. They are
+ * counted separately and said out loud (see `foreign` in the queue state), so
+ * a device with another account's unsynced time shows that rather than hiding
+ * it or silently binning it.
+ */
+let owner: string | null = null;
+
+export const getOfflineQueueOwner = (): string | null => owner;
+
+/**
+ * Point the queue at an account. Returns how many previously unowned rows this
+ * account adopted, so a caller can flush straight away when there is something
+ * new to send.
+ *
+ * Adoption is for rows written before ownership stamping existed: the first
+ * account to sign in after the upgrade claims them. They are its own in every
+ * realistic case — the alternative is stranding a day of tracked time forever,
+ * or leaving it for whoever signs in two accounts from now.
+ */
+export const setOfflineQueueOwner = async (
+  next: string | null
+): Promise<number> => {
+  if (next === owner) return 0;
+  owner = next;
+  const adopted = next === null ? 0 : await getOfflineQueue().adoptUnowned(next);
+  await refreshPendingCount();
+  return adopted;
+};
+
+/** Test seam. */
+export const __resetOfflineQueueOwnerForTests = (): void => {
+  owner = null;
+};
+
 // ── reactive pending count ───────────────────────────────────────────
 
 type Listener = () => void;
 
 let pending = 0;
+let foreign = 0;
 const listeners = new Set<Listener>();
 
-const setPending = (next: number): void => {
-  if (next === pending) return;
-  pending = next;
+const setCounts = (nextPending: number, nextForeign: number): void => {
+  if (nextPending === pending && nextForeign === foreign) return;
+  pending = nextPending;
+  foreign = nextForeign;
   for (const listener of listeners) listener();
 };
 
@@ -125,15 +182,36 @@ export const subscribePending = (listener: Listener): (() => void) => {
   };
 };
 
+/** Rows this account can replay. */
 export const getPendingCount = (): number => pending;
+
+/**
+ * Rows queued by a different account. They stay in the queue — that is
+ * somebody's tracked time — and are never replayed under this session.
+ */
+export const getForeignCount = (): number => foreign;
 
 /** Server snapshot for `useSyncExternalStore` — nothing is ever queued on SSR. */
 export const getServerPendingCount = (): number => 0;
+export const getServerForeignCount = (): number => 0;
 
+/**
+ * Recount, and return what this account can send.
+ *
+ * With no owner resolved yet nothing is called foreign: "we do not know who is
+ * signed in" must not render as "somebody else queued this". The flush filter
+ * is separate and stricter — it replays nothing at all until an account is
+ * known.
+ */
 export const refreshPendingCount = async (): Promise<number> => {
-  const size = await getOfflineQueue().size();
-  setPending(size);
-  return size;
+  const rows = await getOfflineQueue().list();
+  if (owner === null) {
+    setCounts(rows.length, 0);
+    return rows.length;
+  }
+  const theirs = rows.filter((row) => isForeignTo(row, owner)).length;
+  setCounts(rows.length - theirs, theirs);
+  return rows.length - theirs;
 };
 
 /** Append a mutation that could not reach the server. */
@@ -143,7 +221,10 @@ export const enqueueOffline = async <K extends OfflineOp>(
   tempId?: string
 ): Promise<void> => {
   const payload: StoredOfflinePayload = tempId ? { input, tempId } : { input };
-  await getOfflineQueue().enqueue(op, payload);
+  // `owner ?? undefined` writes no stamp at all when the session has not
+  // resolved. That row is then adopted by the first account to claim the
+  // queue, which is the same rule legacy rows follow.
+  await getOfflineQueue().enqueue(op, payload, owner ?? undefined);
   await refreshPendingCount();
 };
 
@@ -157,6 +238,11 @@ export const cancelQueuedForTemp = async (tempId: string): Promise<boolean> => {
   let removed = false;
 
   for (const row of rows) {
+    // Never reach into another account's rows, even to cancel: the temp id
+    // being deleted belongs to an entry in THIS session's cache. An unowned
+    // row is fair game — it is one this session queued before the account
+    // resolved, or one waiting to be adopted.
+    if (isForeignTo(row, owner)) continue;
     const decoded = decodeOfflineMutation(row);
     if (decoded?.tempId !== tempId) continue;
     await offlineQueue.remove(row.id);
@@ -173,6 +259,10 @@ export const cancelQueuedForTemp = async (tempId: string): Promise<boolean> => {
  * pure op contract and several clients pin its exact shape. The replay needs
  * the age because a queue that now survives an OS kill can hold a row for
  * days, and some of them stop being safe to replay blind.
+ *
+ * The filter is the cross-account guard. A row the current account does not
+ * own is skipped rather than run, and skipped rows keep their place in the
+ * queue — `createOfflineQueue.flush` writes them back untouched.
  */
 export const flushOfflineQueue = async (
   runner: (
@@ -180,12 +270,15 @@ export const flushOfflineQueue = async (
     meta: { createdAt: string }
   ) => Promise<void>
 ): Promise<FlushResult> => {
-  const result = await getOfflineQueue().flush(async (row) => {
-    const decoded = decodeOfflineMutation(row);
-    // A row we can no longer read is dropped by resolving successfully.
-    if (decoded === null) return;
-    await runner(decoded, { createdAt: row.createdAt });
-  });
+  const result = await getOfflineQueue().flush(
+    async (row) => {
+      const decoded = decodeOfflineMutation(row);
+      // A row we can no longer read is dropped by resolving successfully.
+      if (decoded === null) return;
+      await runner(decoded, { createdAt: row.createdAt });
+    },
+    { filter: (row) => isReplayableBy(row, owner) }
+  );
   await refreshPendingCount();
   return result;
 };
