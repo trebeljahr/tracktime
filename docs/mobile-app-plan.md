@@ -84,7 +84,7 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
 
 **Corrections found while implementing stage 2 — native chrome:**
 
-- The pre-paint `body.cap` script goes at the **top of `<body>`**, not into the
+- The pre-paint `html.cap` script goes at the **top of `<body>`**, not into the
   existing `THEME_SCRIPT` in `<head>`: `document.body` does not exist yet while
   the head is being parsed. `<body>` also carries `suppressHydrationWarning`,
   since React would otherwise complain about the class it did not render.
@@ -106,7 +106,7 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
 - `entry-list.tsx`'s `STICKY_TOP` had to move to
   `var(--app-header-offset, 3.5rem)`, because it hardcoded the header's 3.5rem
   and the tracker bar's `top-14` and the header's height both change under the
-  status-bar inset. The variable is set only under `body.cap`, so the fallback
+  status-bar inset. The variable is set only under `html.cap`, so the fallback
   makes the web string identical to what it was.
 - The Playwright phone project is **`devices["Pixel 5"]` (chromium)**, per the
   critics, and both projects are scoped (`testMatch` / `testIgnore`) so the
@@ -114,7 +114,7 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
 - Stage 2's own spec had to be rewritten once: `getComputedStyle().top` returns
   a used px value not `"50%"`, and the tracker composer's description carries
   an explicit `text-base`, so it is 16px on web too and the naive font-size
-  assertion passed whether or not the rule leaked. Rewriting `body.cap` to
+  assertion passed whether or not the rule leaked. Rewriting `html.cap` to
   `body` in native.css now fails 4 of the 7.
 - **`@capacitor/keyboard` needed `resize: "native"`.** `"body"` leaves every
   `position: fixed` element — the sticky header, the tracker bar, stage 3's tab
@@ -154,7 +154,7 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
   module the bundler reaches first — and `isActiveRoute` is a `const`, so the
   losing order is a TDZ error, not a warning. `app-shell.tsx` re-exports both.
 - The bar is hidden with Tailwind's `hidden` utility and revealed by a single
-  `body.cap` rule, so `native.css` stays entirely `body.cap`-scoped — the file's
+  `html.cap` rule, so `native.css` stays entirely `html.cap`-scoped — the file's
   one rule. `--app-tab-bar-offset` (3.5rem + the bottom inset) is the single
   number the bar's height and `app-main`'s padding both read.
 - Exactly one tab is ever lit: while the drawer is open it is More, even
@@ -296,7 +296,7 @@ and the earlier note is the record of what was believed at the time.
   `suppressHydrationWarning` onto `<body>` — an attribute that does not scope
   itself to the one mismatch that needed it and silences every body-level
   mismatch the web app will ever have. `<html>` already carried the attribute
-  for the theme script. Every `body.cap` selector in `native.css` is now
+  for the theme script. Every `html.cap` selector in `native.css` is now
   `html.cap`. The scripts moved to `app/pre-paint.ts` so a test can reach them:
   a layout module may only export what Next recognises.
 - **`viewport-fit=cover` reaches every host, and the installed PWA is the one
@@ -337,11 +337,11 @@ and the earlier note is the record of what was believed at the time.
 
 ## Summary
 
-Ship the phone app as the existing Next.js client inside a Capacitor shell — one composition, not a second UI. Everything mobile is either scoped to `body.cap` (a class `packages/client/src/mobile/bridge.ts:30` already sets and nothing styles), behind the synchronous `isNative()` check in that same file, or a correctness fix the web build also wants. No new screens for reports, timesheet, invoices or catalog; they stay honestly cramped one level down. Cookie auth is abandoned for native (a `capacitor://localhost` document is cross-site to the API and loses to WKWebView ITP regardless of SameSite) in favour of the bearer path `packages/core/src/session-auth.ts` was written for — which needs zero server code, only `TRUSTED_ORIGINS`. Stage 1 ends with a signed-in app on the iOS Simulator starting and stopping a real timer against `pnpm run dev`, verified against a real `pnpm build:mobile` bundle rather than live reload, because under live reload the document origin is `http://localhost:7130`, which is same-site with a localhost API and would make cookie auth misleadingly appear to work. Later stages add native chrome, a three-tab bar, resume/offline durability, calendar touch de-hostility, and two zero-custom-native wins (haptics, a runaway-timer local notification). No Swift, no Kotlin, no widget extension, no second HTTP client — the judges called all of that the fatal path.
+Ship the phone app as the existing Next.js client inside a Capacitor shell — one composition, not a second UI. Everything mobile is either scoped to `html.cap` (a class `packages/client/src/mobile/bridge.ts:30` already sets and nothing styles), behind the synchronous `isNative()` check in that same file, or a correctness fix the web build also wants. No new screens for reports, timesheet, invoices or catalog; they stay honestly cramped one level down. Cookie auth is abandoned for native (a `capacitor://localhost` document is cross-site to the API and loses to WKWebView ITP regardless of SameSite) in favour of the bearer path `packages/core/src/session-auth.ts` was written for — which needs zero server code, only `TRUSTED_ORIGINS`. Stage 1 ends with a signed-in app on the iOS Simulator starting and stopping a real timer against `pnpm run dev`, verified against a real `pnpm build:mobile` bundle rather than live reload, because under live reload the document origin is `http://localhost:7130`, which is same-site with a localhost API and would make cookie auth misleadingly appear to work. Later stages add native chrome, a three-tab bar, resume/offline durability, calendar touch de-hostility, and two zero-custom-native wins (haptics, a runaway-timer local notification). No Swift, no Kotlin, no widget extension, no second HTTP client — the judges called all of that the fatal path.
 
 ## Decisions
 
-### One UI, gated by `body.cap` and `isNative()` — no second mobile composition, no build-time shell split, no mobile-only routes.
+### One UI, gated by `html.cap` and `isNative()` — no second mobile composition, no build-time shell split, no mobile-only routes.
 
 **Why:** `bridge.ts:30-31` already writes `document.body.classList.add("cap")` and `data-platform`, and a repo-wide grep shows nothing styles either — a native-only CSS seam is installed and unused. `isNative()` (bridge.ts:78-82) is a synchronous `window.Capacitor` read, so it needs no async state and produces no flash. Unbuilt UI cannot drift, cannot regress, and costs nothing to maintain in a repo where one person already keeps a web app, a browser extension, Raycast and Electron in step over `@starter/core`.
 
@@ -401,13 +401,13 @@ Ship the phone app as the existing Next.js client inside a Capacitor shell — o
 
 **Rejected:** Long-press-to-drag, pinch-to-zoom, a phone-only day-list view. All better; all gesture work, which is where mobile projects lose their schedule, and none of it is start/stop/edit.
 
-### Add `.cap-touch` (44pt minimum, scoped under `body.cap`) to the six controls the phone's core loop touches. Do not change `packages/client/src/components/ui/button.tsx` or `input.tsx`.
+### Add `.cap-touch` (44pt minimum, scoped under `html.cap`) to the six controls the phone's core loop touches. Do not change `packages/client/src/components/ui/button.tsx` or `input.tsx`.
 
-**Why:** Those primitives back every desktop screen; raising `h-9` to `h-11` re-lays-out the whole web app to fix a phone. A class with no rule outside `body.cap` is inert on web by construction rather than by test.
+**Why:** Those primitives back every desktop screen; raising `h-9` to `h-11` re-lays-out the whole web app to fix a phone. A class with no rule outside `html.cap` is inert on web by construction rather than by test.
 
 **Rejected:** Raising the base sizes; and a global `[data-shell="mobile"] button { min-height: 44px }` sweep, which silently relayouts the calendar toolbar, the catalog tables and the timesheet unpin button with a screenshot test as the only detector.
 
-### 16px `font-size` on inputs under `body.cap`, not `maximumScale: 1` / `userScalable: false`.
+### 16px `font-size` on inputs under `html.cap`, not `maximumScale: 1` / `userScalable: false`.
 
 **Why:** iOS auto-zooms on focus for any field under 16px, and every `Input` is `text-sm` (ui/input.tsx:15). Pinning maximum-scale fixes it and is an accessibility regression that would apply to the web build too.
 
@@ -463,9 +463,9 @@ Acceptance (the point of this stage): with `pnpm run dev` up (API on 5159), run 
 
 **Work**
 
-Add `viewportFit: "cover"` and `interactiveWidget: "resizes-content"` to the `viewport` export in app/layout.tsx (currently only `themeColor`). `viewport-fit=cover` is the gating change for everything else here — without it `env(safe-area-inset-*)` resolves to 0 in WKWebView and no inset CSS can work at all. In the same file, extend the existing pre-paint THEME_SCRIPT to add `cap` and `data-platform` to `document.body` when `window.Capacitor` is present: `bridge.ts` sets them only after `Promise.all([import("@capacitor/core"), …])` resolves (line 30, after the await), so today every `body.cap` rule would apply a frame or two late and produce a visible reflow under the notch on every launch. Keep the bridge's own writes — they are idempotent.
+Add `viewportFit: "cover"` and `interactiveWidget: "resizes-content"` to the `viewport` export in app/layout.tsx (currently only `themeColor`). `viewport-fit=cover` is the gating change for everything else here — without it `env(safe-area-inset-*)` resolves to 0 in WKWebView and no inset CSS can work at all. In the same file, extend the existing pre-paint THEME_SCRIPT to add `cap` and `data-platform` to `document.body` when `window.Capacitor` is present: `bridge.ts` sets them only after `Promise.all([import("@capacitor/core"), …])` resolves (line 30, after the await), so today every `html.cap` rule would apply a frame or two late and produce a visible reflow under the notch on every launch. Keep the bridge's own writes — they are idempotent.
 
-New `packages/client/src/styles/native.css`, imported by one line from globals.css, every rule scoped under `body.cap`: safe-area padding on the sticky header (`app-shell.tsx:357`) and the sticky tracker bar (`tracker-bar.tsx:201`); `input, textarea, select { font-size: 16px }`; `-webkit-tap-highlight-color: transparent`; `-webkit-text-size-adjust: 100%`; `overscroll-behavior-y: none`; `.cap-touch { min-height: 2.75rem; min-width: 2.75rem }`; a two-row tracker composer keyed off a new `data-testid="tracker-composer"` on the wrapping flex row at tracker-bar.tsx:217 (`[data-testid="tracker-description"] { flex-basis: 100% }` plus a taller, wider Start); and a rule anchoring `DialogContent` to the top under the safe area instead of `translate(-50%,-50%)`, so the keyboard shrinks the visual viewport and the panel's existing `overflow-y-auto` scrolls the focused field into view.
+New `packages/client/src/styles/native.css`, imported by one line from globals.css, every rule scoped under `html.cap`: safe-area padding on the sticky header (`app-shell.tsx:357`) and the sticky tracker bar (`tracker-bar.tsx:201`); `input, textarea, select { font-size: 16px }`; `-webkit-tap-highlight-color: transparent`; `-webkit-text-size-adjust: 100%`; `overscroll-behavior-y: none`; `.cap-touch { min-height: 2.75rem; min-width: 2.75rem }`; a two-row tracker composer keyed off a new `data-testid="tracker-composer"` on the wrapping flex row at tracker-bar.tsx:217 (`[data-testid="tracker-description"] { flex-basis: 100% }` plus a taller, wider Start); and a rule anchoring `DialogContent` to the top under the safe area instead of `translate(-50%,-50%)`, so the keyboard shrinks the visual viewport and the panel's existing `overflow-y-auto` scrolls the focused field into view.
 
 `autoFocus` at tracker-bar.tsx:220 becomes `autoFocus={!isNative()}` — today the software keyboard fights to open every time /track mounts, covering half the phone before the user has done anything. Add `cap-touch` to the four `size-8` action buttons in entry-row.tsx (billable, stop, continue, overflow — lines 298/398/410/425) and to the billable and manual-entry icon buttons in tracker-bar.tsx. Leave the `--tracker-bar-height` ResizeObserver (tracker-bar.tsx:70-85) and its consumer `entry-list.tsx:36` untouched — that mechanism already makes the sticky day headings follow the bar's wrap.
 
@@ -486,13 +486,13 @@ Device: rebuild and run on a notched Simulator device. Screenshot the header cle
 
 **Work**
 
-New `components/mobile-tab-bar.tsx`: fixed bottom bar, three 56px cells — Track (`/track`), Reports (`/reports/summary`), More. Active state reuses the already-exported `isActiveRoute` from app-shell.tsx:97. More calls the shell's existing `setMobileOpen(true)`, which renders the existing `SidebarNav` in the existing drawer, so no new navigation logic and no second nav data source; `NAV_SECTIONS` (app-shell.tsx:66-94) is untouched and a new web screen appears on the phone for free. Render the bar unconditionally from `AppShell` and reveal it with a `body.cap`-scoped CSS rule rather than returning null on `!isNative()` — under `output: "export"` the markup is prerendered in Node where `window.Capacitor` cannot exist, so a runtime branch that changes the tree disagrees with the served HTML on native. Add `padding-bottom: calc(4rem + env(safe-area-inset-bottom))` on `[data-testid="app-main"]` in native.css so the last entry row is never trapped behind the bar. AppShell's existing route-change effect (lines 291-295) already closes the drawer on navigation, so the tab bar inherits that.
+New `components/mobile-tab-bar.tsx`: fixed bottom bar, three 56px cells — Track (`/track`), Reports (`/reports/summary`), More. Active state reuses the already-exported `isActiveRoute` from app-shell.tsx:97. More calls the shell's existing `setMobileOpen(true)`, which renders the existing `SidebarNav` in the existing drawer, so no new navigation logic and no second nav data source; `NAV_SECTIONS` (app-shell.tsx:66-94) is untouched and a new web screen appears on the phone for free. Render the bar unconditionally from `AppShell` and reveal it with a `html.cap`-scoped CSS rule rather than returning null on `!isNative()` — under `output: "export"` the markup is prerendered in Node where `window.Capacitor` cannot exist, so a runtime branch that changes the tree disagrees with the served HTML on native. Add `padding-bottom: calc(4rem + env(safe-area-inset-bottom))` on `[data-testid="app-main"]` in native.css so the last entry row is never trapped behind the bar. AppShell's existing route-change effect (lines 291-295) already closes the drawer on navigation, so the tab bar inherits that.
 
 New `packages/client/src/mobile/overlay-stack.ts`: a tiny push/pop registry of open sheets/dialogs. Pass an `onBackButton` handler from AppShell down through `MobileBridgeLoader` into `initMobile` — `bridge.ts:37-45` has supported it since the file was written and has never been given one, and it already implements the right contract (`handled === false && event.canGoBack === false` → `App.exitApp()`). Without this, Android's hardware back exits the app from any screen and does not close an open dialog; wire it now so the behaviour exists before Android ships. Sheets stay out of the URL: a WebView reload always lands at `/` (Router.swift), so a modal in history would restore over nothing.
 
 **Verification**
 
-Web non-regression: chromium project green unchanged; `e2e/mobile-shell.spec.ts` asserts at 390pt that the tab bar element is present in the DOM but `display: none` without `body.cap`, so the web layout is provably unaffected. `pnpm test:client`, `pnpm typecheck` green.
+Web non-regression: chromium project green unchanged; `e2e/mobile-shell.spec.ts` asserts at 390pt that the tab bar element is present in the DOM but `display: none` without `html.cap`, so the web layout is provably unaffected. `pnpm test:client`, `pnpm typecheck` green.
 
 Device: all three tabs navigate; active state tracks the route; the drawer still auto-closes on navigation; scrolling the entries list reaches the last row fully above the tab bar. Open EntryEditDialog and confirm the overlay stack registers it (log or a test hook) — full back-button behaviour is verified on Android in stage 9.
 
@@ -769,7 +769,7 @@ A tagged dry run producing a signed IPA (and, if Android shipped, a signed AAB) 
 
 - A phone gesture model for the calendar. Long-press-to-drag, pinch-to-zoom, a day-list view. Stage 5 fixes only what is destructive.
 
-- A bottom-sheet primitive replacing `ui/dialog.tsx`. Six call sites (EntryEditDialog, ManualEntryDialog, EntryCreateDialog, three catalog forms), every one shared with the web app — the largest web-regression surface in the port, for one screen the phone visits occasionally. `interactiveWidget: "resizes-content"` plus a top-anchoring `body.cap` rule gets the cheap 90%. If that measurably fails on device, a `ui/sheet.tsx` is the right v2.
+- A bottom-sheet primitive replacing `ui/dialog.tsx`. Six call sites (EntryEditDialog, ManualEntryDialog, EntryCreateDialog, three catalog forms), every one shared with the web app — the largest web-regression surface in the port, for one screen the phone visits occasionally. `interactiveWidget: "resizes-content"` plus a top-anchoring `html.cap` rule gets the cheap 90%. If that measurably fails on device, a `ui/sheet.tsx` is the right v2.
 
 - Raising the shared `ui/button.tsx` / `ui/input.tsx` sizes to 44pt/16px globally. Screens outside the core loop keep 32-36px targets on a phone; that is genuinely worse than the alternative and is a deliberate trade against a guaranteed absence of web regression.
 

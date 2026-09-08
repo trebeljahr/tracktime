@@ -63,7 +63,28 @@ const dropRevokedSocket = (socket: WebSocket): void => {
 export const revokeStaleSockets = (): Promise<number> =>
   sessionWatch.sweep(dropRevokedSocket);
 
-export function setupWebSocket(server: Server): WebSocketServer {
+/**
+ * The two auth lookups the upgrade path needs, injectable for tests.
+ *
+ * Not a generality for its own sake: `probeSession` is attached to the socket
+ * inside `wss.handleUpgrade`'s callback, and every other test in this suite
+ * drives `wss.emit("connection", ...)` directly with a socket it built itself
+ * — so nothing exercised the attachment, and deleting it left the whole
+ * revocation feature inert with a green suite. Real lookups need better-auth
+ * and a database; injecting them lets the upgrade run for real without both.
+ */
+export type UpgradeDeps = {
+  authenticate: typeof authenticateUpgrade;
+  probe: typeof probeUpgradeSession;
+};
+
+export function setupWebSocket(
+  server: Server,
+  deps: UpgradeDeps = {
+    authenticate: authenticateUpgrade,
+    probe: probeUpgradeSession,
+  },
+): WebSocketServer {
   const wss = new WebSocketServer({
     noServer: true,
     /**
@@ -112,7 +133,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
     // Authenticate. An unauthenticated socket can never join a room (both
     // join paths below require `ws.userId`), so refuse the upgrade outright
     // rather than holding a connection open that can do nothing.
-    const authenticated = await authenticateUpgrade(req);
+    const authenticated = await deps.authenticate(req);
     if (!authenticated?.session.user?.id) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
@@ -126,7 +147,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
       authedWs.displayName = session.user.name ?? "Anonymous";
       // The credential that opened this socket, replayable for as long as it
       // stays open. Captured here because `req` is not kept past the upgrade.
-      authedWs.probeSession = () => probeUpgradeSession(headers);
+      authedWs.probeSession = () => deps.probe(headers);
       wss.emit("connection", ws, req);
     });
   });

@@ -81,7 +81,7 @@ export function MobileTabBar({
   return (
     <nav
       // `hidden` is the whole web story: display:none everywhere, undone only
-      // by `body.cap [data-testid="mobile-tab-bar"]` in styles/native.css.
+      // by `html.cap [data-testid="mobile-tab-bar"]` in styles/native.css.
       className="hidden fixed inset-x-0 bottom-0 z-40 items-stretch border-t border-border bg-background/95 backdrop-blur"
       data-testid="mobile-tab-bar"
       aria-label="Primary"

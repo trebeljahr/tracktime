@@ -76,7 +76,7 @@ export default defineConfig({
        * A phone-sized viewport against the SAME servers — no second build.
        * What it guards is the one thing the Simulator cannot show: that
        * styles/native.css is inert on web. Every rule in that file is under
-       * `body.cap`, and this asserts at 390pt that the class is absent and
+       * `html.cap`, and this asserts at 390pt that the class is absent and
        * the web layout is intact.
        *
        * `Pixel 5` (chromium), not `iPhone 14` (webkit), for one boring
