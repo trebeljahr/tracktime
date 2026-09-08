@@ -28,6 +28,13 @@
 services:
   server:
     image: ${SERVER_IMAGE:-ghcr.io/trebeljahr/tracktime-server:main}
+    # Always re-pull the tag before starting. Without this, Docker keeps the
+    # image it already has for `:main` and a deploy silently runs the PREVIOUS
+    # build: the container comes up healthy, Coolify reports the new commit,
+    # ghcr's `main` points at the new digest, and the served bundle is still
+    # the old one. That cost an afternoon on 2026-09-08 — the client kept
+    # calling the pre-migration API host long after the new image was built.
+    pull_policy: always
     environment:
       PORT: "5159"
       # How many proxies sit in front of this container, which is what
