@@ -14,7 +14,7 @@ import {
 } from "@starter/shared";
 
 import { toast } from "@/components/ui/sonner";
-import { ORIGIN_ID } from "@/hooks/use-sync";
+import { ORIGIN_ID, timerStore } from "@/hooks/use-sync";
 import {
   buildOptimisticEntry,
   decorateEntry,
@@ -32,6 +32,7 @@ import {
   enqueueOffline,
   isDocumentUnloading,
   isNetworkError,
+  isOnline,
   isTempId,
   type OfflineCreateInput,
   type OfflineIdInput,
@@ -62,6 +63,12 @@ type MutationContext = {
   tempId?: string;
   /** Flipped in `onError` when the mutation was parked in the offline queue. */
   queued?: boolean;
+  /**
+   * The entry a stop is ending, resolved from the query cache *or* the timer
+   * store. Distinct from `previousCurrent`, which is only ever the cache and
+   * is `undefined` on a cold offline launch — see `stopMutation.onMutate`.
+   */
+  runningAtStop?: TimeEntry | null;
 };
 
 // The offline payload types in `@starter/core` now carry `tagIds` themselves,
@@ -308,12 +315,22 @@ export const useEntryMutations = (): EntryMutations => {
       fallbackMessage: string
     ): Promise<void> => {
       if (isNetworkError(error)) {
-        // The document is being torn down, so this "failure" is an aborted
-        // request whose bytes the server almost certainly already has. See
-        // `isDocumentUnloading` — queueing it would duplicate the entry
-        // rather than recover it, and the reload about to happen asks the
-        // server what is really there.
-        if (isDocumentUnloading()) return;
+        /*
+         * The document is being torn down *and the device was online*, so this
+         * "failure" is an aborted request whose bytes the server almost
+         * certainly already has. See `isDocumentUnloading` — queueing it would
+         * duplicate the entry rather than recover it, and the reload about to
+         * happen asks the server what is really there.
+         *
+         * `isOnline()` is half of the condition, not decoration. Offline,
+         * `isNetworkError()` returns true unconditionally, so an airplane-mode
+         * start or stop that happens to coincide with a reload or a tab close
+         * used to hit this guard and be dropped on the floor — silently, in
+         * the exact case the queue exists for. There are no bytes for the
+         * server to have received when there is no radio, so nothing can be
+         * duplicated by queueing it.
+         */
+        if (isDocumentUnloading() && isOnline()) return;
         if (context) context.queued = true;
         await enqueue(context?.tempId);
         return;
@@ -386,11 +403,35 @@ export const useEntryMutations = (): EntryMutations => {
     onMutate: async (raw): Promise<MutationContext> => {
       const input = raw as OfflineStopInput;
       const context = await snapshot();
-      const running = context.previousCurrent ?? null;
+      /*
+       * What is running — from the query cache when it has an answer, and from
+       * the timer store when it does not.
+       *
+       * The fallback is the whole point on a phone. Cold-launch offline and
+       * `trpc.entries.current` never resolves, so `previousCurrent` is
+       * `undefined` while the timer on screen is perfectly real: the mirror
+       * seeded it into the store before the query ever fired
+       * (`lib/running-mirror.ts`). Reading only the cache meant the stop the
+       * user then pressed was queued with neither an `id` nor a `tempId` —
+       * degrading on replay to "stop whatever is running", which days later is
+       * a different entry, possibly on another device. The store knows which
+       * entry it is; use it.
+       *
+       * `!== undefined` rather than `??`: an answered `null` means the server
+       * says nothing is running, and that answer beats the store (which
+       * `useRunningEntry` has already cleared to match). Only a query that has
+       * not spoken at all falls through.
+       */
+      const running =
+        context.previousCurrent !== undefined
+          ? context.previousCurrent
+          : timerStore.getState().running;
+      context.runningAtStop = running;
       if (running) {
         replaceEntry(running.id, stopShape(running, input.end));
         // A timer started offline still carries its temp id; keep the link so
-        // a later delete can cancel the whole queued pair.
+        // a later delete can cancel the whole queued pair — and so the replay
+        // can name the entry once the start ahead of it in the queue lands.
         if (isTempId(running.id)) context.tempId = running.id;
       }
       utils.entries.current.setData(undefined, null);
@@ -436,7 +477,7 @@ export const useEntryMutations = (): EntryMutations => {
            * means "end whatever is running", which days later is a different
            * entry, possibly on a different device.
            */
-          const runningId = context?.previousCurrent?.id ?? null;
+          const runningId = context?.runningAtStop?.id ?? null;
           const targeted = runningId !== null && !isTempId(runningId);
           return enqueueOffline(
             "entries.stop",
