@@ -41,6 +41,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { describeChildFailure } from "./lib/child-failure.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -64,14 +65,42 @@ function step(message) {
   console.log(`\n  ${message}`);
 }
 
+/*
+ * stdout is inherited so a long build still shows progress live; stderr is
+ * piped so the tail can be repeated next to the failure message. It is echoed
+ * unconditionally afterwards, success included — a build that warns on stderr
+ * must not go quiet just because this function wanted to keep a copy.
+ */
 function run(command, cmdArgs, env = {}) {
   const result = spawnSync(command, cmdArgs, {
     cwd: repoRoot,
-    stdio: "inherit",
+    stdio: ["inherit", "inherit", "pipe"],
+    encoding: "utf8",
     env: { ...process.env, ...env },
   });
+  const stderr = result.stderr ?? "";
+  if (stderr !== "") process.stderr.write(stderr);
+  if (result.error) {
+    fail(
+      describeChildFailure({
+        command,
+        args: cmdArgs,
+        status: result.status,
+        signal: result.signal,
+        stderr: `${stderr}${result.error.message}`,
+      }),
+    );
+  }
   if (result.status !== 0) {
-    fail(`\`${command} ${cmdArgs.join(" ")}\` exited with ${result.status ?? "a signal"}.`);
+    fail(
+      describeChildFailure({
+        command,
+        args: cmdArgs,
+        status: result.status,
+        signal: result.signal,
+        stderr,
+      }),
+    );
   }
 }
 
