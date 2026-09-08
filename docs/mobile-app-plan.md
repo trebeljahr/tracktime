@@ -222,6 +222,57 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
   than silently wrong, which is what turns it from an unexplainable bug into a
   settings change.
 
+**Stage 9 corrections**, from actually running it:
+
+- **`cap add` DOES write the identifiers, and this document has been wrong
+  about it three times.** The critic finding at the bottom of this file reads
+  `@capacitor/cli/dist/android/add.js` (and the iOS one), sees a bare
+  `extractTemplate()`, and concludes the template's `com.getcapacitor`
+  placeholders survive. They do not: `dist/tasks/add.js` calls
+  `editProjectSettingsIOS` / `editProjectSettingsAndroid` immediately after,
+  which rewrite `applicationId`, `namespace`, `res/values/strings.xml`,
+  `PRODUCT_BUNDLE_IDENTIFIER` and `CFBundleDisplayName`. `pnpm cap:add:android`
+  produced `com.trebeljahr.tracktime` / "Tracktime" with no hand-editing at
+  all. The assertions in `scripts/build-mobile.mjs` stay, because those edits
+  happen exactly once and `cap sync` never revisits them — the drift they catch
+  is a later `appId` change, not the initial add. What DID need hand-editing:
+  `versionName`, which `cap add` leaves at the template's `1.0`.
+- **The Android WebView needs a cleartext exception, and `server.cleartext`
+  does not provide one.** Android blocks cleartext for `targetSdk` 28+, and
+  Capacitor 8's Android runtime contains no reference to the `cleartext` config
+  key at all — so a dev build against a local API dies with
+  `ERR_CLEARTEXT_NOT_PERMITTED`, which reads like a wrong port. The fix is
+  `app/src/debug/res/xml/network_security_config.xml` plus a one-attribute
+  debug manifest overlay; release builds get no exception, which is stricter
+  than the iOS `Info.plist`.
+- **A bundled Android build cannot reach the host at `10.0.2.2` over http.**
+  Its document origin is `https://localhost`, and an https document fetching a
+  plain-http URL is blocked as mixed content unless the target is a loopback
+  address. `adb reverse tcp:<port> tcp:<port>` plus a baked
+  `http://localhost:<port>` is the way in, and it works on a physical device
+  over USB too. `10.0.2.2` remains right for `dev:android`, where the document
+  is itself http.
+- **`pnpm dev:android` did not work at all, for two more reasons than the plan
+  names.** Next 16 blocks cross-origin `/_next` dev resources, so the WebView
+  got the document and none of the chunks and hung on a splash that
+  `launchAutoHide: false` never hides; and the dev server's origin is what the
+  API sees under live reload, so every request failed CORS. Both are now
+  handled by the script (`NEXT_DEV_ORIGINS`) and by `scripts/dev.mjs` (the
+  live-reload origin joins the trusted list).
+- **`build:mobile` now picks platforms by toolchain, not by directory.** With
+  both trees committed, "the platform exists" stopped meaning "this machine can
+  build it". An explicitly named platform still fails loudly.
+- **The signing block the stage text asks for was NOT added**, on instruction:
+  release signing is its own stage. `mobile-release.yml` says out loud that the
+  AAB it produces is unsigned and that the three keystore secrets it passes are
+  read by nothing, so a green build cannot be mistaken for an uploadable one.
+- **The hardware back button behaves as designed**, verified on an emulator for
+  all three rules. One caveat worth writing down: the *first* press with a
+  dialog open is consumed by the IME whenever a field inside it is focused,
+  even when no keyboard is visible (a hardware keyboard is attached). That is
+  Android's own ordering, not a gap in the overlay stack, and it cost an hour
+  of misdiagnosis — `dumpsys input_method | grep mInputShown` settles it.
+
 ## Summary
 
 Ship the phone app as the existing Next.js client inside a Capacitor shell — one composition, not a second UI. Everything mobile is either scoped to `body.cap` (a class `packages/client/src/mobile/bridge.ts:30` already sets and nothing styles), behind the synchronous `isNative()` check in that same file, or a correctness fix the web build also wants. No new screens for reports, timesheet, invoices or catalog; they stay honestly cramped one level down. Cookie auth is abandoned for native (a `capacitor://localhost` document is cross-site to the API and loses to WKWebView ITP regardless of SameSite) in favour of the bearer path `packages/core/src/session-auth.ts` was written for — which needs zero server code, only `TRUSTED_ORIGINS`. Stage 1 ends with a signed-in app on the iOS Simulator starting and stopping a real timer against `pnpm run dev`, verified against a real `pnpm build:mobile` bundle rather than live reload, because under live reload the document origin is `http://localhost:7130`, which is same-site with a localhost API and would make cookie auth misleadingly appear to work. Later stages add native chrome, a three-tab bar, resume/offline durability, calendar touch de-hostility, and two zero-custom-native wins (haptics, a runaway-timer local notification). No Swift, no Kotlin, no widget extension, no second HTTP client — the judges called all of that the fatal path.
