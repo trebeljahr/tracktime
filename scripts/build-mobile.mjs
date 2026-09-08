@@ -38,6 +38,7 @@
 import { spawnSync } from "node:child_process";
 import { createConnection } from "node:net";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -113,7 +114,6 @@ if (apiOrigin.pathname !== "/") {
 // ── 2. Which platforms ───────────────────────────────────────────────
 
 const presentPlatforms = ALL_PLATFORMS.filter((p) => existsSync(resolve(repoRoot, p)));
-const platforms = requestedPlatforms.length ? requestedPlatforms : presentPlatforms;
 
 for (const platform of requestedPlatforms) {
   if (!presentPlatforms.includes(platform)) {
@@ -121,11 +121,80 @@ for (const platform of requestedPlatforms) {
   }
 }
 
-// Syncing every present platform would make a pure-iOS task require a working
-// Android SDK the moment android/ exists, so an explicit argument narrows it.
+/**
+ * Why a toolchain check decides the platform set rather than the directory
+ * existing: both native trees are COMMITTED, so from the Android stage onward
+ * every checkout has an `android/` whether or not the machine can do anything
+ * with it — a Mac with no Android SDK, or the Linux runner that only builds
+ * the AAB. A bare `pnpm build:mobile` there must not fail on the platform the
+ * caller never asked for.
+ *
+ * So: a platform named on the command line is a demand and a missing toolchain
+ * is an error; an auto-detected one is an offer and a missing toolchain skips
+ * it with a note. Returns a reason string, or null when the toolchain is there.
+ */
+function toolchainProblem(platform) {
+  if (platform === "ios") {
+    if (process.platform !== "darwin") return "iOS builds need macOS.";
+    const xcodePath = capture("xcode-select", ["-p"]);
+    if (!xcodePath.ok || !xcodePath.out.includes("Xcode.app")) {
+      return (
+        `xcode-select points at ${xcodePath.out.trim() || "nothing"} — a full Xcode install is\n` +
+        "    needed:  sudo xcode-select -s /Applications/Xcode.app"
+      );
+    }
+    const sims = capture("xcrun", ["simctl", "list", "devices", "available"]);
+    if (!sims.ok || !/^\s+iPhone .*\(/m.test(sims.out)) {
+      return "No available iPhone simulator — install a runtime in Xcode → Settings → Components.";
+    }
+    return null;
+  }
+
+  // Android: a JDK and an SDK, found the same way scripts/android-env.sh finds
+  // them, so the two cannot disagree about whether this machine is ready.
+  // `/usr/bin/java` exists on every Mac and is a stub that exits non-zero when
+  // no JDK is installed, so the runtime is probed rather than looked for.
+  const javaHomes = [
+    process.env.JAVA_HOME,
+    "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
+  ].filter(Boolean);
+  const javaHome = javaHomes.find((home) => existsSync(join(home, "bin/java")));
+  if (!javaHome && !capture("java", ["-version"]).ok) {
+    return (
+      "No Java runtime. Install Android Studio (its bundled JBR is what\n" +
+      "    scripts/android-env.sh points JAVA_HOME at) or set JAVA_HOME."
+    );
+  }
+  const sdkHome = [
+    process.env.ANDROID_HOME,
+    process.env.ANDROID_SDK_ROOT,
+    join(homedir(), "Library/Android/sdk"),
+  ].find((dir) => dir && existsSync(dir));
+  if (!sdkHome) {
+    return "No Android SDK at $ANDROID_HOME (or ~/Library/Android/sdk).";
+  }
+  return null;
+}
+
+const platforms = [];
+for (const platform of requestedPlatforms.length ? requestedPlatforms : presentPlatforms) {
+  const problem = toolchainProblem(platform);
+  if (!problem) {
+    platforms.push(platform);
+  } else if (requestedPlatforms.includes(platform)) {
+    fail(`${platform} was asked for, but its toolchain is not usable here:\n    ${problem}`);
+  } else {
+    console.warn(
+      `\n  Skipping ${platform}/ — its toolchain is not usable on this machine:\n` +
+        `    ${problem}\n` +
+        `  Pass \`${platform}\` explicitly to make that an error instead.`,
+    );
+  }
+}
+
 if (platforms.length === 0) {
   console.warn(
-    "\n  No native platform directories yet — building the export only.\n" +
+    "\n  No native platform to sync — building the export only.\n" +
       "  Add one with `pnpm cap:add:ios` / `pnpm cap:add:android`.",
   );
 }
@@ -308,24 +377,10 @@ if (platforms.includes("ios")) {
   }
 }
 
-// 3d. Xcode toolchain. `cap run ios` shells out to xcodebuild; a
-// CommandLineTools-only selection fails hundreds of lines deep.
-if (platforms.includes("ios")) {
-  const xcodePath = capture("xcode-select", ["-p"]);
-  if (!xcodePath.ok || !xcodePath.out.includes("Xcode.app")) {
-    fail(
-      `xcode-select points at ${xcodePath.out.trim() || "nothing"} — the iOS build needs a full\n` +
-        "  Xcode install:  sudo xcode-select -s /Applications/Xcode.app",
-    );
-  }
-  const sims = capture("xcrun", ["simctl", "list", "devices", "available"]);
-  if (!sims.ok || !/^\s+iPhone .*\(/m.test(sims.out)) {
-    fail(
-      "No available iPhone simulator. Install a Simulator runtime in\n" +
-        "  Xcode → Settings → Components.",
-    );
-  }
-  console.log("    Xcode selected, iPhone simulator available");
+// 3d. The per-platform toolchains were resolved in step 2 — a platform is only
+// in `platforms` if its toolchain answered.
+if (platforms.length) {
+  console.log(`    toolchain ready for ${platforms.join(", ")}`);
 }
 
 // 3e. Is anything listening on the baked API? A dead localhost port is nearly
