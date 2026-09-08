@@ -35,6 +35,12 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=5159
 
+# The commit this image was built from, surfaced by /api/health. Runtime env is
+# enough here (unlike the client's NEXT_PUBLIC_*, which must be inlined at
+# build time), so it lives in the runtime stage and costs no rebuild.
+ARG COMMIT_SHA
+ENV COMMIT_SHA=$COMMIT_SHA
+
 # Self-contained prod bundle from `pnpm deploy` — dist + package.json +
 # node_modules (with @starter/shared materialised, no symlinks).
 COPY --from=build /prod/dist ./dist

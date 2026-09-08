@@ -35,9 +35,30 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
     NEXT_PUBLIC_PLAUSIBLE_SCRIPT_URL=$NEXT_PUBLIC_PLAUSIBLE_SCRIPT_URL \
     NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 
+ARG COMMIT_SHA
+ENV COMMIT_SHA=$COMMIT_SHA
+
 RUN pnpm --filter @starter/shared run build
 RUN pnpm --filter @starter/core run build
 RUN pnpm --filter @starter/client run build
+
+# Prove the build arg actually reached the bundle, and fail the image if it
+# did not. NEXT_PUBLIC_* is inlined at build time, so a missing or misspelled
+# arg produces an image that builds perfectly, starts healthy, and talks to
+# the wrong API — or to nothing. That shipped twice: every image before
+# 2026-09-08 was built with an EMPTY api url (the workflow read a repo
+# variable nobody had set), and the domain migration then went out against a
+# stale one. Neither was caught by a test, because both artefacts were fine
+# in every way a test looked at them.
+RUN test -n "$NEXT_PUBLIC_API_URL" \
+      || (echo "NEXT_PUBLIC_API_URL build arg is empty" >&2; exit 1); \
+    grep -rqF "$NEXT_PUBLIC_API_URL" packages/client/out/_next/static \
+      || (echo "NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL never made it into the bundle" >&2; exit 1)
+
+# Stamp the commit next to the export so the deployed artefact can be asked
+# what it is. Served as /version.json by serve.mjs like any other static file.
+RUN printf '{"commit":"%s","apiUrl":"%s"}\n' "$COMMIT_SHA" "$NEXT_PUBLIC_API_URL" \
+      > packages/client/out/version.json
 
 # ── Stage 3: Production runtime ─────────────────────────────────────
 FROM node:24-bookworm-slim AS runtime

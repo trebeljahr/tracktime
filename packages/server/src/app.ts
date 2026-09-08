@@ -123,6 +123,11 @@ export function createApp() {
       // the server beats making the user configure a second URL that must
       // agree with the first. Public, but FRONTEND_URL is a public address.
       webUrl: env.FRONTEND_URL,
+      // The commit this image was built from. The deploy pipeline polls this
+      // until it matches the commit it just pushed — without it, a deploy that
+      // silently kept the previous container reported success everywhere.
+      // Empty for a locally-run server, which has no build commit.
+      version: env.COMMIT_SHA,
       timestamp: new Date().toISOString(),
     });
   });

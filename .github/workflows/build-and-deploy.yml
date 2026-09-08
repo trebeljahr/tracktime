@@ -168,6 +168,8 @@ jobs:
           context: .
           file: packages/server/Dockerfile
           push: true
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository }}-server:main
             ghcr.io/${{ github.repository }}-server:${{ github.sha }}
@@ -217,6 +219,7 @@ jobs:
             NEXT_PUBLIC_PLAUSIBLE_DOMAIN=${{ vars.NEXT_PUBLIC_PLAUSIBLE_DOMAIN }}
             NEXT_PUBLIC_PLAUSIBLE_SCRIPT_URL=${{ vars.NEXT_PUBLIC_PLAUSIBLE_SCRIPT_URL }}
             NEXT_PUBLIC_SENTRY_DSN=${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+            COMMIT_SHA=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository }}-client:main
             ghcr.io/${{ github.repository }}-client:${{ github.sha }}
@@ -242,6 +245,46 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-server, build-client]
     steps:
+      # Pin each app to the IMMUTABLE tag before deploying it.
+      #
+      # The compose files default to `:main`, and Docker keeps whatever image
+      # it already has for a mutable tag. On 2026-09-08 that meant Coolify
+      # started the PREVIOUS build while ghcr's `main`, the Coolify dashboard
+      # and this workflow all reported the new commit — a client that had been
+      # migrated to a new API host kept calling the old one for hours.
+      # `pull_policy: always` in the compose files covers the default; pinning
+      # the digest tag here removes the ambiguity entirely, and makes rollback
+      # "set this variable to an older sha".
+      #
+      # PATCH, not POST: Coolify's env API only UPDATES an existing variable —
+      # a POST-less PATCH against a name that does not exist yet is accepted
+      # and silently does nothing. Both variables must therefore be created
+      # once by hand in the Coolify UI (CLIENT_IMAGE on the client app,
+      # SERVER_IMAGE on the server app); this step keeps them current.
+      - name: Pin image tags to this commit
+        env:
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+          COOLIFY_SERVER_RESOURCE_UUID: ${{ secrets.COOLIFY_SERVER_RESOURCE_UUID }}
+          COOLIFY_CLIENT_RESOURCE_UUID: ${{ secrets.COOLIFY_CLIENT_RESOURCE_UUID }}
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+        if: >-
+          env.COOLIFY_BASE_URL != '' && env.COOLIFY_SERVER_RESOURCE_UUID != ''
+          && env.COOLIFY_CLIENT_RESOURCE_UUID != ''
+        run: |
+          set -euo pipefail
+          pin() {
+            curl -fsSL -X PATCH \
+              "$COOLIFY_BASE_URL/api/v1/applications/$1/envs" \
+              -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
+              -H 'Content-Type: application/json' \
+              -d "{\"key\":\"$2\",\"value\":\"$3\",\"is_preview\":false}" >/dev/null
+            echo "pinned $2=$3"
+          }
+          pin "$COOLIFY_SERVER_RESOURCE_UUID" SERVER_IMAGE \
+            "ghcr.io/${{ github.repository }}-server:${{ github.sha }}"
+          pin "$COOLIFY_CLIENT_RESOURCE_UUID" CLIENT_IMAGE \
+            "ghcr.io/${{ github.repository }}-client:${{ github.sha }}"
+
       - name: Deploy server app via Coolify API
         env:
           COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
@@ -287,6 +330,68 @@ jobs:
           COOLIFY_WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
         if: env.COOLIFY_BASE_URL == '' && env.COOLIFY_WEBHOOK_URL != ''
         run: curl -fsSL "$COOLIFY_WEBHOOK_URL"
+
+      # Everything above only proves Coolify ACCEPTED a request. This proves
+      # the deployed artefacts are the ones this run built.
+      #
+      # Until this existed, the pipeline's final assertion was an HTTP 200 from
+      # a POST. A deploy that kept the old container, an image built with an
+      # empty API URL, a container crash-looping behind a proxy that reports
+      # 503 — all three happened, and all three left this workflow green.
+      #
+      # Deliberately polls, because a Coolify deploy is asynchronous: the POST
+      # returns as soon as the deployment is QUEUED.
+      - name: Verify the deployment is actually live
+        env:
+          WEB_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://trackyourtime.dev' }}
+          API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://api.trackyourtime.dev' }}
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+        if: env.COOLIFY_BASE_URL != ''
+        run: |
+          set -uo pipefail
+          SHA='${{ github.sha }}'
+
+          # `?cb=` on every request: the point is what the ORIGIN now serves,
+          # and a CDN hit would answer with exactly the stale copy being
+          # tested for.
+          poll() { # name url jq-expression
+            for i in $(seq 1 40); do
+              got=$(curl -fsSL --max-time 10 "$2?cb=$i$RANDOM" 2>/dev/null | jq -r "$3" 2>/dev/null || true)
+              if [ "$got" = "$SHA" ]; then echo "✓ $1 is $SHA"; return 0; fi
+              echo "  $1: $(printf '%.12s' "${got:-<no response>}")… waiting ($i/40)"
+              sleep 15
+            done
+            echo "::error::$1 never reported $SHA — the deploy did not land." >&2
+            echo "::error::last seen: ${got:-<no response>}" >&2
+            return 1
+          }
+
+          poll "api  $API_URL/api/health"    "$API_URL/api/health"   '.version'
+          poll "web  $WEB_URL/version.json"  "$WEB_URL/version.json" '.commit'
+
+          # The client bakes its API origin in at build time, so a correct
+          # commit can still carry the wrong URL. Assert the pairing.
+          baked=$(curl -fsSL --max-time 10 "$WEB_URL/version.json?cb=$RANDOM" | jq -r '.apiUrl')
+          if [ "$baked" != "$API_URL" ]; then
+            echo "::error::client was built against '$baked', expected '$API_URL'" >&2
+            exit 1
+          fi
+          echo "✓ client is built against $baked"
+
+          # The web app is a separate origin from the API now, so CORS is
+          # load-bearing and nothing else in CI exercises it — the e2e suite
+          # runs both on localhost.
+          allow=$(curl -fsS --max-time 10 -o /dev/null -D - -X OPTIONS \
+                    -H "Origin: $WEB_URL" \
+                    -H 'Access-Control-Request-Method: POST' \
+                    -H 'Access-Control-Request-Headers: content-type' \
+                    "$API_URL/api/auth/get-session" \
+                  | tr -d '\r' | awk -F': ' 'tolower($1)=="access-control-allow-origin"{print $2}')
+          if [ "$allow" != "$WEB_URL" ]; then
+            echo "::error::CORS preflight returned '${allow:-<none>}', expected '$WEB_URL'" >&2
+            exit 1
+          fi
+          echo "✓ CORS allows $WEB_URL"
 
   # DCO gate — pull requests only. tracktime takes Developer Certificate of
   # Origin 1.1 sign-off rather than a CLA, so the check is mechanical: every

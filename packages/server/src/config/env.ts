@@ -196,6 +196,13 @@ export const env = {
   // credentials:true — register a custom protocol in the main process
   // and list it here instead.
   TRUSTED_ORIGINS: getOptional("TRUSTED_ORIGINS"),
+
+  // The git commit this image was built from, baked in as a Docker build arg
+  // (see packages/server/Dockerfile). Reported by /api/health so "is the
+  // deployed thing the thing I built?" is one HTTP request rather than an
+  // archaeology session. Empty outside a CI image build, which is correct —
+  // a local `pnpm dev` has no commit it was built from.
+  COMMIT_SHA: getOptional("COMMIT_SHA"),
   GOOGLE_CLIENT_ID: getOptional("GOOGLE_CLIENT_ID"),
   GOOGLE_CLIENT_SECRET: getOptional("GOOGLE_CLIENT_SECRET"),
 
