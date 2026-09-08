@@ -15,8 +15,15 @@ import { cleanDatabase, closeDbConnection } from "./db-utils";
  *
  * That claim is easy to break by accident — one rule written as
  * `@media (max-width: 640px)` instead of `html.cap`, and the web app silently
- * inherits the phone treatment. So the assertions below are deliberately
- * about the ABSENCE of native chrome, not the presence of it.
+ * inherits the phone treatment. So most of the assertions below are
+ * deliberately about the ABSENCE of native chrome, not the presence of it.
+ *
+ * The exception is the last block. styles/standalone.css deliberately is NOT
+ * inert by construction — it matches `@media (display-mode: standalone)` in a
+ * plain browser, because an installed PWA gets `viewport-fit=cover` from the
+ * same static export and none of native.css. Those rules are checked in both
+ * directions: absent in a browser tab, present once the display mode is
+ * emulated.
  */
 
 const PASSWORD = "SecurePassword123!";
@@ -187,5 +194,105 @@ test.describe("web app at phone width", () => {
       getComputedStyle(document.body).getPropertyValue("--app-header-offset").trim(),
     );
     expect(offset).toBe("");
+  });
+});
+
+test.describe("the installed PWA at phone width", () => {
+  /*
+   * The one part of the mobile work that is NOT gated on a class Capacitor
+   * sets. `viewport-fit=cover` lives in the static `viewport` export, and one
+   * static export serves the browser, the installed PWA and both native
+   * shells — so an installed PWA gets real insets with none of native.css
+   * applying to it, and content runs under the notch.
+   * `styles/standalone.css` is the `@media (display-mode: standalone)` copy of
+   * the safe-area geometry that fixes that.
+   *
+   * WHAT THIS CAN AND CANNOT ASSERT. Not the layout: Chromium cannot be put
+   * into standalone display mode from a test. `Emulation.setEmulatedMedia`
+   * ignores a `display-mode` feature (measured — `matchMedia` still answers
+   * `browser` afterwards), DevTools exposes no such override, and a
+   * `--app=<url>` window does not come back as a Playwright page. So the
+   * geometry is asserted where it can be: in the browser tab, where every one
+   * of these rules must be inert, and against the SHIPPED stylesheet, which
+   * is read out of `document.styleSheets` in the real browser rather than
+   * grepped off disk — so a deleted file, a dropped `@import`, or a build that
+   * strips the block all fail here.
+   */
+  test.beforeEach(async ({ page }) => {
+    await signUpViaUI(page, {
+      name: "Phone PWA",
+      email: uniqueEmail("pwa"),
+      password: PASSWORD,
+    });
+  });
+
+  test("is a browser tab here, so none of the rules apply", async ({ page }) => {
+    // The premise for the rest of the file. Every "web keeps its layout"
+    // assertion above would also pass if standalone.css simply did not exist,
+    // so this pins WHY they pass: the gate is closed, not missing.
+    const mode = await page.evaluate(() => ({
+      standalone: matchMedia("(display-mode: standalone)").matches,
+      browser: matchMedia("(display-mode: browser)").matches,
+    }));
+    expect(mode).toEqual({ standalone: false, browser: true });
+  });
+
+  test("ships the safe-area block, scoped so it cannot reach the native app", async ({
+    page,
+  }) => {
+    const block = await page.evaluate(() => {
+      const found: { selector: string; text: string }[] = [];
+      for (const sheet of Array.from(document.styleSheets)) {
+        let rules: CSSRule[];
+        try {
+          rules = Array.from(sheet.cssRules);
+        } catch {
+          continue; // cross-origin sheet; the app has none
+        }
+        for (const rule of rules) {
+          if (
+            !(rule instanceof CSSMediaRule) ||
+            !rule.conditionText.includes("display-mode: standalone")
+          ) {
+            continue;
+          }
+          for (const inner of Array.from(rule.cssRules)) {
+            if (inner instanceof CSSStyleRule) {
+              found.push({ selector: inner.selectorText, text: inner.cssText });
+            }
+          }
+        }
+      }
+      return found;
+    });
+
+    // The header, the sticky tracker bar under it, the bottom of the page,
+    // the drawer and the dialog — the five places a notch or a home indicator
+    // can eat content.
+    const selectors = block.map((rule) => rule.selector).join(" | ");
+    for (const target of [
+      "[data-testid=\"app-header\"]",
+      "[data-testid=\"tracker-bar\"]",
+      "[data-testid=\"app-main\"]",
+      "[data-testid=\"sidebar-mobile\"]",
+      "[data-slot=\"dialog-content\"]",
+    ]) {
+      expect(selectors).toContain(target);
+    }
+
+    // Every one of them behind `html:not(.cap)`. Without it these stack with
+    // native.css inside an Android WebView that reports standalone, and the
+    // two disagree about exactly one value — see the next assertion.
+    for (const rule of block) {
+      expect(rule.selector).toContain(":not(.cap)");
+    }
+
+    // That value: the native app clears a 3.5rem tab bar plus the home
+    // indicator, the PWA clears the home indicator alone. Copying the native
+    // rule wholesale would leave a 56px dead strip under every page in the
+    // installed app.
+    const main = block.find((rule) => rule.selector.includes("app-main"));
+    expect(main?.text).toContain("safe-area-inset-bottom");
+    expect(main?.text).not.toContain("--app-tab-bar-offset");
   });
 });

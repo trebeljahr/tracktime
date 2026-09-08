@@ -9,7 +9,9 @@
  *
  * The marker is on <html> and not on <body> so that <body> keeps warning about
  * hydration mismatches — see the NATIVE_SHELL_SCRIPT comment in
- * app/pre-paint.ts.
+ * app/pre-paint.ts. The PWA's copy of the safe-area half lives in
+ * styles/standalone.css, which is deliberately a separate file: those rules
+ * are NOT under `html.cap` and so are not inert by construction.
  *
  * The other half of the same argument is what is NOT here. The base sizes in
  * components/ui/button.tsx and input.tsx back every desktop screen, so raising

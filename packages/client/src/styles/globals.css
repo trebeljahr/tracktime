@@ -11,6 +11,14 @@
  */
 @import "./native.css";
 
+/*
+ * The installed PWA's half of the same safe-area problem. Separate file
+ * because its selectors are NOT under `html.cap` — they match on
+ * `@media (display-mode: standalone)` in an ordinary browser — and native.css
+ * only stays trustworthy while that claim about it is absolute.
+ */
+@import "./standalone.css";
+
 /* Dark mode via .dark class on a parent (matches shadcn convention). */
 @custom-variant dark (&:is(.dark *));
 

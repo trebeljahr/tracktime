@@ -1,0 +1,93 @@
+/*
+ * The installed PWA's safe areas.
+ *
+ * WHY THIS FILE EXISTS. `app/layout.tsx` exports `viewportFit: "cover"`, and
+ * that meta tag is static: one `output: "export"` build serves the browser,
+ * the installed PWA and both native shells, so there is no build in which it
+ * can be emitted for Capacitor and withheld from web. In a normal mobile
+ * browser that costs nothing — the browser keeps its own chrome over the
+ * notch and reports no insets — but `public/manifest.json` says
+ * `"display": "standalone"`, so the app is installable, and an installed PWA
+ * on a notched phone gets `viewport-fit=cover` with real insets and none of
+ * `native.css`, whose every rule is behind the `html.cap` class only Capacitor
+ * sets. The header then runs under the Dynamic Island and the last row of the
+ * page sits under the home indicator.
+ *
+ * The alternative — dropping `viewport-fit=cover` for non-Capacitor hosts —
+ * was rejected because there is nothing to drop it from. The only lever would
+ * be rewriting the viewport meta from the same pre-paint script that sets
+ * `html.cap`, which means the document parses once with the wrong viewport and
+ * is re-laid-out, on the one host (the native shell) whose first frame this
+ * whole area of the code exists to get right.
+ *
+ * SO WHY NOT PUT THESE IN native.css. Because `native.css` earns its safety
+ * from a single claim — every selector under `html.cap`, a class no browser
+ * ever sets — and `e2e/mobile-shell.spec.ts` is built to check that claim.
+ * These rules break it by design: they match on a media feature, in a plain
+ * browser, with no marker class at all. Keeping them in their own file keeps
+ * the other file's rule absolute.
+ *
+ * WHAT IS AND IS NOT COPIED. Only the safe-area geometry: the header, the
+ * sticky tracker bar under it, the bottom of the page, the drawer and the
+ * dialog. NOT the tab bar (the PWA has none — it uses the web app's own
+ * hamburger drawer), NOT the 16px field override (a browser PWA still lets the
+ * user pinch out of an iOS focus zoom; the WebView does not), NOT `.cap-touch`
+ * or the two-row composer, which are native-app layout decisions rather than
+ * safe-area correctness.
+ *
+ * `html:not(.cap)` on every selector so these can never stack with
+ * `native.css`: an Android WebView may well report `display-mode: standalone`,
+ * and `--app-main`'s padding is the one value that legitimately differs
+ * between the two (the native app has a tab bar to clear, the PWA does not).
+ * On a desktop installed PWA every inset is 0px and the whole file is inert.
+ */
+
+@media (display-mode: standalone) {
+  html:not(.cap) {
+    /*
+     * The same variable name native.css publishes, so
+     * tracker/entry-list.tsx's STICKY_TOP — `var(--app-header-offset,
+     * 3.5rem)` — follows the taller header here too, with no second number.
+     */
+    --app-header-offset: calc(3.5rem + env(safe-area-inset-top, 0px));
+  }
+
+  html:not(.cap) [data-testid="app-header"] {
+    height: var(--app-header-offset);
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  html:not(.cap) [data-testid="tracker-bar"] {
+    top: var(--app-header-offset);
+  }
+
+  /*
+   * No tab bar here, so this is the home indicator plus the layout's own
+   * `py-4` — deliberately NOT `--app-tab-bar-offset`, which would reserve
+   * 3.5rem for a bar the PWA never shows.
+   */
+  html:not(.cap) [data-testid="app-main"] {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  html:not(.cap) [data-testid="sidebar-mobile"] {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /*
+   * Top-anchored for the same reason as the native one: a centred panel is
+   * translated by half its own height, so a shrinking viewport pushes it off
+   * the top edge and the focused field goes out of reach in the direction
+   * nothing scrolls. See the long comment on the `html.cap` copy in
+   * native.css for why the undo is `--tw-translate-y` and not a `transform`.
+   */
+  html:not(.cap) [data-slot="dialog-content"] {
+    top: calc(env(safe-area-inset-top, 0px) + 1rem);
+    --tw-translate-y: 0;
+    max-height: calc(
+      100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) -
+        2rem
+    );
+  }
+}
