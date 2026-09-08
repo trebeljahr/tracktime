@@ -129,4 +129,44 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /*
+   * WebKit refuses author `box-sizing` on a date/time input while the native
+   * control's appearance is in force: measured on iOS 26 at 402pt, an
+   * `<Input type="date">` inside a dialog computed to `box-sizing:
+   * content-box` — the `*` reset losing — and `min-width: 102px`, so its
+   * `width: 100%` (360px) became a used width of 386px once `px-3 py-1` and
+   * the 1px border were added OUTSIDE it. The field ran 25px past the
+   * dialog's padding and 5px off the screen, right border and all, while the
+   * text input directly under it ended exactly on the padding.
+   *
+   * `appearance: none` is the only thing that fixes it. `box-sizing:
+   * border-box !important`, `max-width: 100%` and `min-width: 0` were each
+   * measured on the device and each changed nothing: the box-sizing override
+   * is refused, and no width bound helps when the overflow comes from
+   * padding added outside the width. Opting out of the native appearance
+   * hands author box-sizing back, and the field then measures identically to
+   * a text input beside it.
+   *
+   * The whole date/time family behaves the same way — `date`, `time` and
+   * `datetime-local` were all measured at 386px where a text input beside
+   * them measured 360 — so all five types are listed rather than the one
+   * field the bug was reported on. The app has six such fields today
+   * (date-range-picker ×2, new-invoice-dialog ×2, entry-edit-dialog ×2,
+   * manual-entry-dialog, runaway-prompt's `datetime-local`).
+   *
+   * Not scoped to the native shell, and not a Capacitor bug: this is WebKit,
+   * so desktop Safari does the same thing in a narrow window. Blink is
+   * unaffected either way — verified that the rule changes neither the
+   * rendering nor the measured box there, calendar picker indicator included
+   * — so it is a no-op on Chrome and a fix on Safari.
+   */
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"],
+  input[type="month"],
+  input[type="week"] {
+    appearance: none;
+    -webkit-appearance: none;
+  }
 }

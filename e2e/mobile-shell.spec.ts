@@ -230,6 +230,56 @@ test.describe("web app at phone width", () => {
     expect(style.maxHeight).toBe("none");
     expect(style.maxWidth).toBe("none");
   });
+
+  test("the manual-entry date field ends where its siblings do", async ({
+    page,
+  }) => {
+    // WebKit refuses author `box-sizing` on a date input while the native
+    // control's appearance is in force, so `width: 100%` plus `px-3` and a
+    // border became a used width 26px wider than the column: measured on iOS
+    // 26 at 402pt, the field ran 25px past the dialog padding and 5px off the
+    // screen. globals.css opts the whole date/time family out of that
+    // appearance, which is the only thing that restores border-box sizing —
+    // `box-sizing: border-box !important`, `max-width: 100%` and `min-width:
+    // 0` were each measured on the device and each changed nothing.
+    //
+    // Chromium never had the bug, so the box assertions here are a bound, not
+    // a reproduction: what fails in this browser when the rule goes is the
+    // `appearance` assertion, which is the fix itself.
+    await page.getByTestId("tracker-manual-open").click();
+
+    const field = page.getByTestId("manual-entry-date");
+    await expect(field).toBeVisible();
+    expect(await field.evaluate((el) => getComputedStyle(el).appearance)).toBe(
+      "none",
+    );
+
+    const geometry = await page.evaluate(() => {
+      const date = document.querySelector<HTMLElement>(
+        '[data-testid="manual-entry-date"]',
+      );
+      const sibling = document.querySelector<HTMLElement>(
+        '[data-testid="manual-entry-description"]',
+      );
+      const dialog = document.querySelector<HTMLElement>(
+        '[data-slot="dialog-content"]',
+      );
+      if (!date || !sibling || !dialog) throw new Error("missing element");
+      const box = dialog.getBoundingClientRect();
+      return {
+        date: date.getBoundingClientRect().right,
+        sibling: sibling.getBoundingClientRect().right,
+        inner: box.right - parseFloat(getComputedStyle(dialog).paddingRight),
+        viewport: window.innerWidth,
+      };
+    });
+
+    // Inside the dialog's padding box, inside the screen, and flush with the
+    // text field above it — the three things it was not on iOS.
+    expect(geometry.date).toBeLessThanOrEqual(geometry.inner + 0.5);
+    expect(geometry.date).toBeLessThanOrEqual(geometry.viewport);
+    expect(geometry.date).toBeCloseTo(geometry.sibling, 0);
+  });
 });
 
 test.describe("the installed PWA at phone width", () => {
