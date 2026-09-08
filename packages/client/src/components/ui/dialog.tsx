@@ -17,10 +17,11 @@ const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    // The overlay covers the whole viewport and outlives the content it dims:
-    // it is still mounted, and still swallowing clicks, for the length of the
-    // close animation. Anything that has to know a dialog is *fully* gone —
-    // rather than merely closing — waits on this, not on the content.
+    // A handle for asserting a dialog is gone. There is no exit animation
+    // (see the className below), so the overlay unmounts together with the
+    // content rather than lingering over it — and a test that waits on this
+    // is checking exactly that, since a re-introduced exit animation would
+    // leave a full-viewport click-swallowing layer behind and fail here.
     data-testid="dialog-overlay"
     className={cn(
       // Entry animation only. An exit animation keeps the dialog — and its

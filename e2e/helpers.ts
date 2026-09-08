@@ -61,13 +61,13 @@ export async function logManualEntry(
 
   await page.getByTestId("manual-entry-add").click();
 
-  // Adding closes the dialog, but closing is an animation: the content and its
-  // full-viewport overlay stay mounted until it finishes, and the overlay is
-  // the one that outlives the other. A click landing in that window hits the
-  // overlay rather than the button underneath it and is simply lost — which is
-  // how calling this helper twice in a row used to leave the second dialog
-  // unopened and the fill() below waiting out its whole timeout. Wait the
-  // teardown out instead of racing it.
+  // Adding closes the dialog, and closing unmounts it: dialogs animate in but
+  // not out, precisely so nothing lingers over the page afterwards. Assert
+  // both nodes are gone before returning — a click that landed while a
+  // full-viewport overlay was still mounted would hit the overlay instead of
+  // the button underneath and simply be lost, which is how calling this
+  // helper twice in a row used to leave the second dialog unopened and the
+  // fill() below waiting out its whole timeout.
   await expect(page.getByTestId("manual-entry-dialog")).toHaveCount(0);
   await expect(page.getByTestId("dialog-overlay")).toHaveCount(0);
 
