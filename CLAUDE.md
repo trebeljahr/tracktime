@@ -326,13 +326,19 @@ it:
 
 - `isNetworkError()` short-circuits on `isOnline()`, so a wrong verdict decides
   whether a refused mutation is queued for replay or rolled back.
-- **Mutations run in `networkMode: "always"`** (`lib/query-client.ts`). React
-  Query otherwise *pauses* a mutation while it believes the device is offline:
-  `mutationFn` never runs, `onError` never fires, and `onError` is where
-  `use-entry-mutations.ts` queues offline work. With the radio's real answer
-  wired in, the default would make start/stop in airplane mode do nothing at
-  all. The offline queue is this app's pause mechanism and it needs the failure
-  to happen. Queries keep the default, where pausing is exactly right.
+- **The mutations the offline queue owns run in `networkMode: "always"`** —
+  and *only* those. React Query otherwise *pauses* a mutation while it believes
+  the device is offline: `mutationFn` never runs, `onError` never fires, and
+  `onError` is where `use-entry-mutations.ts` queues offline work. With the
+  radio's real answer wired in, the default would make start/stop in airplane
+  mode do nothing at all. The offline queue is this app's pause mechanism and
+  it needs the failure to happen. The option is `OFFLINE_QUEUED_MUTATION` in
+  `lib/query-client.ts`, spread into the entry mutations, the timesheet grid's
+  writes and the queue's own replay; it is deliberately **not** a
+  `defaultOptions.mutations`, which would take pause-and-resume away from the
+  forty-odd mutations that queue nothing — on web as much as on the phone —
+  and leave them toasting "network error" on a blip where they used to wait.
+  Queries keep the default too, where pausing is exactly right.
 
 **The running timer is mirrored, and the mirror is only overwritten by an
 answer.** `lib/running-mirror.ts` writes every resolution of

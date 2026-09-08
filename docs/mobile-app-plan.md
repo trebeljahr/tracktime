@@ -173,14 +173,19 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
   the change of address safe. It lives in the adapter, behind a
   `tracktime.preferences-migrated` marker in Preferences, and removes the
   `localStorage` copy so a rollback cannot replay rows this build has flushed.
-- **Mutations had to move to `networkMode: "always"`.** Nothing in the plan
-  mentions this and it is not optional. React Query *pauses* a mutation while
-  `onlineManager` reports offline: `mutationFn` never runs and `onError` never
-  fires — and `onError` is exactly where `use-entry-mutations.ts` queues. The
-  moment `@capacitor/network` gives `onlineManager` the truth about a dead
-  radio, start/stop in airplane mode would have silently done nothing at all.
-  The offline queue *is* this app's pause mechanism, and it needs the failure
-  to happen. Queries keep the default, where pausing is right.
+- **The queueing mutations had to move to `networkMode: "always"`.** Nothing
+  in the plan mentions this and it is not optional. React Query *pauses* a
+  mutation while `onlineManager` reports offline: `mutationFn` never runs and
+  `onError` never fires — and `onError` is exactly where
+  `use-entry-mutations.ts` queues. The moment `@capacitor/network` gives
+  `onlineManager` the truth about a dead radio, start/stop in airplane mode
+  would have silently done nothing at all. The offline queue *is* this app's
+  pause mechanism, and it needs the failure to happen. It was first set as a
+  global `defaultOptions.mutations` and that was wrong: it applied to every
+  non-queueing mutation in the web app as well, replacing pause-and-resume
+  with an immediate rollback and an error toast. It is now
+  `OFFLINE_QUEUED_MUTATION`, spread into the three families that catch the
+  failure. Queries keep the default, where pausing is right.
 - The resume order is the critics': reconnect → tick → flush, and refetch
   `entries.current` *only* when nothing was queued. It is a pure function
   (`runResume`) so the ordering is tested without a bridge, a socket or a tree.

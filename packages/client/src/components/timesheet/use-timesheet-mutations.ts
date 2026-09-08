@@ -26,6 +26,7 @@ import {
   type OfflineIdInput,
   type OfflineUpdateInput,
 } from "@/lib/offline";
+import { OFFLINE_QUEUED_MUTATION } from "@/lib/query-client";
 import { trpc } from "@/lib/trpc";
 import { entrySource } from "@/lib/entry-source";
 
@@ -203,9 +204,13 @@ export const useTimesheetMutations = (
     [invalidate, patchList, restore, snapshot]
   );
 
-  const createEntry = trpc.entries.create.useMutation();
-  const updateEntry = trpc.entries.update.useMutation();
-  const removeEntry = trpc.entries.remove.useMutation();
+  // `networkMode: "always"` on each: `run()` above only reaches `queue()`
+  // because the call rejected. React Query's default would pause the mutation
+  // while offline instead, and a paused promise never rejects — the grid edit
+  // would sit there un-queued for the rest of the launch.
+  const createEntry = trpc.entries.create.useMutation(OFFLINE_QUEUED_MUTATION);
+  const updateEntry = trpc.entries.update.useMutation(OFFLINE_QUEUED_MUTATION);
+  const removeEntry = trpc.entries.remove.useMutation(OFFLINE_QUEUED_MUTATION);
 
   const create = React.useCallback(
     (start: string, end: string, context: CellEditContext): void => {

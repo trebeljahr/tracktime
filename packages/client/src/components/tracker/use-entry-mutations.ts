@@ -24,6 +24,7 @@ import {
   type OptimisticEntryArgs,
 } from "@/lib/entry-shape";
 import { idleWatcher } from "@/lib/idle-watcher";
+import { OFFLINE_QUEUED_MUTATION } from "@/lib/query-client";
 import { trpc } from "@/lib/trpc";
 import {
   cancelQueuedForTemp,
@@ -330,6 +331,7 @@ export const useEntryMutations = (): EntryMutations => {
   // ── mutations ──────────────────────────────────────────────────────
 
   const startMutation = trpc.entries.start.useMutation({
+    ...OFFLINE_QUEUED_MUTATION,
     onMutate: async (raw): Promise<MutationContext> => {
       const input = raw as StartInput;
       const context = await snapshot();
@@ -380,6 +382,7 @@ export const useEntryMutations = (): EntryMutations => {
   });
 
   const stopMutation = trpc.entries.stop.useMutation({
+    ...OFFLINE_QUEUED_MUTATION,
     onMutate: async (raw): Promise<MutationContext> => {
       const input = raw as OfflineStopInput;
       const context = await snapshot();
@@ -454,6 +457,7 @@ export const useEntryMutations = (): EntryMutations => {
   });
 
   const createMutation = trpc.entries.create.useMutation({
+    ...OFFLINE_QUEUED_MUTATION,
     onMutate: async (raw): Promise<MutationContext> => {
       const input = raw as CreateInput;
       const context = await snapshot();
@@ -490,6 +494,7 @@ export const useEntryMutations = (): EntryMutations => {
   });
 
   const updateMutation = trpc.entries.update.useMutation({
+    ...OFFLINE_QUEUED_MUTATION,
     onMutate: async (raw): Promise<MutationContext> => {
       const input = raw as UpdateInput;
       const context = await snapshot();
@@ -582,6 +587,7 @@ export const useEntryMutations = (): EntryMutations => {
   });
 
   const removeMutation = trpc.entries.remove.useMutation({
+    ...OFFLINE_QUEUED_MUTATION,
     onMutate: async (raw): Promise<MutationContext> => {
       const input = raw as OfflineIdInput;
       const context = await snapshot();
@@ -782,6 +788,13 @@ export const useEntryMutations = (): EntryMutations => {
     [dropEntry, removeMutation, utils]
   );
 
+  /*
+   * The one mutation here that does NOT carry `OFFLINE_QUEUED_MUTATION`, and
+   * the omission is the point: resolving a runaway timer queues nothing (see
+   * `onError` — it toasts), so React Query's default pause-and-resume is
+   * exactly right for it. Offline it waits and replays on reconnect instead of
+   * failing at the user.
+   */
   const resolveRunawayMutation = trpc.entries.resolveRunaway.useMutation({
     onSuccess: (entry) => {
       replaceEntry(entry.id, toDetailed(entry));

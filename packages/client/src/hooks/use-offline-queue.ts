@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { toast } from "@/components/ui/sonner";
+import { OFFLINE_QUEUED_MUTATION } from "@/lib/query-client";
 import { trpc } from "@/lib/trpc";
 import {
   flushOfflineQueue,
@@ -78,12 +79,23 @@ export const useOfflineQueue = (): OfflineQueueState => {
   const [isFlushing, setIsFlushing] = React.useState(false);
   const [authBlocked, setAuthBlocked] = React.useState(false);
 
-  const startMutation = trpc.entries.start.useMutation();
-  const stopMutation = trpc.entries.stop.useMutation();
-  const createMutation = trpc.entries.create.useMutation();
-  const updateMutation = trpc.entries.update.useMutation();
-  const removeMutation = trpc.entries.remove.useMutation();
-  const discardMutation = trpc.entries.discard.useMutation();
+  /*
+   * The replay's own mutations, and they need `networkMode: "always"` for a
+   * different reason than the ones that fill the queue.
+   *
+   * `flush()` checks `isOnline()` before it starts, but a radio can die
+   * mid-flush — that is the ordinary case on a phone. A paused mutation never
+   * settles, so `mutateAsync` would hang forever inside the flush loop:
+   * `runningRef` stays latched, the `finally` never runs, and nothing in this
+   * launch can flush the queue again. Rejecting is what lets `isNetworkError`
+   * stop the flush and write the remainder back in order.
+   */
+  const startMutation = trpc.entries.start.useMutation(OFFLINE_QUEUED_MUTATION);
+  const stopMutation = trpc.entries.stop.useMutation(OFFLINE_QUEUED_MUTATION);
+  const createMutation = trpc.entries.create.useMutation(OFFLINE_QUEUED_MUTATION);
+  const updateMutation = trpc.entries.update.useMutation(OFFLINE_QUEUED_MUTATION);
+  const removeMutation = trpc.entries.remove.useMutation(OFFLINE_QUEUED_MUTATION);
+  const discardMutation = trpc.entries.discard.useMutation(OFFLINE_QUEUED_MUTATION);
 
   const mutators: OfflineReplayMutators = React.useMemo(
     () => ({
