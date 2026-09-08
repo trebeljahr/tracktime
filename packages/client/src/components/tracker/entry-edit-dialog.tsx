@@ -1,19 +1,7 @@
 "use client";
 
 import * as React from "react";
-import {
-  dayKeyInZone,
-  isSameZone,
-  rollEndAfterStart,
-  withDayInZone,
-  zoneLabel,
-  type DetailedEntry,
-} from "@starter/shared";
-import {
-  deviceTimeZone,
-  emptyEntryFields,
-  entryFieldsFrom,
-} from "@starter/core";
+import { zoneLabel, type DetailedEntry } from "@starter/shared";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -28,16 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DurationInput } from "@/components/duration-input";
 import { EntryFieldsEditor } from "@/components/entry-fields/entry-fields-editor";
-import { useEntryFields } from "@/components/entry-fields/use-entry-fields";
 import { TimeField } from "@/components/tracker/time-field";
+import { useEntryEditor } from "@/components/tracker/use-entry-editor";
 import type { EntryMutations } from "@/components/tracker/use-entry-mutations";
 import { useFormatSettings } from "@/lib/format";
-
-const MINUTE_MS = 60_000;
-
-// Re-anchoring a date must happen in the ENTRY's zone, not the editor's:
-// moving "23:30 Berlin" to another day should keep it at 23:30 Berlin.
-// `withDayInZone` in @starter/shared does exactly that.
 
 export type EntryEditDialogProps = {
   /** The entry being edited; `null` closes the dialog. */
@@ -49,6 +31,10 @@ export type EntryEditDialogProps = {
 /**
  * Full editor for one entry — the escape hatch for the changes the inline
  * fields cannot express, mainly moving a block to another day.
+ *
+ * Every rule about what a save writes lives in `use-entry-editor.ts`, which is
+ * where the timezone re-anchoring and the midnight roll are documented and
+ * unit-tested. This file is the dialog around it and nothing more.
  */
 export function EntryEditDialog({
   entry,
@@ -56,56 +42,10 @@ export function EntryEditDialog({
   mutations,
 }: EntryEditDialogProps): React.JSX.Element {
   const format = useFormatSettings();
-
-  const { fields, setFields } = useEntryFields(
-    () => (entry === null ? emptyEntryFields() : entryFieldsFrom(entry)),
-    entry?.id ?? null
-  );
-  const [start, setStart] = React.useState<string>(() =>
-    new Date().toISOString()
-  );
-  const [end, setEnd] = React.useState<string>(() => new Date().toISOString());
-
-  // Everything in this dialog is read and written in the zone the entry was
-  // RECORDED in, so opening it from elsewhere shows the original wall-clock
-  // time and saving it unchanged does not move the entry.
-  const entryZone = entry?.timeZone ?? deviceTimeZone();
-  const foreignZone =
-    entry !== null &&
-    !isSameZone(entryZone, deviceTimeZone(), Date.parse(entry.start));
-
-  // Reseed the times whenever a different entry is opened. The fields do the
-  // same, keyed on the id, inside `useEntryFields`.
-  const entryId = entry?.id ?? null;
-  const [lastEntryId, setLastEntryId] = React.useState<string | null>(null);
-  if (lastEntryId !== entryId) {
-    setLastEntryId(entryId);
-    if (entry !== null) {
-      setStart(entry.start);
-      setEnd(entry.end ?? new Date().toISOString());
-    }
-  }
-
-  const seconds = Math.max(
-    0,
-    Math.round((Date.parse(end) - Date.parse(start)) / 1000)
-  );
-
-  const save = React.useCallback((): void => {
-    if (entry === null) return;
-    // Roll a midnight-crossing end forward rather than clamping it: an entry
-    // from 23:30 to 00:30 is an hour of work, and clamping threw that away.
-    const safeEnd = rollEndAfterStart(start, end);
-
-    mutations.updateEntry({
-      id: entry.id,
-      ...fields,
-      start,
-      // A running entry keeps running unless it already had an end.
-      end: entry.end === null ? null : safeEnd,
-    });
-    onClose();
-  }, [end, entry, fields, mutations, onClose, start]);
+  const editor = useEntryEditor(entry, {
+    onSave: mutations.updateEntry,
+    onDone: onClose,
+  });
 
   return (
     <Dialog
@@ -124,19 +64,20 @@ export function EntryEditDialog({
 
         <div className="space-y-4">
           <EntryFieldsEditor
-            value={fields}
-            onChange={setFields}
+            value={editor.fields}
+            onChange={editor.setFields}
             idPrefix="entry-edit"
             testIdPrefix="entry-edit"
           />
 
-          {foreignZone ? (
+          {editor.foreignZone ? (
             <p
               className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
               data-testid="entry-edit-zone-note"
             >
-              Recorded in {zoneLabel(entryZone)} ({entryZone}). Times below are
-              shown and saved in that zone, so they stay as they were written.
+              Recorded in {zoneLabel(editor.entryZone)} ({editor.entryZone}).
+              Times below are shown and saved in that zone, so they stay as they
+              were written.
             </p>
           ) : null}
 
@@ -146,15 +87,8 @@ export function EntryEditDialog({
               <Input
                 id="entry-edit-date"
                 type="date"
-                value={dayKeyInZone(Date.parse(start), entryZone)}
-                onChange={(event) => {
-                  // Moving the start date carries the end with it, so the
-                  // entry keeps its length instead of silently stretching.
-                  const nextStart = withDayInZone(start, event.target.value, entryZone);
-                  const delta = Date.parse(nextStart) - Date.parse(start);
-                  setStart(nextStart);
-                  setEnd(new Date(Date.parse(end) + delta).toISOString());
-                }}
+                value={editor.startDayKey}
+                onChange={(event) => editor.changeStartDay(event.target.value)}
                 data-testid="entry-edit-date"
               />
             </div>
@@ -166,11 +100,9 @@ export function EntryEditDialog({
               <Input
                 id="entry-edit-end-date"
                 type="date"
-                value={dayKeyInZone(Date.parse(end), entryZone)}
-                min={dayKeyInZone(Date.parse(start), entryZone)}
-                onChange={(event) =>
-                  setEnd(withDayInZone(end, event.target.value, entryZone))
-                }
+                value={editor.endDayKey}
+                min={editor.startDayKey}
+                onChange={(event) => editor.changeEndDay(event.target.value)}
                 data-testid="entry-edit-end-date"
               />
             </div>
@@ -180,41 +112,35 @@ export function EntryEditDialog({
             <div className="space-y-2">
               <Label>Start</Label>
               <TimeField
-                value={start}
+                value={editor.start}
                 timeFormat={format.timeFormat}
-                timeZone={entryZone}
+                timeZone={editor.entryZone}
                 aria-label="Start time"
                 testId="entry-edit-start"
-                onCommit={setStart}
+                onCommit={editor.setStart}
               />
             </div>
             <div className="space-y-2">
               <Label>End</Label>
               <TimeField
-                value={end}
+                value={editor.end}
                 timeFormat={format.timeFormat}
-                timeZone={entryZone}
-                disabled={entry?.end === null}
+                timeZone={editor.entryZone}
+                disabled={editor.isRunning}
                 aria-label="End time"
                 testId="entry-edit-end"
-                onCommit={setEnd}
+                onCommit={editor.setEnd}
               />
             </div>
             <div className="space-y-2">
               <Label>Duration</Label>
               <DurationInput
-                value={seconds}
+                value={editor.seconds}
                 format={format.durationFormat}
-                disabled={entry?.end === null}
+                disabled={editor.isRunning}
                 aria-label="Duration"
                 testId="entry-edit-duration"
-                onCommit={(next) =>
-                  setEnd(
-                    new Date(
-                      Date.parse(start) + Math.max(60, next) * 1000
-                    ).toISOString()
-                  )
-                }
+                onCommit={editor.setDurationSeconds}
               />
             </div>
           </div>
@@ -229,7 +155,11 @@ export function EntryEditDialog({
           >
             Cancel
           </Button>
-          <Button type="button" onClick={save} data-testid="entry-edit-save">
+          <Button
+            type="button"
+            onClick={editor.save}
+            data-testid="entry-edit-save"
+          >
             Save
           </Button>
         </DialogFooter>
