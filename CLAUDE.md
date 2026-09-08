@@ -557,8 +557,20 @@ per-session revocation in Settings → Devices.
 Store that token in real secret storage (Keychain, `chrome.storage.session`,
 the Raycast password store), never a plain config file. Clients send
 `x-tracktime-client` so their session is named in Settings → Devices, where
-any of them can be signed out; revocation kills the HTTP and WebSocket paths
-at once. Device-flow client ids are allowlisted in `auth/client-label.ts`.
+any of them can be signed out. Device-flow client ids are allowlisted in
+`auth/client-label.ts`.
+
+Revocation has to reach the socket, not just HTTP. `ws/handler.ts`
+authenticates at the upgrade, and a phone then holds that socket open for
+days — so the session behind every live socket is re-checked once a minute
+(`ws/session-watch.ts`), and one that no longer exists is dropped out of its
+room and closed with code 4401. Two things there are load-bearing: the
+re-check passes `disableCookieCache`, or a revoked web session keeps
+answering out of the five-minute cookie cache; and a lookup that *throws* is
+"unknown", never "revoked", because one bad database minute must not sign
+every connected device out. A timer rather than a revoke event, because
+expiry and a row deleted straight out of the database are revocations too,
+and no event is published for either.
 
 ### Catalog shape
 

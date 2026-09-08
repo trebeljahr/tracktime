@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "http";
 import { getAuth } from "../auth/auth.js";
+import type { SessionVerdict } from "./session-watch.js";
 import { fromNodeHeaders } from "better-auth/node";
 
 /** Subprotocol prefix a browser client uses to carry its session token. */
@@ -48,21 +49,39 @@ function extractUpgradeToken(req: IncomingMessage): string | null {
 }
 
 /**
+ * A successful upgrade: better-auth's `{ session, user }` envelope, plus the
+ * exact headers that produced it.
+ *
+ * The headers are kept because authenticating once at the handshake is not
+ * enough — a socket outlives the session that opened it, so the same lookup
+ * has to be repeatable for as long as the socket is open. See
+ * `ws/session-watch.ts`.
+ */
+export type UpgradeAuth = {
+  session: NonNullable<
+    Awaited<ReturnType<ReturnType<typeof getAuth>["api"]["getSession"]>>
+  >;
+  headers: Headers;
+};
+
+/**
  * Authenticate a WebSocket upgrade request.
  *
  * Same single credential as every other entry point: a better-auth session,
  * arriving either as a cookie (web app) or as a session token (everything
- * else). Returns better-auth's `{ session, user }` envelope, or null when
- * unauthenticated. Never throws — a failed upgrade must not take the server
- * down.
+ * else). Returns the session and the headers that authenticated it, or null
+ * when unauthenticated. Never throws — a failed upgrade must not take the
+ * server down.
  */
-export async function authenticateUpgrade(req: IncomingMessage) {
+export async function authenticateUpgrade(
+  req: IncomingMessage,
+): Promise<UpgradeAuth | null> {
   const headers = fromNodeHeaders(req.headers);
 
   try {
     const auth = getAuth();
     const session = await auth.api.getSession({ headers });
-    if (session?.user) return session;
+    if (session?.user) return { session, headers };
   } catch {
     // Fall through and retry with an explicit token, below.
   }
@@ -75,8 +94,39 @@ export async function authenticateUpgrade(req: IncomingMessage) {
     // as it does for HTTP requests — no separate verification path.
     headers.set("authorization", `Bearer ${raw}`);
     const session = await getAuth().api.getSession({ headers });
-    return session?.user ? session : null;
+    return session?.user ? { session, headers } : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Ask again whether the session behind a live socket still exists.
+ *
+ * Replays the headers that authenticated the upgrade, so it is the same
+ * lookup with the same credential — no second verification path to keep in
+ * sync with the first.
+ *
+ * Two details are load-bearing:
+ *
+ *  - `disableCookieCache` — the auth config enables a five-minute signed
+ *    cookie cache, and without this flag a revoked web session would keep
+ *    answering from that cache instead of from the session table. A socket
+ *    re-check that reads a cache is not a re-check.
+ *  - a throw is `"unknown"`, never `"revoked"` — a database hiccup must not
+ *    sign every connected device out. Only a clean "no session" closes a
+ *    socket.
+ */
+export async function probeUpgradeSession(
+  headers: Headers,
+): Promise<SessionVerdict> {
+  try {
+    const session = await getAuth().api.getSession({
+      headers,
+      query: { disableCookieCache: true },
+    });
+    return session?.user ? "live" : "revoked";
+  } catch {
+    return "unknown";
   }
 }
