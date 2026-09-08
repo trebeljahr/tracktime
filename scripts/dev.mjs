@@ -301,7 +301,20 @@ const devExtensionOrigin = extensionOrigin(
 // TRUSTED_ORIGINS on the server child's command line and config/env.ts loads
 // dotenvx without `overload` — so a key already in the environment wins and the
 // file's value is skipped. Same rule as MONGODB_URI above.
-const capacitorOrigins = ["capacitor://localhost", "https://localhost"];
+//
+// The third is not a bundled app at all: under `pnpm dev:android` live reload
+// the WebView loads the Next dev server over the emulator's host alias, so the
+// document origin is http://10.0.2.2:<NEXT_PORT> and every API call is
+// cross-origin from it. Only scripts/android-dev.sh's default port is listed,
+// because the port is that script's to choose — with `NEXT_PORT=<n>` or a
+// physical device on `LAN_IP`, pass the origin yourself:
+//
+//   TRUSTED_ORIGINS=http://10.0.2.2:<n> pnpm run dev
+const capacitorOrigins = [
+  "capacitor://localhost",
+  "https://localhost",
+  "http://10.0.2.2:51740",
+];
 
 const trustedOrigins = [
   ...(process.env.TRUSTED_ORIGINS ?? "")
