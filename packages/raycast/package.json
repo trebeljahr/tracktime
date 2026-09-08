@@ -105,7 +105,7 @@
       "description": "Origin of the tracktime server, e.g. https://api.tracktime.example. Empty means the deployed server, or the local dev server under `ray develop`.",
       "type": "textfield",
       "required": false,
-      "placeholder": "https://tracktime.trebeljahr.com"
+      "placeholder": "https://api.trackyourtime.dev"
     },
     {
       "name": "webUrl",
@@ -113,7 +113,7 @@
       "description": "Origin of the tracktime web app, used for the device-pairing page and Open in Browser. Empty follows the API URL's default.",
       "type": "textfield",
       "required": false,
-      "placeholder": "https://tracktime.trebeljahr.com"
+      "placeholder": "https://trackyourtime.dev"
     }
   ],
   "dependencies": {

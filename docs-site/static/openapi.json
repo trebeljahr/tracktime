@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "https://api.tracktime.trebeljahr.com"
+      "url": "https://api.trackyourtime.dev"
     }
   ],
   "components": {
@@ -27,7 +27,7 @@
             "type": "string",
             "format": "uri",
             "examples": [
-              "https://tracktime.trebeljahr.com/problems/insufficient-scope"
+              "https://trackyourtime.dev/problems/insufficient-scope"
             ]
           },
           "title": {

@@ -134,7 +134,7 @@ export function registerApiV1Routes(app: Express): void {
   // a client that parses one error format would fail to parse the other.
   router.use((req: Request, res: Response) => {
     sendProblem(res, {
-      type: "https://tracktime.trebeljahr.com/problems/no-such-route",
+      type: "https://trackyourtime.dev/problems/no-such-route",
       title: "Not Found",
       status: 404,
       detail: `No API route matches ${req.method} ${req.originalUrl}. See ${API_V1_BASE_PATH}/openapi.json.`,

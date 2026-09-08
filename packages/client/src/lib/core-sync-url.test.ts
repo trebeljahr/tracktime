@@ -8,17 +8,17 @@
  * throwing, so a wrong path here reaches production as "sync just doesn't
  * work" with every HTTP request still succeeding.
  *
- * The `/api` prefix in particular is load-bearing for the deployment: the API
- * is served on a path of the web app's domain, so a socket outside `/api`
- * would need its own proxy rule. See docs/deploy.md.
+ * The `/api` prefix in particular is load-bearing for the deployment: the
+ * server mounts everything it owns at `/api`, so a socket outside it would
+ * need its own proxy rule. See docs/deploy.md.
  */
 import { describe, expect, it } from "vitest";
 import { resolveSyncUrl } from "@starter/core";
 
 describe("resolveSyncUrl", () => {
   it("puts the socket under /api so one proxy rule covers the server", () => {
-    expect(resolveSyncUrl("https://tracktime.trebeljahr.com", "")).toBe(
-      "wss://tracktime.trebeljahr.com/api/ws",
+    expect(resolveSyncUrl("https://api.trackyourtime.dev", "")).toBe(
+      "wss://api.trackyourtime.dev/api/ws",
     );
   });
 
@@ -32,8 +32,8 @@ describe("resolveSyncUrl", () => {
   });
 
   it("falls back to the page origin when no API URL was built in", () => {
-    expect(resolveSyncUrl("", "https://tracktime.trebeljahr.com")).toBe(
-      "wss://tracktime.trebeljahr.com/api/ws",
+    expect(resolveSyncUrl("", "https://api.trackyourtime.dev")).toBe(
+      "wss://api.trackyourtime.dev/api/ws",
     );
   });
 

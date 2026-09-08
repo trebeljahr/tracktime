@@ -10,11 +10,13 @@
  * `NEXT_PUBLIC_API_URL` the socket is same-origin, which is what the local
  * dev proxy and single-origin deployments want.
  *
- * The socket sits UNDER `/api` deliberately. Production serves the API on a
- * path of the web app's own domain (`https://<domain>/api`), so everything the
- * server owns has to live under one prefix — a socket at `/ws` would need its
- * own routing rule at the proxy, and a rule nobody remembers to add is a
- * client that reconnects forever while every HTTP request succeeds.
+ * The socket sits UNDER `/api` deliberately: the server mounts everything it
+ * owns at that prefix, so `https://api.trackyourtime.dev` as the base yields
+ * `wss://api.trackyourtime.dev/api/ws`. The doubled-looking segment is the
+ * mount, not a stray path in the base URL. Keeping one prefix means one
+ * routing rule at the proxy — a socket at `/ws` would need its own, and a
+ * rule nobody remembers to add is a client that reconnects forever while
+ * every HTTP request succeeds.
  *
  * The server accepts `/ws` as well (`ws/handler.ts`), so a client built before
  * this still connects wherever `/ws` is still routed.

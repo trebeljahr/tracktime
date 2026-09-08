@@ -57,7 +57,7 @@ body:
     attributes:
       label: Hosted or self-hosted?
       options:
-        - Hosted (tracktime.trebeljahr.com)
+        - Hosted (trackyourtime.dev)
         - Self-hosted
         - Running it locally for development
     validations:

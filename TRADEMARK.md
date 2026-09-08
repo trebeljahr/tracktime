@@ -10,7 +10,7 @@ The marks covered by this policy are:
 
 - the project name **tracktime**
 - the tracktime logo and visual identity
-- the domains `tracktime.trebeljahr.com` and `api.tracktime.trebeljahr.com`
+- the domains `trackyourtime.dev` and `api.trackyourtime.dev`
 
 AGPL-3.0 says as much itself: section 7(e) contemplates a term "declining to
 grant rights under trademark law for use of some trade names, trademarks, or

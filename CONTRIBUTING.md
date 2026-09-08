@@ -465,8 +465,8 @@ the full policy, including what to put in a report and the expected timelines.
 Open a [question issue](https://github.com/trebeljahr/tracktime/issues/new?template=question.yml)
 — GitHub Discussions are not enabled on this repository, so the issue tracker
 is where questions go — or email <ricotrebeljahr@gmail.com>.
-[SUPPORT.md](SUPPORT.md) says which to use and what to expect. The hosted app is at <https://tracktime.trebeljahr.com>, with the
-API served on `/api` of that same domain.
+[SUPPORT.md](SUPPORT.md) says which to use and what to expect. The hosted app is at <https://trackyourtime.dev>, with the
+API on its own host at <https://api.trackyourtime.dev>.
 
 ## Who decides
 

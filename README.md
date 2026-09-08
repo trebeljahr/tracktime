@@ -5,7 +5,7 @@ A self-hostable time tracker: clients, projects, tasks, tags, billable rates, re
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![build-and-deploy](https://github.com/trebeljahr/tracktime/actions/workflows/build-and-deploy.yml/badge.svg?branch=main)](https://github.com/trebeljahr/tracktime/actions/workflows/build-and-deploy.yml?query=branch%3Amain)
 
-Hosted instance: <https://tracktime.trebeljahr.com>. The API is served on `/api` of that same domain, not on a host of its own — [`docs/deploy.md`](docs/deploy.md) explains why.
+Hosted instance: <https://trackyourtime.dev>, with the API on its own host at <https://api.trackyourtime.dev> — [`docs/deploy.md`](docs/deploy.md) explains the topology and why the domain moved.
 
 > The build badge is pinned to `main` and reports the real state of the pipeline. It is not green — see [Not there yet](#not-there-yet).
 
@@ -184,7 +184,7 @@ Other clients:
 ```bash
 pnpm run dev:extension       # browser extension, dev target (localhost:5159)
 pnpm run build:extension     # dist/       -> http://localhost:5159
-pnpm run build:extension:prod # dist-prod/ -> https://tracktime.trebeljahr.com
+pnpm run build:extension:prod # dist-prod/ -> https://api.trackyourtime.dev
 pnpm run extension:id [dev|prod]  # the chrome-extension:// origin to trust
 
 pnpm run dev:raycast         # ray develop

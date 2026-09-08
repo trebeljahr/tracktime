@@ -5,7 +5,7 @@ description: The public REST API at /api/v1 — base URL, response envelope, cur
 
 # REST API
 
-`https://api.tracktime.trebeljahr.com/api/v1` is a token-authenticated REST API over
+`https://api.trackyourtime.dev/api/v1` is a token-authenticated REST API over
 the same data the web app, the browser extension and the Raycast extension use. It
 reads and writes time entries, the catalog behind them (clients, projects, tasks,
 tags) and reports over both.
@@ -22,7 +22,7 @@ appears in an open browser tab immediately.
 3. Confirm what it can reach:
 
 ```bash
-curl -s https://api.tracktime.trebeljahr.com/api/v1/me \
+curl -s https://api.trackyourtime.dev/api/v1/me \
   -H "Authorization: Bearer $TRACKTIME_TOKEN"
 ```
 
@@ -81,7 +81,7 @@ default set by the server) and then feed each response's `nextCursor` back as th
 `cursor` parameter until it comes back `null`:
 
 ```bash
-curl -s -G https://api.tracktime.trebeljahr.com/api/v1/entries \
+curl -s -G https://api.trackyourtime.dev/api/v1/entries \
   -H "Authorization: Bearer $TRACKTIME_TOKEN" \
   --data-urlencode "from=2026-09-01" \
   --data-urlencode "to=2026-09-30" \

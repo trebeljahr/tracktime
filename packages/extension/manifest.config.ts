@@ -43,15 +43,18 @@ export const BUILD_TARGETS: Record<BuildMode, BuildTarget> = {
     outDir: "dist",
   },
   production: {
-    // The API is served on `/api` of the web app's own domain, not on a host
-    // of its own: `api.<domain>` is two labels under the zone, which the
-    // wildcard certificate does not cover, so it had no TLS at all.
+    // The API has its own host on its own apex zone. `api.trackyourtime.dev`
+    // is one label under `trackyourtime.dev`, which a wildcard certificate
+    // covers — the reason the old `api.tracktime.trebeljahr.com` could not
+    // exist was that it was two labels under `trebeljahr.com`.
     //
     // This is an ORIGIN — the extension appends `/api/...` itself, the same
-    // as the web client does — so it is the bare domain with no path.
-    apiUrl: "https://tracktime.trebeljahr.com",
+    // as the web client does — so it is the bare host with no path. The
+    // server still mounts at `/api`, so calls land on
+    // `https://api.trackyourtime.dev/api/trpc`.
+    apiUrl: "https://api.trackyourtime.dev",
     name: "tracktime",
-    hostPermissions: ["https://tracktime.trebeljahr.com/*"],
+    hostPermissions: ["https://api.trackyourtime.dev/*"],
     outDir: "dist-prod",
   },
 };

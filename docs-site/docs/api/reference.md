@@ -12,7 +12,7 @@ Every route below is mounted from one array, `API_ROUTES` in
 [the OpenAPI document](pathname:///openapi.json) are both generated from it. A route
 cannot exist here and not in the server, or in the server and not here.
 
-All paths are relative to `https://api.tracktime.trebeljahr.com/api/v1`. Every route
+All paths are relative to `https://api.trackyourtime.dev/api/v1`. Every route
 but `/openapi.json` needs `Authorization: Bearer tt_…`. **Parameters** says where a
 route's input goes: `query` for a GET filter, `body` for JSON, `path` for the id in
 the URL. Full field-level shapes live in the OpenAPI document.

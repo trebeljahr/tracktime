@@ -270,7 +270,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
         "intersected with that member's visibility right now — it can never show more than its " +
         "owner may see.",
     },
-    servers: [{ url: "https://api.tracktime.trebeljahr.com" }],
+    servers: [{ url: "https://api.trackyourtime.dev" }],
     components: {
       securitySchemes: {
         bearerAuth: {

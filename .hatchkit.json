@@ -4,7 +4,7 @@
   "scaffoldedAt": "2026-08-21T08:54:14.553Z",
   "name": "tracktime",
   "description": "A simple time tracker application",
-  "domain": "tracktime.trebeljahr.com",
+  "domain": "trackyourtime.dev",
   "features": [
     "websocket",
     "s3",
@@ -59,7 +59,7 @@
         "origins": [
           "http://localhost:5159",
           "http://localhost:6477",
-          "https://tracktime.trebeljahr.com"
+          "https://trackyourtime.dev"
         ],
         "methods": [
           "GET",

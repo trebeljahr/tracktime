@@ -86,7 +86,7 @@ describe("problemFromTRPCError", () => {
       assert.equal(problem.status, status, code);
       assert.equal(problem.detail, "a message about the request", code);
       assert.equal(problem.instance, INSTANCE);
-      assert.match(problem.type, /^https:\/\/tracktime\.trebeljahr\.com\/problems\//);
+      assert.match(problem.type, /^https:\/\/trackyourtime\.dev\/problems\//);
     }
   });
 
@@ -135,7 +135,7 @@ describe("problemFromTRPCError", () => {
     // `problems/forbidden` and a client could only tell them apart by prose.
     const problem = problemFromTRPCError(moneyVisibilityProblem(), INSTANCE);
     assert.equal(problem.status, 403);
-    assert.equal(problem.type, "https://tracktime.trebeljahr.com/problems/money-visibility-required");
+    assert.equal(problem.type, "https://trackyourtime.dev/problems/money-visibility-required");
   });
 
   it("still hides the message when a route names a 5xx slug", () => {
@@ -151,7 +151,7 @@ describe("problemFromTRPCError", () => {
     // endpoint into an enumeration oracle.
     const problem = problemFromTRPCError(notFoundProblem("Entry not found"), INSTANCE);
     assert.equal(problem.status, 404);
-    assert.equal(problem.type, "https://tracktime.trebeljahr.com/problems/not-found");
+    assert.equal(problem.type, "https://trackyourtime.dev/problems/not-found");
   });
 });
 
@@ -207,7 +207,7 @@ describe("requireScope", () => {
       assert.equal(recorded.status, 403, scope);
       assert.equal(
         JSON.parse(recorded.body).type,
-        "https://tracktime.trebeljahr.com/problems/insufficient-scope",
+        "https://trackyourtime.dev/problems/insufficient-scope",
       );
     }
   });

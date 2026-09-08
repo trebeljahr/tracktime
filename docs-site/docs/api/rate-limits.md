@@ -87,7 +87,7 @@ Retry-After: 17
 
 ```json
 {
-  "type": "https://tracktime.trebeljahr.com/problems/rate-limited",
+  "type": "https://trackyourtime.dev/problems/rate-limited",
   "title": "Too Many Requests",
   "status": 429,
   "detail": "Rate limit of 600 requests per minute exceeded. Retry in 17s.",

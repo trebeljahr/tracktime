@@ -537,31 +537,60 @@ the browser extension and CLI inherit it; only Raycast UI belongs here.
   real value and "untouched" would be indistinguishable from "typed the
   production URL". A worktree runs on random ports — set both by hand there.
 
-### Deployment (two Coolify apps, one domain)
+### Deployment (two Coolify apps, two hosts)
 
-Production is two apps behind **one** domain: `tracktime-client` on
-`https://tracktime.trebeljahr.com` and `tracktime-server` on
-`https://tracktime.trebeljahr.com/api`, from `docker-compose.client.yml` and
+Production is two apps on **two hosts of one zone**: `tracktime-client` on
+`https://trackyourtime.dev` and `tracktime-server` on
+`https://api.trackyourtime.dev`, from `docker-compose.client.yml` and
 `docker-compose.server.yml`. The service name inside each file (`client` /
 `server`) is load-bearing — Coolify keys `docker_compose_domains` by it, and a
-mismatch yields 503 with a 200 from the API. `docker-compose.yml` is the
-legacy single-app layout, kept for reference.
+mismatch yields 503 for the site with a 200 from Coolify's own API.
+`docker-compose.yml` is the legacy single-app layout, kept for reference.
 
-The API is on a **path**, not on `api.<domain>`, because Cloudflare's
-Universal SSL for this zone covers `trebeljahr.com` and `*.trebeljahr.com` —
-one label. `api.tracktime.trebeljahr.com` is two, so it got no certificate and
-failed the TLS handshake before any HTTP. Two apps rather than one so a client
-deploy cannot restart the server and drop every connected device's socket.
+Two apps rather than one so a client deploy cannot restart the server and drop
+every connected device's socket.
 
-Everything the server owns lives under `/api`, the socket included:
-`resolveSyncUrl` derives `wss://<domain>/api/ws`, so one proxy rule covers the
-lot. `NEXT_PUBLIC_API_URL` is an **origin** with no path — the clients append
-`/api/trpc`, `/api/auth` and `/api/ws` themselves.
+**Why the domain moved.** The previous layout put both apps on
+`tracktime.trebeljahr.com` and split them by path (`/api` to the server),
+because `api.tracktime.trebeljahr.com` could not get a certificate: Cloudflare
+Universal SSL for that zone covers `trebeljahr.com` and `*.trebeljahr.com` —
+**one** label — and that host is two. That constraint is real and still applies
+to anything under `trebeljahr.com`.
 
-Four places must agree on it: `.env.production` (`BETTER_AUTH_URL`), the
-client image's `NEXT_PUBLIC_API_URL` build arg in
-`.github/workflows/build-and-deploy.yml`, `packages/extension/manifest.config.ts`,
-and `packages/raycast/src/lib/preferences.ts`. See `docs/deploy.md`.
+The path split then failed for a second, independent reason: this Coolify
+instance proxies with **caddy-docker-proxy**, not Traefik. Coolify writes
+`traefik.*` labels onto every app and they are inert here; what routes is
+`caddy_0=https://<host>` plus `caddy_0.handle_path`. Both apps wrote the same
+`caddy_0` site for the same host, caddy-docker-proxy merged them, and the
+client's `/*` won — so `https://tracktime.trebeljahr.com/api/health` was
+answered by the client's 404 page. And `handle_path` **strips** its prefix, so
+even ordered correctly the server (which mounts its routes AT `/api`) would
+have received `/health`.
+
+A fresh apex zone fixes both at once. `api.trackyourtime.dev` is one label
+under `trackyourtime.dev`, so the wildcard covers it, and each app gets
+`handle_path=/*` on a host of its own — no label collision, no prefix strip.
+
+**Consequence: the API is a separate origin from the web app again.** CORS and
+cookie handling are load-bearing, not decorative. `FRONTEND_URL` and
+`TRUSTED_ORIGINS` on the server are what let the browser client and the
+extension sign in at all; do not "simplify" them away.
+
+The server still mounts everything it owns at `/api`, the socket included:
+`resolveSyncUrl` derives `wss://api.trackyourtime.dev/api/ws`.
+`NEXT_PUBLIC_API_URL` is an **origin** with no path — the clients append
+`/api/trpc`, `/api/auth` and `/api/ws` themselves — so real requests carry a
+doubled-looking `api.trackyourtime.dev/api/...`. That is the mount, not a
+mistake in the value. Stripping the mount would touch server, core, extension
+and Raycast; it buys cosmetics only.
+
+Four places must agree on the API origin: the server's `BETTER_AUTH_URL`
+(set in Coolify's env fields — `packages/server/.env.production` is NOT tracked
+in this repo, a global gitignore rule excludes it), the client image's
+`NEXT_PUBLIC_API_URL` build arg in `.github/workflows/build-and-deploy.yml`
+(Next inlines it at image build time, so a wrong value builds green and points
+at a dead API), `packages/extension/manifest.config.ts`, and
+`packages/raycast/src/lib/preferences.ts`. See `docs/deploy.md`.
 
 The client image serves the static export: `output: "export"` leaves no
 `.next/standalone`, so the image is `out/` plus `packages/client/serve.mjs`.
@@ -612,7 +641,7 @@ target. Both are declared in `packages/extension/manifest.config.ts` — not in
 
 ```bash
 pnpm run build:extension        # dist/      -> http://localhost:5159
-pnpm run build:extension:prod   # dist-prod/ -> https://api.tracktime.trebeljahr.com
+pnpm run build:extension:prod   # dist-prod/ -> https://api.trackyourtime.dev
 pnpm run extension:id [dev|prod]  # the chrome-extension:// origin to trust
 ```
 

@@ -39,7 +39,7 @@ export const isPermanentRejection = (error: unknown): boolean =>
   error instanceof ApiError && PERMANENT_REJECTIONS.has(error.httpStatus);
 
 export type ApiClientOptions = {
-  /** Origin of the server, e.g. `https://tracktime.trebeljahr.com`. */
+  /** Origin of the server, e.g. `https://api.trackyourtime.dev`. */
   baseUrl: string;
   /**
    * better-auth session token from `signInWithPassword()` or the device flow.

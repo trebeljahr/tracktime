@@ -16,7 +16,7 @@ import { ZodError } from "zod";
  * spec intends. Keeping the base here means the slug is the only thing a
  * call site has to know.
  */
-const PROBLEM_BASE = "https://tracktime.trebeljahr.com/problems/";
+const PROBLEM_BASE = "https://trackyourtime.dev/problems/";
 
 export type Problem = {
   type: string;

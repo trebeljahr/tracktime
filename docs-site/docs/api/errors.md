@@ -10,7 +10,7 @@ as `Content-Type: application/problem+json`:
 
 ```json
 {
-  "type": "https://tracktime.trebeljahr.com/problems/insufficient-scope",
+  "type": "https://trackyourtime.dev/problems/insufficient-scope",
   "title": "Forbidden",
   "status": 403,
   "detail": "This token does not carry the `entries:write` scope.",
@@ -29,7 +29,7 @@ a success before you parse: `application/problem+json` versus `application/json`
 
 ## The slugs
 
-Each `type` is `https://tracktime.trebeljahr.com/problems/` plus one of:
+Each `type` is `https://trackyourtime.dev/problems/` plus one of:
 
 | Slug | Status | Means |
 | --- | --- | --- |

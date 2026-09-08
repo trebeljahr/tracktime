@@ -1,19 +1,23 @@
-# Production compose for the CLIENT Coolify app (the bare <domain>).
+# Production compose for the CLIENT Coolify app, routed at
+# https://trackyourtime.dev — the apex host.
 #
-# Traefik routes <domain>/api to the server app and everything else here, so
-# the two share one domain and one certificate without sharing a deploy.
+# The server app owns https://api.trackyourtime.dev, a separate host in the
+# same zone. Separate hosts rather than one host split by path: this Coolify
+# instance proxies with caddy-docker-proxy, where two apps claiming the same
+# site collide on one label and the client's /* swallows the API. See
+# docs/deploy.md.
 #
 # One service, named `client` — the name is load-bearing for the same reason
 # as in docker-compose.server.yml: `hatchkit sync` writes the
 # `docker_compose_domains` key `client` for the split topology, and a key that
-# doesn't match a service here yields a 200 from Coolify, no Traefik labels,
+# doesn't match a service here yields a 200 from Coolify, no proxy labels,
 # and 503 from the site.
 #
 # Separate from the server app on purpose. The server holds the WebSocket sync
 # connections, so a client deploy that restarted it would drop every connected
 # device's socket for a change that never touched the server.
 #
-# Do NOT expose ports here — Coolify's Traefik handles external routing.
+# Do NOT expose ports here — Coolify's reverse proxy handles external routing.
 
 services:
   client:

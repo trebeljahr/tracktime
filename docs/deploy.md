@@ -1,19 +1,22 @@
 # Deploying tracktime
 
-Two Coolify apps behind **one** domain:
+Two Coolify apps on **two hosts of one zone**:
 
 | Coolify app | Routed at | Compose file | Serves |
 |---|---|---|---|
-| `tracktime-client` | `https://tracktime.trebeljahr.com` | `docker-compose.client.yml` | the Next web app |
-| `tracktime-server` | `https://tracktime.trebeljahr.com/api` | `docker-compose.server.yml` | the Express API, tRPC and the `/api/ws` socket |
+| `tracktime-client` | `https://trackyourtime.dev` | `docker-compose.client.yml` | the Next web app |
+| `tracktime-server` | `https://api.trackyourtime.dev` | `docker-compose.server.yml` | the Express API, tRPC and the `/api/ws` socket |
 
-## Why one domain and not `api.<domain>`
+## Why a new domain — the history, because both halves still matter
 
-Because `api.tracktime.trebeljahr.com` cannot get a certificate here.
+This deployment has been through two failed shapes. Neither reason has gone
+away; the new domain just stops both from applying at once.
 
-Cloudflare's Universal SSL certificate for this zone covers `trebeljahr.com`
-and `*.trebeljahr.com` — **one** label. `api.tracktime.trebeljahr.com` is two,
-so TLS fails before any HTTP happens:
+### 1. `api.tracktime.trebeljahr.com` could not get a certificate
+
+Cloudflare's Universal SSL certificate for the `trebeljahr.com` zone covers
+`trebeljahr.com` and `*.trebeljahr.com` — **one** label.
+`api.tracktime.trebeljahr.com` is two, so TLS failed before any HTTP happened:
 
 ```
 $ curl https://api.tracktime.trebeljahr.com/api/health
@@ -21,14 +24,53 @@ curl: (35) error:1404B410:SSL routines:ST_CONNECT:sslv3 alert handshake failure
 ```
 
 `api.playtiao.com` is one label under `playtiao.com`, which is why the sibling
-deployment does not hit this and why copying its shape here does not work.
+deployment never hit this and why copying its shape under `trebeljahr.com` did
+not work. **This constraint is still true** — anything moved back under
+`trebeljahr.com` hits it again. The paid alternatives were Advanced
+Certificate Manager, or turning the proxy off on that record so Coolify issues
+its own certificate (which exposes the origin IP).
 
-The alternatives were Cloudflare's Advanced Certificate Manager (paid),
-turning off the proxy on that record so Coolify issues its own certificate
-(exposes the origin IP), or renaming to a single-label host. Serving the API
-on a path of the site's own domain costs nothing, needs no second certificate,
-and makes the browser client same-origin — so no CORS preflights and no
-third-party-cookie exposure for the session cookie.
+### 2. So the API went on a path — and this Coolify instance runs Caddy
+
+The fix was to serve the API at `https://tracktime.trebeljahr.com/api`, one
+domain, one certificate, browser client same-origin. That is unworkable here,
+and the reason is the proxy.
+
+This Coolify instance proxies with **caddy-docker-proxy**, not Traefik.
+Confirmed at the origin: an unknown `Host` answers `503 no available server`
+with an `alt-svc: h3` header, which is Caddy. Coolify writes `traefik.*`
+labels onto every app regardless, and they are inert here. What actually routes
+is:
+
+```
+client: caddy_0=https://tracktime.trebeljahr.com   caddy_0.handle_path=/*
+server: caddy_0=https://tracktime.trebeljahr.com   caddy_0.handle_path=/api*
+```
+
+Two problems, either one fatal:
+
+- Both containers write the **same label key for the same site**.
+  caddy-docker-proxy merges them, and `/*` wins — so
+  `https://tracktime.trebeljahr.com/api/health` was answered by the client's
+  404 page. There is no "more specific rule first" here; that is Traefik
+  behaviour, and Traefik is not what is running.
+- `handle_path` **strips** its prefix. Even ordered correctly, the server —
+  which mounts its routes *at* `/api` and expects `/api/trpc` — would have
+  received `/trpc`, and answered 404 to everything.
+
+### 3. A fresh apex zone: `trackyourtime.dev`
+
+On a new apex, the API gets a **single-label** host that a wildcard covers, and
+each app gets `handle_path=/*` on a site of its own. No certificate problem, no
+label collision, no prefix strip, no path routing at all.
+
+The cost is that the API is a **separate origin** from the web app again. That
+is the thing most likely to be broken by a later "simplification":
+`FRONTEND_URL` and `TRUSTED_ORIGINS` on the server are what make cross-origin
+sign-in work, and every browser call is now preflighted. They are load-bearing.
+(The two hosts share a registrable domain, so the session cookie is still
+*same-site* — `SameSite=Lax` survives the move. Cross-**origin**, not
+cross-site.)
 
 ## Why still two apps
 
@@ -36,20 +78,35 @@ Coolify's unit of deployment is the app. Two apps means the client and the
 server restart independently, which matters because the server holds the
 WebSocket sync connections — under a single app, every client-side deploy
 would drop every connected device's socket for a change that never touched
-the server. One domain, two apps, two deploy triggers.
+the server. One zone, two hosts, two apps, two deploy triggers.
 
 The app names are the ones `hatchkit sync` looks for (`<name>-client` /
 `<name>-server`). The service names *inside* each compose file are equally
 load-bearing: Coolify keys `docker_compose_domains` by service name, and a key
-that doesn't match a service makes Coolify accept the PATCH, emit no Traefik
-labels, and serve 503.
+that doesn't match a service makes Coolify accept the PATCH, emit no proxy
+labels, and serve 503. (Coolify writes `traefik.*` labels too, but this
+instance routes on the `caddy_*` ones — either way the key is the service
+name.)
 
-## Everything the server owns lives under `/api`
+## Everything the server owns is still mounted under `/api`
 
-One prefix, one routing rule. The socket included — `resolveSyncUrl`
-(`packages/core/src/sync-url.ts`) derives `wss://<domain>/api/ws`, not `/ws`,
-so there is no second path to remember at the proxy. A rule nobody remembers
-to add is a client that reconnects forever while every HTTP request succeeds.
+The dedicated `api.` host did **not** move the mount. The server still serves
+`/api/trpc`, `/api/auth` and `/api/ws`, so the real endpoints are
+`https://api.trackyourtime.dev/api/trpc` and
+`wss://api.trackyourtime.dev/api/ws`. The doubled-looking segment is
+deliberate: `NEXT_PUBLIC_API_URL` is an **origin** with no path, and the
+clients append the `/api/...` themselves.
+
+Keeping the mount was the cheap correct choice. Stripping it to get
+`api.trackyourtime.dev/trpc` would mean changes in the server's route mounting,
+`packages/core` (`sync-url.ts`, `api-client.ts`), the extension and Raycast —
+and every client already deployed against the old paths would break on a
+mismatch. The wart is cosmetic; the change is not.
+
+One prefix also means one routing rule. The socket included — `resolveSyncUrl`
+(`packages/core/src/sync-url.ts`) derives `/api/ws`, not `/ws`, so there is no
+second path to remember at the proxy. A rule nobody remembers to add is a
+client that reconnects forever while every HTTP request succeeds.
 
 `packages/server/src/ws/handler.ts` accepts `/ws` as well, so a client built
 before this change still connects wherever `/ws` is still routed.
@@ -61,18 +118,17 @@ before this change still connects wherever `/ws` is still routed.
    and logs "skipping Redis connection" when it is unset.
 2. **Two applications**, both from this repo, build pack `dockercompose`:
    - `tracktime-server` → compose path `docker-compose.server.yml`,
-     domain `https://tracktime.trebeljahr.com/api`
+     domain `https://api.trackyourtime.dev`
    - `tracktime-client` → compose path `docker-compose.client.yml`,
-     domain `https://tracktime.trebeljahr.com`
+     domain `https://trackyourtime.dev`
 
-   Traefik picks the more specific rule first, so the `/api` router wins for
-   API traffic and everything else falls through to the client.
+   **Give each a bare host and no path.** A path in the domain field is what
+   produced `handle_path=/api*`, and `handle_path` strips its prefix — the
+   server expects to receive `/api/trpc`, not `/trpc`. With one host per app
+   the generated rule is `handle_path=/*` on each, which strips nothing.
 
-   **Check that Coolify did not add a strip-prefix middleware.** Some versions
-   attach one automatically to a domain that carries a path. The server mounts
-   its routes *at* `/api` — it expects to receive `/api/trpc`, not `/trpc` —
-   so a stripped prefix turns every call into a 404 while the site itself
-   looks fine. The one-line test is below.
+   Two apps must never carry the same host, either: caddy-docker-proxy merges
+   same-site labels and one of them silently swallows the other's traffic.
 3. **Env on the server app — all of it, in Coolify's env fields.**
 
    `packages/server/.env.production` is NOT tracked in git here (a global
@@ -88,16 +144,25 @@ before this change still connects wherever `/ws` is still routed.
    `TRUSTED_ORIGINS`, `S3_PUBLIC_URL`, `AWS_ACCESS_KEY_ID`,
    `AWS_SECRET_ACCESS_KEY`.
 
-   `BETTER_AUTH_URL` and `FRONTEND_URL` are now the *same* value,
-   `https://tracktime.trebeljahr.com` — that is what one domain means.
+   These are now **different** values, which they were not under the
+   one-domain layout:
 
-   `.env.production` remains the local source of truth — it is what
-   `NODE_ENV=production pnpm --filter @starter/server start` reads, and where
-   to look up the values to paste — but editing it does not change the
-   deployment.
-4. **DNS**: one record on `trebeljahr.com` — `tracktime`. There is no longer
-   an `api.tracktime` record; delete it if it is still there, so nothing
-   resolves to a host with no certificate.
+   - `BETTER_AUTH_URL=https://api.trackyourtime.dev` — better-auth's own
+     origin, where it mounts `/api/auth` and signs cookies for.
+   - `FRONTEND_URL=https://trackyourtime.dev` — the web app, and the CORS
+     allow-list entry. The browser client is cross-origin again, so this is
+     what makes its calls pass preflight at all.
+   - `TRUSTED_ORIGINS` — plus the extension's `chrome-extension://<id>`.
+
+   `.env.production` is a local convenience only — it is what
+   `NODE_ENV=production pnpm --filter @starter/server start` reads — and it is
+   untracked here, so Coolify's env fields are the real source of truth.
+4. **DNS**: two records on the `trackyourtime.dev` zone — the apex `@` and
+   `api`, both proxied. The old `tracktime` record on `trebeljahr.com` (and
+   any leftover `api.tracktime`) can go once the move is verified; nothing in
+   the app points at them any more. `assets.tracktime.trebeljahr.com` is a
+   separate thing and stays — it is the R2 asset host, unrelated to this
+   move.
 5. **GitHub secrets** so CI can trigger both deploys:
    `COOLIFY_SERVER_RESOURCE_UUID` and `COOLIFY_CLIENT_RESOURCE_UUID`
    (alongside the existing `COOLIFY_BASE_URL` and `COOLIFY_API_TOKEN`). With
@@ -107,21 +172,37 @@ before this change still connects wherever `/ws` is still routed.
 ## Verifying a deploy
 
 ```bash
-curl -sS https://tracktime.trebeljahr.com/api/health
+curl -sS https://api.trackyourtime.dev/api/health   # the server app
+curl -sSI https://trackyourtime.dev/                # the client app
 ```
 
-That single call covers the whole chain: the certificate, the `/api` router
-winning over the client's, the prefix arriving unstripped, and the server
-being up. A 404 with the site otherwise working is the strip-prefix middleware
-in step 2. A 503 is Coolify routing with no Traefik labels — check the service
-names in the compose files.
+The first covers the whole server chain: the certificate on the `api.` host,
+the route reaching the container with `/api` unstripped, and the server being
+up.
+
+Reading the failures:
+
+- **404 from the API host** while the site works — the prefix was stripped.
+  Check that the server app's Coolify domain is the bare host with no `/api`
+  path on it.
+- **The client's own 404 page from the API host** — the two apps are claiming
+  the same Caddy site. Check that they carry different domains.
+- **503 `no available server`** — Coolify emitted no usable proxy labels.
+  Check the service names (`client` / `server`) against the compose files.
+- **TLS handshake failure** — the host is more than one label under its zone
+  and the wildcard does not cover it. That is the original bug; do not
+  re-create it.
 
 ## What has to agree
 
-- `.env.production` — `BETTER_AUTH_URL=https://tracktime.trebeljahr.com` and
-  `FRONTEND_URL=https://tracktime.trebeljahr.com`. `FRONTEND_URL` is also the
-  CORS allow-list entry; same-origin requests do not need it, but the browser
-  extension's do.
+- **Coolify's env fields on the server app** —
+  `BETTER_AUTH_URL=https://api.trackyourtime.dev` and
+  `FRONTEND_URL=https://trackyourtime.dev`. These are different values now.
+  `FRONTEND_URL` is also the CORS allow-list entry, and the browser client is
+  cross-origin again, so getting it wrong breaks sign-in for everyone rather
+  than just for the extension. `packages/server/.env.production` is untracked
+  in this repo, so there is no committed file to edit — Coolify is where the
+  value lives.
 - `.github/workflows/build-and-deploy.yml` — `NEXT_PUBLIC_API_URL` and
   `NEXT_PUBLIC_WS_URL` are baked into the browser bundle at image build time.
   Runtime env cannot change them; rebuilding the image is the only way. Both
@@ -138,8 +219,9 @@ carries `Sec-Fetch-*` headers, which every browser fetch does. Any origin that
 is not `FRONTEND_URL` needs to be in `TRUSTED_ORIGINS` or sign-in returns
 `403 INVALID_ORIGIN` before the password is checked.
 
-The web app is now same-origin with the API, so it needs nothing here. The
-browser extension still does. That id is derived from the directory the
+The web app is **not** same-origin with the API any more, so `FRONTEND_URL`
+carrying `https://trackyourtime.dev` is what admits it. The browser extension
+needs its own entry on top. That id is derived from the directory the
 unpacked build is loaded from, so it is only right for a `dist-prod/` at this
 checkout's path. Before publishing, pin `EXTENSION_KEY` (see
 `packages/extension/manifest.config.ts`) so the id stops moving, then:
@@ -159,9 +241,10 @@ Express hands `req.ip` to the public API's failed-authentication meter, and
 derives it as the (n+1)-th address from the *right* of `X-Forwarded-For`.
 
 **This deployment has two.** Cloudflare proxies the record (that is why the
-origin IP stays hidden, and why the single-domain certificate works at all),
-and Coolify's Traefik sits behind it. Cloudflare appends the caller to
-`X-Forwarded-For`, Traefik appends Cloudflare's edge address, so the header
+origin IP stays hidden, and why Universal SSL covers the host at all),
+and Coolify's reverse proxy (caddy-docker-proxy here) sits behind it.
+Cloudflare appends the caller to `X-Forwarded-For`, the proxy appends
+Cloudflare's edge address, so the header
 reaching the app reads `<caller>, <cf-edge>` and only `TRUST_PROXY_HOPS=2`
 resolves `req.ip` to the caller. The default is **1**, which is the safe
 generic value, not the right one here — set it explicitly.

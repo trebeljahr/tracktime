@@ -1,21 +1,29 @@
-# Production compose for the SERVER Coolify app, routed at <domain>/api.
+# Production compose for the SERVER Coolify app, routed at
+# https://api.trackyourtime.dev — its own host, not a path of the client's.
 #
-# A path of the site's own domain rather than api.<domain>: the zone's
-# wildcard certificate covers one label, so api.tracktime.trebeljahr.com had
-# no TLS at all. See docs/deploy.md.
+# It used to be a path (<domain>/api) because api.tracktime.trebeljahr.com is
+# two labels under trebeljahr.com and the zone's wildcard certificate covers
+# only one, so that host had no TLS at all. The path split then failed for a
+# different reason: this Coolify instance proxies with caddy-docker-proxy, not
+# Traefik, and both apps wrote the same caddy_0 site label — /* won, and
+# <domain>/api/health was answered by the client's 404 page. Moving to an apex
+# zone gives the API a single-label host the wildcard does cover, and each app
+# a caddy site of its own. See docs/deploy.md.
 #
 # One service, named `server` — the name is load-bearing. Coolify routes a
 # dockercompose app through `docker_compose_domains`, which is keyed by
 # service name, and `hatchkit sync` writes the key `server` for the split
 # topology. A name that isn't in this file makes Coolify accept the PATCH,
-# emit no Traefik labels, and serve 503 for everything.
+# emit no proxy labels, and serve 503 for everything. (Coolify writes
+# traefik.* labels too; this instance runs caddy-docker-proxy, so the caddy_*
+# ones are the ones that route. Either way the key is the service name.)
 #
 # Mongo and Redis are NOT here. Under the split they are Coolify-managed
 # databases shared with nothing else, reached over the Coolify network via
 # MONGODB_URI / REDIS_URL — so a client-only deploy cannot restart the
 # database, and a server restart cannot drop the volume.
 #
-# Do NOT expose ports here — Coolify's Traefik handles external routing.
+# Do NOT expose ports here — Coolify's reverse proxy handles external routing.
 
 services:
   server:
@@ -26,13 +34,16 @@ services:
       MONGODB_URI: ${MONGODB_URI}
       REDIS_URL: ${REDIS_URL:-}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
-      # The API's own origin. Same value as FRONTEND_URL: better-auth mounts
-      # itself at /api/auth of the site's domain, which is where this server
-      # is routed.
+      # The API's OWN origin — https://api.trackyourtime.dev, not the web
+      # app's. better-auth mounts itself at /api/auth of this host and signs
+      # cookies for it, so a value pointing at the client's host breaks
+      # sign-in. NOT the same value as FRONTEND_URL any more.
       BETTER_AUTH_URL: ${BETTER_AUTH_URL}
-      # The web app's origin, and the CORS allow-list entry. The browser
-      # client is same-origin now and needs no preflight; the extension,
-      # which is not, still does.
+      # The web app's origin — https://trackyourtime.dev — and the CORS
+      # allow-list entry. The browser client is CROSS-origin again now that
+      # the API has its own host, so every call is preflighted and the
+      # session cookie is cross-site: this value is load-bearing, not a
+      # formality. So is TRUSTED_ORIGINS below.
       FRONTEND_URL: ${FRONTEND_URL}
       # Extra origins allowed to sign in — the browser extension's
       # chrome-extension://<id> lives here. Without it better-auth answers

@@ -20,11 +20,13 @@ const DEFAULT_ORIGINS = {
     webUrl: "http://localhost:3392",
   },
   production: {
-    // Same origin as the web app: the API is served on `/api` of it, and
-    // `apiUrl` is an origin the callers append `/api/...` to. `api.<domain>`
-    // is two labels under the zone, which the wildcard cert does not cover.
-    apiUrl: "https://tracktime.trebeljahr.com",
-    webUrl: "https://tracktime.trebeljahr.com",
+    // Two hosts, not one: `apiUrl` is an origin the callers append `/api/...`
+    // to, and the API has its own single-label host under the apex zone.
+    // (`api.tracktime.trebeljahr.com` was two labels under `trebeljahr.com`,
+    // which the wildcard cert did not cover — hence the move.) `webUrl` is
+    // where the device-flow approval page and the dashboard live.
+    apiUrl: "https://api.trackyourtime.dev",
+    webUrl: "https://trackyourtime.dev",
   },
 } as const;
 
