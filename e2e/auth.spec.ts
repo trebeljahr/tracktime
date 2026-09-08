@@ -60,7 +60,27 @@ test.describe("Authentication", () => {
   test("forgot password page shows confirmation", async ({ page }) => {
     await page.goto("/forgot-password");
     await page.getByTestId("forgot-email").fill(TEST_USER.email);
-    await page.getByTestId("forgot-submit").click();
+
+    // Assert the request itself, not just the banner. The banner appears
+    // whatever the server answers — deliberately, so it cannot reveal whether
+    // an address has an account — which means a wrong endpoint or a
+    // redirectTo pointing at the API host both look like success here.
+    const [request] = await Promise.all([
+      page.waitForRequest((req) =>
+        req.url().endsWith("/api/auth/request-password-reset"),
+      ),
+      page.getByTestId("forgot-submit").click(),
+    ]);
+
+    // better-auth resolves redirectTo against its OWN base URL, so a relative
+    // path emails a link back to the API host, which serves no reset page.
+    const body = JSON.parse(request.postData() ?? "{}") as {
+      redirectTo?: string;
+    };
+    expect(new URL(body.redirectTo ?? "").origin).toBe(
+      new URL(page.url()).origin,
+    );
+    expect(new URL(body.redirectTo ?? "").pathname).toBe("/reset-password");
 
     await expect(page.getByTestId("reset-sent")).toBeVisible();
   });

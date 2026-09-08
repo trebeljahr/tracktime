@@ -99,7 +99,9 @@ exits instead, because "these exact ports" was the point. `node scripts/dev.mjs
 from `packages/extension/dist`'s absolute path — the same hash Chrome uses — and
 passes it to the server as `TRUSTED_ORIGINS`, so no id is ever pasted by hand
 for local work. Anything in `TRUSTED_ORIGINS` in the environment is kept
-alongside it. Production origins still belong in `.env.production`.
+alongside it. Production origins belong in the server app's `TRUSTED_ORIGINS`
+field in Coolify — `.env.production` is untracked here and never reaches the
+image.
 
 Drop fixtures into `seed/assets/` to have them auto-populate the
 local bucket — see `seed/README.md`. To copy a real-prod bucket into
@@ -651,8 +653,9 @@ unpacked extensions the two have different ids, and **each id's origin must be
 in that server's `TRUSTED_ORIGINS`**. The dev id is derived and trusted by
 `pnpm run dev` (`scripts/lib/extension-id.mjs`, shared with `extension:id` so
 the two can never disagree). The production id has to be pinned with
-`EXTENSION_KEY` and added to `.env.production` by hand — deliberately: a
-production trust list that a script can extend is a trust list nobody reviews.
+`EXTENSION_KEY` and added to the server app's `TRUSTED_ORIGINS` in Coolify by
+hand — deliberately: a production trust list that a script can extend is a
+trust list nobody reviews.
 
 ### Static export caveats
 
@@ -666,54 +669,60 @@ production trust list that a script can extend is a trust list nobody reviews.
 
 ## Environment & Secrets (dotenvx)
 
-The server uses **[dotenvx](https://dotenvx.com)** for env handling — a
-drop-in replacement for `dotenv` that transparently decrypts values
-marked `encrypted:...`. `packages/server/src/config/env.ts` loads
-either `.env.production` (when `NODE_ENV=production`) or
-`.env.development` (otherwise).
+The server reads env through **[dotenvx](https://dotenvx.com)** — a drop-in
+`dotenv` replacement that also decrypts values marked `encrypted:...`.
+`packages/server/src/config/env.ts` loads `.env.production` when
+`NODE_ENV=production` and `.env.development` otherwise, **if the file exists**.
 
 ```
 packages/server/
   .env.example        plaintext, committed (reference, no real secrets)
   .env.development    plaintext, committed (local-dev defaults, localhost)
-  .env.production     mixed: plaintext config + encrypted secrets,
-                      committed to git. Public key lives at the top.
-  .env.keys           DOTENV_PRIVATE_KEY_PRODUCTION lives here locally;
-                      gitignored. In production, set it as an env var
-                      instead.
+  .env.production     NOT tracked in this repo — a global gitignore rule
+                      (~/.config/git/ignore) excludes .env.production, and
+                      there is no such file on disk. Purely a local
+                      convenience if you make one.
+  .env.keys           DOTENV_PRIVATE_KEY_PRODUCTION, gitignored.
 ```
 
-### Setting an encrypted value
+**Production env lives in Coolify's env fields, not in a file.** This is the
+part that catches people out, because the starter this repo grew from shipped
+a committed encrypted `.env.production` and dotenvx exists to decrypt exactly
+that. Here there is nothing to decrypt: the file is untracked, and
+`packages/server/Dockerfile`'s runtime stage copies only `dist`,
+`package.json` and `node_modules`, so even an untracked local copy never
+reaches the image. `DOTENV_PRIVATE_KEY_PRODUCTION` on its own therefore does
+nothing in production. The compose files take every value as a `${VAR}`
+substitution and Coolify fills them — that is the whole mechanism. See
+`docs/deploy.md`.
 
-```bash
-pnpm --filter @starter/server exec dotenvx set STRIPE_SECRET_KEY sk_live_... -f .env.production
-```
+Concretely: changing `BETTER_AUTH_URL`, `FRONTEND_URL` or `TRUSTED_ORIGINS`
+means editing the **server app's env fields in Coolify** and redeploying. A
+`dotenvx set ... -f .env.production` writes into a file production never
+reads, deploys green, and leaves the server holding the old values with
+nothing in the diff to point at.
 
-Writes the encrypted ciphertext into `.env.production` and appends
-the private key to `.env.keys` if it wasn't there already.
+### Running locally against production-shaped values
 
-### Running locally against production values
+If you keep a local `packages/server/.env.production`, `.env.keys` is read
+automatically — no extra step:
 
-`.env.keys` is read automatically — no extra step:
 ```bash
 NODE_ENV=production pnpm --filter @starter/server start
 ```
 
-### Deploying to Coolify
+That is the only thing that file is for. It is yours, it is not shared, and
+nothing deploys from it.
 
-The CLI's `devops-cli create` (with `runDeployment: true`) pushes
-`DOTENV_PRIVATE_KEY_PRODUCTION` to Coolify's env for you. The
-encrypted `.env.production` ships with the repo; Coolify injects the
-key at runtime and dotenvx decrypts on load.
-
-### Key rotation
+### Encrypting a value in a local file
 
 ```bash
+pnpm --filter @starter/server exec dotenvx set STRIPE_SECRET_KEY sk_live_... -f .env.production
 pnpm --filter @starter/server exec dotenvx rotate -f .env.production
-# Then re-deploy so Coolify picks up the new private key.
 ```
 
-Keep `.env.keys` out of commits. `.gitignore` enforces this.
+Both act on the local untracked file only. Keep `.env.keys` out of commits —
+`.gitignore` enforces this.
 
 ## Code Style
 

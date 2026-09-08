@@ -30,6 +30,13 @@ services:
     image: ${SERVER_IMAGE:-ghcr.io/trebeljahr/tracktime-server:main}
     environment:
       PORT: "5159"
+      # How many proxies sit in front of this container, which is what
+      # Express counts back from the right of X-Forwarded-For to get req.ip.
+      # Two here — Cloudflare, then Coolify's reverse proxy. It has to be
+      # named in this file to reach the container at all: Coolify's env
+      # fields are only interpolation variables for the compose file, so a
+      # value set there for a variable nothing references goes nowhere.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
       # Supplied by Coolify from the managed database resources.
       MONGODB_URI: ${MONGODB_URI}
       REDIS_URL: ${REDIS_URL:-}

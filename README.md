@@ -28,7 +28,7 @@ Everything is scoped to a workspace, but today that is effectively one workspace
 | Understand how the system fits together | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Run it locally and open a pull request | [`CONTRIBUTING.md`](CONTRIBUTING.md), or [Development](#development) below for the short version |
 | Run your own instance | [`docs/self-hosting.md`](docs/self-hosting.md) — one VPS, one domain, one `docker compose up` |
-| Deploy it | [`docs/deploy.md`](docs/deploy.md) — the two-app, one-domain Coolify topology and the four places that must agree on the API origin |
+| Deploy it | [`docs/deploy.md`](docs/deploy.md) — the two-app, two-host Coolify topology and the four places that must agree on the API origin |
 
 [Project](#project) below indexes the rest — roadmap, governance, support, security, and what `CLAUDE.md` and `docs-site/` are.
 
@@ -221,7 +221,7 @@ The E2E suite starts its own Mongo, Redis and S3 containers on separate ports an
 | [`TRADEMARK.md`](TRADEMARK.md) | What the licence does *not* cover: the name, the logo and the domain — and how to fork cleanly. |
 | [`CHANGELOG.md`](CHANGELOG.md) | What has changed. It starts at the point the project was opened up, not at the first commit. |
 | [`CLAUDE.md`](CLAUDE.md) | Instructions for AI coding agents, not contributor documentation — but worth knowing about. [CONTRIBUTING.md](CONTRIBUTING.md#repository-layout) explains when to reach for it. |
-| [`docs/deploy.md`](docs/deploy.md) | The production topology: two Coolify apps on one domain, and the four places that must agree on the API origin. |
+| [`docs/deploy.md`](docs/deploy.md) | The production topology: two Coolify apps on two hosts — the web app on the apex, the API on `api.` — why the domain moved, and the four places that must agree on the API origin. |
 | [`docs/self-hosting.md`](docs/self-hosting.md) | Running your own instance: `docker-compose.selfhost.yml`, one domain behind a reverse proxy, SMTP, backup, restore and upgrades. |
 | [`docs/dev-setup.md`](docs/dev-setup.md) | The maintainer's own Tailscale/Caddy dev-URL setup. Needs a private CLI that is not installable from this repo — skip it. |
 | `docs-site/` | A Docusaurus site with three pages. **Not deployed anywhere**: with `DOCS_SITE_URL` unset it uses a placeholder URL, which switches on `noIndex` and a disallow-all robots.txt. Its content is still starter boilerplate. Run it locally with `pnpm run dev:docs`. |

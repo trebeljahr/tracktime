@@ -8,7 +8,9 @@ import { fileURLToPath } from "url";
 // it there) or in a local .env.keys file (dev workstation).
 //
 // Load order mirrors conventional dotenv behavior:
-//   - production: only .env.production (encrypted, committed to git)
+//   - production: only .env.production (untracked here — a local convenience
+//                 for `NODE_ENV=production ... start`. The deployed server
+//                 has no such file; Coolify supplies env directly.)
 //   - otherwise:  .env.development (plaintext, local-dev defaults)
 // Any plaintext values in a production file stay plaintext — dotenvx
 // only decrypts values whose cipher prefix starts with "encrypted:".
@@ -170,8 +172,10 @@ export const env = {
   //     accumulates at all;
   //   too low — with a CDN in front of a reverse proxy, every caller collapses
   //     onto the edge's address and shares one key.
-  // 1 is right for the deployed topology (one Traefik hop, see
-  // docs/deploy.md). 0 means "no proxy, believe the socket".
+  // 1 is the safe generic default, NOT the right value for the deployed
+  // topology: that has two hops — Cloudflare in front of Coolify's reverse
+  // proxy (caddy-docker-proxy) — so it needs TRUST_PROXY_HOPS=2, set on the
+  // deployment. See docs/deploy.md. 0 means "no proxy, believe the socket".
   TRUST_PROXY_HOPS: getNonNegativeInt("TRUST_PROXY_HOPS", 1),
   MONGODB_URI: getRequired("MONGODB_URI"),
   REDIS_URL: getOptional("REDIS_URL"),

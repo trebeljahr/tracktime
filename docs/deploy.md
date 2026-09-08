@@ -228,8 +228,13 @@ checkout's path. Before publishing, pin `EXTENSION_KEY` (see
 
 ```bash
 pnpm run extension:id prod
-pnpm --filter @starter/server exec dotenvx set TRUSTED_ORIGINS "chrome-extension://<id>" -f .env.production
 ```
+
+Paste the `chrome-extension://<id>` it prints into the **server app's
+`TRUSTED_ORIGINS` field in Coolify**, comma-separated if there is already
+something there. Not into `packages/server/.env.production` — that file is
+untracked here and never reaches the image (step 3), so a value written there
+changes nothing in production.
 
 Raycast and CLI clients need no origin at all — their `fetch` sends neither
 `Origin` nor `Sec-Fetch-*`. The device flow guards them instead.
@@ -246,8 +251,13 @@ and Coolify's reverse proxy (caddy-docker-proxy here) sits behind it.
 Cloudflare appends the caller to `X-Forwarded-For`, the proxy appends
 Cloudflare's edge address, so the header
 reaching the app reads `<caller>, <cf-edge>` and only `TRUST_PROXY_HOPS=2`
-resolves `req.ip` to the caller. The default is **1**, which is the safe
-generic value, not the right one here — set it explicitly.
+resolves `req.ip` to the caller. The server's own default is **1** — the safe
+generic value, not the right one here — so `docker-compose.server.yml` names
+the variable and defaults it to `2` for this deployment. It has to be named
+there: Coolify's env fields are only interpolation variables for the compose
+file, so a `TRUST_PROXY_HOPS` set in Coolify against a compose file that never
+references it reaches no container. Setting the field now overrides the `2`,
+which is what you want if a hop is ever added or removed.
 
 Both directions fail silently:
 

@@ -110,7 +110,7 @@
     {
       "name": "webUrl",
       "title": "Web App URL",
-      "description": "Origin of the tracktime web app, used for the device-pairing page and Open in Browser. Empty follows the API URL's default.",
+      "description": "Origin of the tracktime web app, used for the device-pairing page and Open in Browser. Empty follows the build: the deployed web app in a `ray build`, http://localhost:3392 under `ray develop`.",
       "type": "textfield",
       "required": false,
       "placeholder": "https://trackyourtime.dev"

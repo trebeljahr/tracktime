@@ -3,8 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { AuthHeader } from "@/components/auth-header";
-
-
+import { requestPasswordReset } from "@/lib/password-reset";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -18,13 +17,7 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     try {
-      // Request password reset via the API endpoint
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/auth/forget-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, redirectTo: "/reset-password" }),
-        credentials: "include",
-      });
+      await requestPasswordReset(email);
       setSent(true);
     } catch {
       setError("An unexpected error occurred");
