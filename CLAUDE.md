@@ -411,17 +411,37 @@ is quietly wrong:
   `open -a Simulator` once.
 
 **Native chrome lives in `packages/client/src/styles/native.css`**, imported by
-one line from `globals.css`. Every selector in it is under `body.cap` — safe-area
+one line from `globals.css`. Every selector in it is under `html.cap` — safe-area
 padding, 16px fields, `.cap-touch`, the two-row tracker composer, the top-anchored
 dialog — so it is inert on web *by construction*, and `e2e/mobile-shell.spec.ts`
 (the `phone` Playwright project, `devices["Pixel 5"]`) asserts that at 393pt.
 Rules that would also be right on web belong in `globals.css` instead.
 
-`body.cap` is set twice on purpose: by an inline script at the top of `<body>`
-in `app/layout.tsx`, before the first paint, and again by `mobile/bridge.ts`
-after its dynamic imports resolve. The pre-paint one is what matters on a
-WebView reload, which has no splash to hide the unpadded frame. `<body>`
-therefore carries `suppressHydrationWarning`.
+`html.cap` is set twice on purpose: by an inline script in `<head>` in
+`app/layout.tsx`, before the first paint, and again by `mobile/bridge.ts` after
+its dynamic imports resolve. The pre-paint one is what matters on a WebView
+reload, which has no splash to hide the unpadded frame.
+
+**The marker is on `<html>`, not `<body>`, and that is a correctness decision,
+not a style one.** A pre-paint script that mutates `<body>` makes the served
+HTML and the hydrated DOM disagree about body's attributes, and the only way to
+silence that is `suppressHydrationWarning` on `<body>` — which then silences
+every *other* body-level mismatch, for the web app, forever. `<html>` already
+carries the attribute for the theme script, so the second marker rides along for
+free and `<body>` keeps its warnings. It is also why the script can sit in
+`<head>`: `document.documentElement` exists during head parsing, `document.body`
+does not.
+
+**`viewport-fit=cover` ships to every host, web included, and the PWA is the
+one that notices.** The `viewport` export is static — one static export serves
+the browser, the installed PWA and both native shells — so there is no build in
+which the meta tag can be left out for web. In a normal mobile browser it is
+harmless (the browser applies no insets), but an installed PWA gets the real
+insets with none of `native.css` applying to it, so content runs under the
+notch. `styles/standalone.css` is the answer: `@media (display-mode: standalone)`
+copies of the header / main / dialog safe-area rules, scoped `html:not(.cap)` so
+they can never double up with the native ones. It is a separate file from
+`native.css` precisely because it is *not* inert by construction.
 
 Two things that look like ordinary CSS and are not. Tailwind v4's `translate-*`
 utilities compile to the `translate` **property**, so the way to undo a
@@ -432,7 +452,7 @@ adding one would only hide the fact that the cascade is doing the work.
 
 **The bottom tab bar renders on every platform.** `components/mobile-tab-bar.tsx`
 ships in the web bundle too and is `display: none` there — Tailwind's `hidden`,
-undone by the one `body.cap` rule in `native.css`. It must not branch on
+undone by the one `html.cap` rule in `native.css`. It must not branch on
 `isNative()`: under `output: "export"` every page is prerendered in Node, where
 `window.Capacitor` cannot exist, so a tree that differs at hydration is a
 mismatch React resolves by discarding the served DOM. The same argument applies

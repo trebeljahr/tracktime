@@ -284,6 +284,57 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
   Android's own ordering, not a gap in the overlay stack, and it cost an hour
   of misdiagnosis — `dumpsys input_method | grep mInputShown` settles it.
 
+**Phone-UI review corrections** (post-implementation, from the adversarial
+review). Each of these contradicts something written above; the code is right
+and the earlier note is the record of what was believed at the time.
+
+- **The pre-paint marker moved to `<html>`, and the script with it into
+  `<head>`.** The stage-2 note above says it must be at the top of `<body>`
+  because `document.body` does not exist during head parsing. True, and beside
+  the point: `document.documentElement` does, and marking <html> instead is
+  strictly better. Writing to `<body>` before hydration is what forced
+  `suppressHydrationWarning` onto `<body>` — an attribute that does not scope
+  itself to the one mismatch that needed it and silences every body-level
+  mismatch the web app will ever have. `<html>` already carried the attribute
+  for the theme script. Every `body.cap` selector in `native.css` is now
+  `html.cap`. The scripts moved to `app/pre-paint.ts` so a test can reach them:
+  a layout module may only export what Next recognises.
+- **`viewport-fit=cover` reaches every host, and the installed PWA is the one
+  that suffers.** The `viewport` export is static and one static export serves
+  browser, PWA and both shells, so there is no build to withhold it from.
+  A normal mobile browser applies no insets, but `manifest.json` declares
+  `"display": "standalone"`, so an installed PWA gets the real insets and none
+  of `native.css`. `styles/standalone.css` is the answer — `@media
+  (display-mode: standalone)` copies of the header / tracker-bar / main /
+  drawer / dialog rules, every selector under `html:not(.cap)` so they cannot
+  stack with the native ones. Deliberately a separate file: `native.css` earns
+  its safety from being inert by construction, and these rules are not.
+  Chromium cannot be put into standalone display mode from a test
+  (`Emulation.setEmulatedMedia` ignores a `display-mode` feature — measured),
+  so the phone project asserts the shipped `@media` block out of
+  `document.styleSheets` instead of measuring the layout.
+- **A popover is not a dialog and CSS cannot anchor one.** `native.css`
+  anchored `[data-slot="dialog-content"]` under the inset and left popovers to
+  Radix's `collisionPadding`, which Floating UI measures against the layout
+  viewport — under `viewport-fit=cover`, the one that runs under the Dynamic
+  Island. No stylesheet can fix it: the popper wrapper's `transform` is inline
+  and computed from those measurements. `native.css` therefore publishes the
+  four insets as custom properties, `lib/safe-area.ts` reads them, and
+  `ui/popover.tsx` widens `collisionPadding` for every popover in the app.
+  `collisionBoundary` is not the alternative it looks like — passing one sets
+  `altBoundary: true` in @radix-ui/react-popper, which flips detectOverflow to
+  measure the reference element instead of the floating one.
+- **WebKit refuses author `box-sizing` on a date input.** Measured on iOS 26 at
+  402pt: `<Input type="date">` computed `box-sizing: content-box` with the `*`
+  reset losing, so `width: 100%` became a used width 26px larger once `px-3`
+  and the border were added outside it — 25px past the dialog's padding, 5px
+  off the screen. `appearance: none` is the only fix; `box-sizing: border-box
+  !important`, `max-width: 100%` and `min-width: 0` were each measured on the
+  device and each changed nothing. The rule is in `globals.css`, not
+  `native.css`: it is a WebKit behaviour, so desktop Safari does it too, and it
+  is a measured no-op in Blink. `time` and `datetime-local` behave identically
+  and are covered by the same rule.
+
 ## Summary
 
 Ship the phone app as the existing Next.js client inside a Capacitor shell — one composition, not a second UI. Everything mobile is either scoped to `body.cap` (a class `packages/client/src/mobile/bridge.ts:30` already sets and nothing styles), behind the synchronous `isNative()` check in that same file, or a correctness fix the web build also wants. No new screens for reports, timesheet, invoices or catalog; they stay honestly cramped one level down. Cookie auth is abandoned for native (a `capacitor://localhost` document is cross-site to the API and loses to WKWebView ITP regardless of SameSite) in favour of the bearer path `packages/core/src/session-auth.ts` was written for — which needs zero server code, only `TRUSTED_ORIGINS`. Stage 1 ends with a signed-in app on the iOS Simulator starting and stopping a real timer against `pnpm run dev`, verified against a real `pnpm build:mobile` bundle rather than live reload, because under live reload the document origin is `http://localhost:7130`, which is same-site with a localhost API and would make cookie auth misleadingly appear to work. Later stages add native chrome, a three-tab bar, resume/offline durability, calendar touch de-hostility, and two zero-custom-native wins (haptics, a runaway-timer local notification). No Swift, no Kotlin, no widget extension, no second HTTP client — the judges called all of that the fatal path.
