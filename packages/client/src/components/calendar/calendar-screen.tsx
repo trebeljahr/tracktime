@@ -46,6 +46,7 @@ import {
 import { EntryCreateDialog, type CreateDraft } from "./entry-create-dialog";
 import { MonthView } from "./month-view";
 import { TimeGrid } from "./time-grid";
+import { useCoarsePointer } from "./use-coarse-pointer";
 import { YearView } from "./year-view";
 import {
   useCalendarActions,
@@ -123,8 +124,18 @@ export function CalendarScreen(): React.JSX.Element {
   const searchParams = useSearchParams();
   const { weekStartsOn } = useFormatSettings();
 
+  // Only the *default*. `?view=` is still the source of truth, so a chosen
+  // week view survives on a phone — this decides nothing but the first load.
+  // Seven columns after a 3.5rem gutter leave ~44px per day at 390pt, which
+  // is a week grid nobody can read, let alone tap.
+  const coarsePointer = useCoarsePointer();
+
   const viewParam = searchParams.get("view");
-  const view: CalendarView = isCalendarView(viewParam) ? viewParam : "week";
+  const view: CalendarView = isCalendarView(viewParam)
+    ? viewParam
+    : coarsePointer
+      ? "day"
+      : "week";
   const anchor = parseDateParam(searchParams.get("date"));
   const anchorMs = startOfDay(anchor).getTime();
 

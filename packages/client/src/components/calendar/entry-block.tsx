@@ -36,6 +36,12 @@ export type EntryBlockProps = {
     event: React.PointerEvent<HTMLDivElement>,
     mode: BlockDragMode
   ) => void;
+  /**
+   * The primary pointer is a finger. The block then has to let the browser
+   * pan the grid vertically through it — `touchAction: "none"` swallows the
+   * scroll and leaves every stray drag to be committed as a real edit.
+   */
+  coarsePointer?: boolean;
 } & Omit<React.ComponentPropsWithoutRef<"div">, "onPointerDown" | "children">;
 
 /** Below this the time/project lines are dropped. */
@@ -67,6 +73,7 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
       timeLabel,
       durationLabel,
       onBlockPointerDown,
+      coarsePointer = false,
       className,
       style,
       ...rest
@@ -74,6 +81,7 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
     ref
   ) {
     const palette = blockPalette(entry.projectColor, isDragging || isSelected);
+    const touchAction = coarsePointer ? "pan-y" : "none";
     const title = entry.description || "No description";
     const compact = height < COMPACT_HEIGHT;
     const tiny = height < TINY_HEIGHT;
@@ -127,7 +135,7 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
           borderLeftColor: palette.accent,
           borderLeftStyle: "solid",
           borderLeftWidth: 3,
-          touchAction: "none",
+          touchAction,
           ...style,
         }}
         onPointerDown={(event) => {
@@ -141,7 +149,7 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
               data-testid={`calendar-entry-resize-start-${entry.id}`}
               aria-hidden
               className="absolute inset-x-0 top-0 cursor-ns-resize"
-              style={{ height: HANDLE_PX, touchAction: "none" }}
+              style={{ height: HANDLE_PX, touchAction }}
               onPointerDown={(event) => {
                 onBlockPointerDown(event, "resize-start");
               }}
@@ -150,7 +158,7 @@ export const EntryBlock = React.forwardRef<HTMLDivElement, EntryBlockProps>(
               data-testid={`calendar-entry-resize-end-${entry.id}`}
               aria-hidden
               className="absolute inset-x-0 bottom-0 cursor-ns-resize"
-              style={{ height: HANDLE_PX, touchAction: "none" }}
+              style={{ height: HANDLE_PX, touchAction }}
               onPointerDown={(event) => {
                 onBlockPointerDown(event, "resize-end");
               }}

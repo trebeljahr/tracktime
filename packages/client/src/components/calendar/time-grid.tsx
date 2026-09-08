@@ -37,6 +37,7 @@ import { DensityCluster, DensityClusterPopover } from "./density-cluster";
 import { blockPalette } from "./entry-color";
 import type { CreateDraft } from "./entry-create-dialog";
 import type { CalendarActions } from "./use-calendar-entries";
+import { useCoarsePointer } from "./use-coarse-pointer";
 import { useNow } from "./use-now";
 
 type Segment = MinuteRange & {
@@ -142,8 +143,15 @@ export function TimeGrid({
   const hasRunning = entries.some((entry) => entry.end === null);
   const nowMs = useNow(hasRunning ? 1_000 : 30_000);
 
+  // Computed once for the whole grid rather than per block: the flag is the
+  // same for every one of them, and a MediaQueryList listener per entry would
+  // scale with the day's density for no reason.
+  const coarsePointer = useCoarsePointer();
+
   const gridRef = React.useRef<HTMLDivElement | null>(null);
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  /** The entry a finger last pressed — see `handleBlockPointerDown`. */
+  const touchTapRef = React.useRef<string | null>(null);
 
   const [drag, setDrag] = React.useState<DragState | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -368,6 +376,18 @@ export function TimeGrid({
     dayIndex: number
   ): void => {
     event.stopPropagation();
+    // A finger never arms move or resize. With `touchAction: "pan-y"` the
+    // browser owns the vertical pan, so the press that follows the finger is
+    // a scroll far more often than an edit — and arming here would commit
+    // that scroll as a real change to the entry. The tap that *was* a tap is
+    // resolved from the click below instead.
+    if (event.pointerType === "touch") {
+      touchTapRef.current = block.entry.id;
+      return;
+    }
+    // Any mouse or pen press clears a stale tap, so a drag with the mouse can
+    // never end by also opening the editor through the click below.
+    touchTapRef.current = null;
     if (event.button !== 0 && event.pointerType === "mouse") return;
 
     if (!block.draggable) {
@@ -408,6 +428,10 @@ export function TimeGrid({
     event: React.PointerEvent<HTMLDivElement>,
     dayIndex: number
   ): void => {
+    // Same reason as the block: a finger dragging across empty grid is the
+    // page scrolling, and arming create-a-new-entry here is what turns every
+    // stray drag into an invented time entry.
+    if (event.pointerType === "touch") return;
     if (event.button !== 0 && event.pointerType === "mouse") return;
     // A popover is a React child of its block, so React bubbles its events
     // up to this column even though the DOM node lives in a portal. Without
@@ -602,6 +626,9 @@ export function TimeGrid({
             onPointerMove={handleGridPointerMove}
             onPointerUp={handleGridPointerUp}
             onPointerCancel={() => {
+              // The browser took the gesture over — the finger is panning,
+              // not tapping.
+              touchTapRef.current = null;
               setDrag(null);
             }}
           >
@@ -647,7 +674,7 @@ export function TimeGrid({
                     "border-border relative border-r last:border-r-0",
                     isToday && "bg-accent/20"
                   )}
-                  style={{ touchAction: "none" }}
+                  style={{ touchAction: coarsePointer ? "pan-y" : "none" }}
                   onPointerDown={(event) => {
                     handleColumnPointerDown(event, dayIndex);
                   }}
@@ -713,6 +740,7 @@ export function TimeGrid({
                               zIndex={geometry.zIndex}
                               stacked={geometry.stacked}
                               isOpen={listOpen || selected !== undefined}
+                              coarsePointer={coarsePointer}
                               onOpen={() => {
                                 setSelectedId(null);
                                 setOpenClusterId(item.id);
@@ -795,6 +823,17 @@ export function TimeGrid({
                                 : formatMinuteOfDay(range.endMin, format.timeFormat)
                             }`}
                             durationLabel={format.duration(seconds)}
+                            coarsePointer={coarsePointer}
+                            onClick={() => {
+                              // Only ever the tap that pointer-down declined.
+                              // A finger that panned the grid fires no click
+                              // at all, and a mouse never sets the ref — so
+                              // the mouse and pen paths are untouched even on
+                              // a touchscreen with a mouse attached.
+                              if (touchTapRef.current !== block.entry.id) return;
+                              touchTapRef.current = null;
+                              setSelectedId(block.entry.id);
+                            }}
                             onBlockPointerDown={(event, mode) => {
                               handleBlockPointerDown(
                                 event,

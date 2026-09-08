@@ -31,6 +31,11 @@ export type DensityClusterProps = {
   stacked?: boolean;
   isOpen: boolean;
   onOpen: () => void;
+  /**
+   * The primary pointer is a finger, so the chip has to let the browser pan
+   * the grid vertically through it rather than swallowing the scroll.
+   */
+  coarsePointer?: boolean;
 } & Omit<React.ComponentPropsWithoutRef<"div">, "onPointerDown" | "children">;
 
 /** Below this width the chip drops everything but the count. */
@@ -60,6 +65,7 @@ export const DensityCluster = React.forwardRef<
     stacked = false,
     isOpen,
     onOpen,
+    coarsePointer = false,
     className,
     style,
     ...rest
@@ -103,7 +109,7 @@ export const DensityCluster = React.forwardRef<
         left: `calc(${leftPct}% + 2px)`,
         width: `calc(${widthPct}% - 4px)`,
         zIndex: isOpen ? 20 : zIndex,
-        touchAction: "none",
+        touchAction: coarsePointer ? "pan-y" : "none",
         ...style,
       }}
       onPointerDown={(event) => {
