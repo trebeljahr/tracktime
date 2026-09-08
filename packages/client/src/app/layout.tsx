@@ -3,6 +3,7 @@ import { TRPCProvider } from "@/providers/trpc-provider";
 import { AuthProvider } from "@/providers/auth-provider";
 import { MobileBridgeLoader } from "@/mobile/MobileBridgeLoader";
 import { Toaster } from "@/components/ui/sonner";
+import { NATIVE_SHELL_SCRIPT, THEME_SCRIPT } from "./pre-paint";
 import "@/styles/globals.css";
 
 export const metadata: Metadata = {
@@ -40,34 +41,6 @@ export const viewport: Viewport = {
   interactiveWidget: "resizes-content",
 };
 
-/**
- * Runs before first paint so the theme class is on <html> ahead of any
- * styled content — without it, a dark-mode user sees a white flash on
- * every hard navigation. Keep the storage key in sync with
- * `THEME_STORAGE_KEY` in components/theme-toggle.tsx.
- */
-const THEME_SCRIPT = `(function(){try{var c=localStorage.getItem("tracktime.theme");if(c!=="light"&&c!=="dark")c=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";var r=document.documentElement;r.classList.remove("light","dark");r.classList.add(c);r.style.colorScheme=c;}catch(e){}})();`;
-
-/**
- * Marks the document as running inside the native shell, before the first
- * paint of anything inside <body>.
- *
- * `mobile/bridge.ts` sets the same two things, but only after
- * `Promise.all([import("@capacitor/core"), …])` has resolved — several frames
- * into the launch, and after React has already painted. Every rule in
- * styles/native.css keys off `body.cap`, so without this the app lays out once
- * with the header under the Dynamic Island and the composer under the home
- * indicator, then jumps. The bridge's own writes stay: they are idempotent,
- * and they are the recovery path if React ever did clobber body's className
- * while hydrating.
- *
- * Rendered as the first child of <body> rather than in <head>, because in
- * <head> `document.body` does not exist yet. Capacitor's native bridge is
- * injected as a document-start WKUserScript, so `window.Capacitor` is already
- * there — the same assumption `isNative()` in bridge.ts has always made.
- */
-const NATIVE_SHELL_SCRIPT = `(function(){try{var c=window.Capacitor;if(!c||!c.isNativePlatform||!c.isNativePlatform())return;var b=document.body;b.classList.add("cap");b.setAttribute("data-platform",c.getPlatform?c.getPlatform():"unknown");}catch(e){}})();`;
-
 export default function RootLayout({
   children,
 }: {
@@ -76,6 +49,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: NATIVE_SHELL_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         {/* OpenPanel analytics — replace with your client ID */}
         {process.env.NEXT_PUBLIC_OPENPANEL_CLIENT_ID && (
@@ -98,11 +72,7 @@ export default function RootLayout({
           />
         )}
       </head>
-      <body
-        className="min-h-screen bg-background font-sans antialiased"
-        suppressHydrationWarning
-      >
-        <script dangerouslySetInnerHTML={{ __html: NATIVE_SHELL_SCRIPT }} />
+      <body className="min-h-screen bg-background font-sans antialiased">
         <MobileBridgeLoader />
         <TRPCProvider>
           <AuthProvider>{children}</AuthProvider>

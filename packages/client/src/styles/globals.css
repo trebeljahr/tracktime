@@ -2,7 +2,7 @@
 @import "tw-animate-css";
 
 /*
- * Native shell chrome. Every selector in it is under `body.cap`, which only
+ * Native shell chrome. Every selector in it is under `html.cap`, which only
  * the Capacitor shell ever sets, so importing it into the shared stylesheet
  * costs the web build a few hundred inert bytes and nothing else. Its rules
  * are unlayered while Tailwind's are in `@layer utilities`, and an unlayered

@@ -1,11 +1,15 @@
 /*
  * Native shell chrome — safe areas, the software keyboard, touch targets.
  *
- * THE ONE RULE IN THIS FILE: every selector is under `body.cap`, which only
+ * THE ONE RULE IN THIS FILE: every selector is under `html.cap`, which only
  * the native shell ever sets (app/layout.tsx pre-paint, mobile/bridge.ts after
  * init). Nothing here can reach the web app, the desktop shells or the E2E
  * suite — inert by construction rather than by screenshot test. Keep it that
  * way: a rule that would also be right on web belongs in globals.css.
+ *
+ * The marker is on <html> and not on <body> so that <body> keeps warning about
+ * hydration mismatches — see the NATIVE_SHELL_SCRIPT comment in
+ * app/pre-paint.ts.
  *
  * The other half of the same argument is what is NOT here. The base sizes in
  * components/ui/button.tsx and input.tsx back every desktop screen, so raising
@@ -17,7 +21,7 @@
  * and the file does nothing at all.
  */
 
-body.cap {
+html.cap {
   /*
    * Where content has to start to clear the status bar / Dynamic Island.
    * The header is `sticky top-0 h-14` (3.5rem) and the tracker bar sticks
@@ -33,6 +37,7 @@ body.cap {
    * bar reads this rather than repeating the arithmetic.
    */
   --app-tab-bar-offset: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+
 
   /* A grey flash on every tap is a browser affordance, not an app one. */
   -webkit-tap-highlight-color: transparent;
@@ -53,10 +58,10 @@ body.cap {
 }
 
 /*
- * The document scroller is <html>, not <body>, so the rule above does not
- * reach it. Scoped through `:has()` so it still cannot match on web.
+ * `overscroll-behavior` has to be on BOTH: the document scroller is <html>,
+ * and a value only on <body> does not reach it.
  */
-html:has(body.cap) {
+html.cap body {
   overscroll-behavior: none;
 }
 
@@ -68,13 +73,13 @@ html:has(body.cap) {
  * running all the way up under the status bar instead of leaving a bare
  * strip of body background there.
  */
-body.cap [data-testid="app-header"] {
+html.cap [data-testid="app-header"] {
   height: var(--app-header-offset);
   padding-top: env(safe-area-inset-top, 0px);
 }
 
 /* Comes to rest below the taller header, not below the web one. */
-body.cap [data-testid="tracker-bar"] {
+html.cap [data-testid="tracker-bar"] {
   top: var(--app-header-offset);
 }
 
@@ -82,12 +87,12 @@ body.cap [data-testid="tracker-bar"] {
  * The last entry row has to clear BOTH the tab bar and the home indicator
  * under it. `1rem` on top so the final row is not flush against the bar.
  */
-body.cap [data-testid="app-main"] {
+html.cap [data-testid="app-main"] {
   padding-bottom: calc(1rem + var(--app-tab-bar-offset));
 }
 
 /* The nav drawer is `fixed inset-0`, so both insets are its own problem. */
-body.cap [data-testid="sidebar-mobile"] {
+html.cap [data-testid="sidebar-mobile"] {
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -108,7 +113,7 @@ body.cap [data-testid="sidebar-mobile"] {
  * translateX(-50%)` here instead would apply on top of the untouched
  * `translate` and push the panel a further half-width off the left edge.
  */
-body.cap [data-slot="dialog-content"] {
+html.cap [data-slot="dialog-content"] {
   top: calc(env(safe-area-inset-top, 0px) + 1rem);
   --tw-translate-y: 0;
   max-height: calc(
@@ -128,9 +133,9 @@ body.cap [data-slot="dialog-content"] {
  * and this file is unlayered, and an unlayered rule beats every layer no
  * matter what its specificity is.
  */
-body.cap input,
-body.cap textarea,
-body.cap select {
+html.cap input,
+html.cap textarea,
+html.cap select {
   font-size: 16px;
 }
 
@@ -142,7 +147,7 @@ body.cap select {
  * their dense desktop layout on a phone rather than being silently relaid out
  * by a blanket `button { min-height }` sweep.
  */
-body.cap .cap-touch {
+html.cap .cap-touch {
   min-height: 2.75rem;
   min-width: 2.75rem;
 }
@@ -161,12 +166,12 @@ body.cap .cap-touch {
  * border box, so the day headings in entry-list.tsx follow this taller layout
  * with no second number to keep in step.
  */
-body.cap [data-testid="tracker-composer"] [data-testid="tracker-description"] {
+html.cap [data-testid="tracker-composer"] [data-testid="tracker-description"] {
   flex-basis: 100%;
   min-height: 2.75rem;
 }
 
-body.cap [data-testid="tracker-composer"] [data-testid="tracker-toggle"] {
+html.cap [data-testid="tracker-composer"] [data-testid="tracker-toggle"] {
   min-height: 2.75rem;
   width: 7rem;
 }
@@ -177,7 +182,7 @@ body.cap [data-testid="tracker-composer"] [data-testid="tracker-toggle"] {
  * components/mobile-tab-bar.tsx renders unconditionally with Tailwind's
  * `hidden`, so it is `display: none` for every web user and every desktop
  * shell. This is the only rule that reveals it — and it can only match under
- * `body.cap`, which is the whole reason the component does not branch on
+ * `html.cap`, which is the whole reason the component does not branch on
  * `isNative()` instead: `output: "export"` prerenders in Node, where
  * `window.Capacitor` cannot exist, so a tree that differs at hydration is a
  * mismatch React resolves by throwing the served HTML away.
@@ -185,7 +190,7 @@ body.cap [data-testid="tracker-composer"] [data-testid="tracker-toggle"] {
  * `display: flex` beats the utility's `display: none` because this file is
  * unlayered and Tailwind's utilities are in `@layer utilities`.
  */
-body.cap [data-testid="mobile-tab-bar"] {
+html.cap [data-testid="mobile-tab-bar"] {
   display: flex;
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -195,6 +200,6 @@ body.cap [data-testid="mobile-tab-bar"] {
  * height is the number `--app-tab-bar-offset` promises, so the padding on
  * app-main and the bar itself cannot drift apart.
  */
-body.cap [data-testid="mobile-tab-bar"] > * {
+html.cap [data-testid="mobile-tab-bar"] > * {
   min-height: 3.5rem;
 }

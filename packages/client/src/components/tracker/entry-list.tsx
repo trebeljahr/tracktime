@@ -34,7 +34,7 @@ import { trpc } from "@/lib/trpc";
  * paint before the observer has measured anything.
  *
  * `--app-header-offset` is the header's height including the status-bar
- * inset, and is set only by styles/native.css under `body.cap`. On web it is
+ * inset, and is set only by styles/native.css under `html.cap`. On web it is
  * undefined and the fallback makes this the same string it always was.
  */
 const STICKY_TOP =

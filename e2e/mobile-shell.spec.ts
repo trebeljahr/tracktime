@@ -9,12 +9,12 @@ import { cleanDatabase, closeDbConnection } from "./db-utils";
  * 393pt chromium viewport against the same servers every other spec uses.
  * It is NOT a test of the native app, which no browser can run. It is the
  * guard on the claim that makes the native work safe: every rule in
- * packages/client/src/styles/native.css is scoped under `body.cap`, a class
+ * packages/client/src/styles/native.css is scoped under `html.cap`, a class
  * only the Capacitor shell ever sets, so a narrow browser window is
  * untouched by all of it.
  *
  * That claim is easy to break by accident — one rule written as
- * `@media (max-width: 640px)` instead of `body.cap`, and the web app silently
+ * `@media (max-width: 640px)` instead of `html.cap`, and the web app silently
  * inherits the phone treatment. So the assertions below are deliberately
  * about the ABSENCE of native chrome, not the presence of it.
  */
@@ -46,13 +46,21 @@ test.describe("web app at phone width", () => {
 
   test("is not treated as the native shell", async ({ page }) => {
     // The premise. Everything else in this file follows from it.
+    //
+    // Both elements, because the marker moved: on <body> it meant a pre-paint
+    // script mutating body, which meant `suppressHydrationWarning` on <body>,
+    // which silenced every body-level hydration mismatch the web app might
+    // ever have. That half cannot be asserted from here — the prop never
+    // reaches the DOM — so it lives in src/app/pre-paint.test.ts.
+    await expect(page.locator("html")).not.toHaveClass(/\bcap\b/);
     await expect(page.locator("body")).not.toHaveClass(/\bcap\b/);
+    expect(await page.locator("html").getAttribute("data-platform")).toBeNull();
     expect(await page.locator("body").getAttribute("data-platform")).toBeNull();
   });
 
   test("gets the drawer, not native chrome", async ({ page }) => {
     // The web app's own narrow-screen affordance is the hamburger + drawer,
-    // and it still is one: the native tab bar is behind the same `body.cap`
+    // and it still is one: the native tab bar is behind the same `html.cap`
     // gate as everything else.
     const toggle = page.getByTestId("sidebar-toggle");
     await expect(toggle).toBeVisible();
@@ -136,7 +144,7 @@ test.describe("web app at phone width", () => {
   });
 
   test("keeps the web tracker composer flex basis", async ({ page }) => {
-    // native.css gives the description `flex-basis: 100%` under `body.cap`,
+    // native.css gives the description `flex-basis: 100%` under `html.cap`,
     // so it takes the whole first line and the controls wrap under it. On web
     // the `basis-64` utility (16rem) has to be what applies.
     //
@@ -160,7 +168,7 @@ test.describe("web app at phone width", () => {
 
     // `top-[50%]` untouched: native.css moves it to
     // `calc(env(safe-area-inset-top) + 1rem)` — 16px in a browser, which has
-    // no insets — only under `body.cap`. getComputedStyle resolves `top` to a
+    // no insets — only under `html.cap`. getComputedStyle resolves `top` to a
     // used value in px, so the percentage is compared as one.
     const { top, half } = await dialog.evaluate((el) => ({
       top: parseFloat(getComputedStyle(el).top),

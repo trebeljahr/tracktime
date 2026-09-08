@@ -94,11 +94,15 @@ export async function initMobile(next: MobileHandlers = {}): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
 
   // app/layout.tsx already did both of these before the first paint — every
-  // `body.cap` rule in styles/native.css has to be in force by then or the
+  // `html.cap` rule in styles/native.css has to be in force by then or the
   // app lays out once without the safe-area insets and jumps. These stay as
   // the idempotent backstop for the case where that script did not run.
-  document.body.classList.add("cap");
-  document.body.setAttribute("data-platform", Capacitor.getPlatform());
+  //
+  // <html>, not <body>: the marker moved there so <body> keeps reporting
+  // hydration mismatches. Writing it to <body> here would leave the CSS
+  // matching nothing at all.
+  document.documentElement.classList.add("cap");
+  document.documentElement.setAttribute("data-platform", Capacitor.getPlatform());
 
   // `viewportFit: "cover"` means the WebView reaches under the status bar,
   // so the status bar has no background of its own any more — it sits on top

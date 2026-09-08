@@ -7,7 +7,7 @@ import { MobileTabBar } from "./mobile-tab-bar";
 
 /*
  * The bar itself. What it must NOT do is decide whether to exist: it renders
- * on every platform and `styles/native.css` reveals it under `body.cap`. The
+ * on every platform and `styles/native.css` reveals it under `html.cap`. The
  * proof that this leaves the web app alone is the phone-viewport Playwright
  * project, which measures the computed `display` in a real browser — jsdom
  * loads no stylesheet and could not tell the difference.
