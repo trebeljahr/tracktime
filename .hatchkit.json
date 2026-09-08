@@ -5,6 +5,9 @@
   "name": "tracktime",
   "description": "A simple time tracker application",
   "domain": "trackyourtime.dev",
+  "aliases": [
+    "api.trackyourtime.dev"
+  ],
   "features": [
     "websocket",
     "s3",
