@@ -21,6 +21,13 @@
 **/.next
 **/dist
 **/out
+# Must go with `**/dist` above, never without it. tsc writes its incremental
+# build log beside the tsconfig rather than into outDir, so excluding only the
+# outputs ships the host's claim that they are already up to date: `tsc` then
+# emits a partial dist (an `index.d.ts.map` and no `index.d.ts`, no `.js` at
+# all), and the next package in the chain fails with TS2307 "cannot find
+# module '@starter/shared'" for a package that is plainly right there.
+**/*.tsbuildinfo
 **/.turbo
 .pnpm-store
 
