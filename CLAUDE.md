@@ -507,10 +507,18 @@ the very thing being replaced.
   marker (which does not) is what tells a fresh install from a relaunch, so
   delete-and-reinstall means signed out rather than resuming a previous — possibly
   a previous *user's* — session.
-- Session lifetime is set explicitly in `auth/auth.ts` (30 days, refreshed at
-  most daily), not inherited from better-auth's 7-day default: a phone left in a
-  drawer over a holiday would otherwise come back to a session row the next
-  lookup deletes, and replay a day of offline-tracked time into 401s.
+- Session lifetime is set explicitly in `auth/session-lifetime.ts` (30 days,
+  refreshed at most daily), not inherited from better-auth's 7-day default: a
+  phone left in a drawer over a holiday would otherwise come back to a session
+  row the next lookup deletes, and replay a day of offline-tracked time into
+  401s. **`session.expiresIn` is global**, so this is not a mobile setting: it
+  moved every browser cookie session on the web app from 7 days to 30 at the
+  same time, cookie `max-age` included. Accepted deliberately — solo-user,
+  self-hosted, and revocation is independent of the window (Settings → Devices
+  deletes the row; the next request 401s and the socket closes within a
+  minute). better-auth 1.6.11 offers no clean per-client scope: a per-session
+  `expiresAt` written in `databaseHooks` is recomputed from the global value on
+  the session's first refresh. The full argument is in the module.
 - An expired or revoked session **stops** the offline flush and keeps the rows
   (`isAuthError` in `lib/offline.ts`). Dropping them is the default for a server
   refusal and is right for a validation error; it is never right for "we do not

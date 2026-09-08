@@ -66,8 +66,14 @@ NEXT_PUBLIC_API_URL=http://localhost:51590 pnpm build:mobile ios
   effect on the token and on hydration having settled.
 - The offline flush now rethrows on `isAuthError`, so a dead session stops it
   instead of deleting the queue one 401 at a time.
-- `session.expiresIn`/`updateAge` set explicitly in `auth/auth.ts` (30 days /
-  1 day), and the server prints its resolved trusted-origin list at boot.
+- `session.expiresIn`/`updateAge` set explicitly (30 days / 1 day), in their
+  own `auth/session-lifetime.ts` — because the setting is global and the plan
+  only argued it from phone behaviour. Thirty days applies to every browser
+  cookie session on the web app too, and better-auth 1.6.11 has no clean hook
+  to scope it per client (the refresh path recomputes `expiresAt` from the
+  global value), so the web consequence is written down beside the number
+  rather than left as a side effect. The server also prints its resolved
+  trusted-origin list at boot.
 - **Two device-only traps cost real time and are written up in CLAUDE.md**:
   a simulator build with `CODE_SIGNING_ALLOWED=NO` gets
   `errSecMissingEntitlement (-34018)` from the Keychain and silently falls back

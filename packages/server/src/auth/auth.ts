@@ -12,6 +12,10 @@ import {
   normalizeClientKind,
 } from "./client-label.js";
 import { createPersonalWorkspace } from "./personal-workspace.js";
+import {
+  SESSION_EXPIRES_IN_SECONDS,
+  SESSION_UPDATE_AGE_SECONDS,
+} from "./session-lifetime.js";
 
 /**
  * Put an auth link in the server log.
@@ -109,21 +113,14 @@ export async function initAuth(): Promise<void> {
 
     session: {
       /**
-       * A decision, not better-auth's 7-day default.
-       *
-       * Seven days is wrong for a phone. A session is only extended when
-       * `getSession` runs, so a device left in a drawer over a holiday comes
-       * back to a session row the next lookup deletes — and a native client
-       * that kept working offline against a stored token replays a queue of
-       * genuinely tracked time into 401s. Thirty days makes the ordinary gap
-       * (a week away, a phone in a drawer) survivable; `updateAge` means one
-       * refresh write a day rather than one per request.
-       *
-       * Revocation is unaffected: Settings → Devices deletes the row and the
-       * next request fails immediately regardless of this window.
+       * Thirty days rather than better-auth's seven, and **global** — this
+       * lengthens the web app's browser cookie sessions exactly as much as the
+       * mobile app's stored tokens. The argument for the number, the web
+       * consequence, and why better-auth 1.6.11 cannot scope it per client are
+       * all in `auth/session-lifetime.ts`. Read that before changing it.
        */
-      expiresIn: 60 * 60 * 24 * 30,
-      updateAge: 60 * 60 * 24,
+      expiresIn: SESSION_EXPIRES_IN_SECONDS,
+      updateAge: SESSION_UPDATE_AGE_SECONDS,
       cookieCache: {
         enabled: true,
         maxAge: 5 * 60, // 5 minutes
