@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG BUILDS ONLY (src/debug/ — the release variant never sees this file).
+
+  Android blocks cleartext HTTP for targetSdk 28+, and Capacitor 8's Android
+  runtime no longer reads `server.cleartext` from capacitor.config.ts at all
+  (there is no reference to it anywhere in @capacitor/android's Java sources),
+  so the app itself has to permit it. Without this, a dev build against
+  `pnpm run dev` fails every request with ERR_CLEARTEXT_NOT_PERMITTED — which
+  looks exactly like a wrong port or a 403 INVALID_ORIGIN from the WebView.
+
+  Three hosts, all of which only ever mean "the machine running the dev stack":
+
+    localhost / 127.0.0.1  the device's own loopback, which is where
+                           `adb reverse tcp:<port> tcp:<port>` lands. This is
+                           the one to prefer: a bundled build's document origin
+                           is https://localhost, and a fetch from an https
+                           document to a plain-http one is blocked as mixed
+                           content unless the target is a loopback address.
+    10.0.2.2               the Android emulator's NAT alias for the host. Used
+                           by scripts/android-dev.sh's live-reload mode, where
+                           the document itself is http:// and mixed content
+                           does not arise.
+
+  Release builds keep Android's default (no cleartext to anything), which is
+  stricter than the iOS side's ATS exception in ios/App/App/Info.plist.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

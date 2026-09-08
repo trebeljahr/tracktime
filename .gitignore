@@ -39,12 +39,15 @@ src-tauri/gen/
 # extraction). .github/workflows/mobile-release.yml also assumes the tree
 # exists in a fresh checkout while never running `cap add`.
 #
-# Generated-but-tracked inside it: ios/App/CapApp-SPM/Package.swift is rewritten
-# by every `cap sync`, so a diff there after a build is normal. Commit it when
-# the plugin set changed.
+# android/ is COMMITTED for the same reasons: `namespace`, `applicationId`,
+# `versionName`, the display name and the cleartext-dev network config are all
+# hand-edits that `cap add android` does not write, and mobile-release.yml
+# expects the tree to exist in a fresh checkout without ever running `cap add`.
 #
-# android/ is still generated — un-ignore it when the Android stage lands.
-android/
+# Generated-but-tracked inside them: ios/App/CapApp-SPM/Package.swift is
+# rewritten by every `cap sync`, and so are android/capacitor.settings.gradle
+# and android/app/capacitor.build.gradle — a diff there after a build is
+# normal. Commit them when the plugin set changed.
 
 # Next.js static export output.
 # out/        — web build (`pnpm build:client`), Playwright, and the

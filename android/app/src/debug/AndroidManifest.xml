@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-variant manifest overlay. It adds exactly one attribute to the
+  application node, pointing at res/xml/network_security_config.xml in this
+  same source set — see that file for why. The main manifest is untouched, so
+  a release build gets no cleartext exception at all.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+</manifest>
