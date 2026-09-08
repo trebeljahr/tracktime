@@ -195,6 +195,41 @@ test.describe("web app at phone width", () => {
     );
     expect(offset).toBe("");
   });
+
+  test("keeps popovers on their own collision padding", async ({ page }) => {
+    // The popover half of the dialog rule above. A Radix popover is placed by
+    // Floating UI against the LAYOUT viewport, which under `viewport-fit=cover`
+    // starts at the physical top of the screen — so on a phone a panel with
+    // nowhere to go is shifted under the Dynamic Island. CSS cannot move it
+    // back (the popper wrapper's `transform` is inline and computed from those
+    // measurements), so ui/popover.tsx widens `collisionPadding` by the insets
+    // that native.css publishes.
+    //
+    // On web there are no such properties to read, so the widening must not
+    // happen at all — and the size bound native.css puts on the panel must not
+    // apply either.
+    const insets = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      return [
+        "--app-safe-area-top",
+        "--app-safe-area-right",
+        "--app-safe-area-bottom",
+        "--app-safe-area-left",
+      ].map((name) => style.getPropertyValue(name).trim());
+    });
+    expect(insets).toEqual(["", "", "", ""]);
+
+    await page.getByTestId("tracker-project").click();
+    const popover = page.locator('[data-slot="popover-content"]');
+    await expect(popover).toBeVisible();
+
+    const style = await popover.evaluate((el) => {
+      const computed = getComputedStyle(el);
+      return { maxHeight: computed.maxHeight, maxWidth: computed.maxWidth };
+    });
+    expect(style.maxHeight).toBe("none");
+    expect(style.maxWidth).toBe("none");
+  });
 });
 
 test.describe("the installed PWA at phone width", () => {

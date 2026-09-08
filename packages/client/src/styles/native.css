@@ -40,6 +40,26 @@ html.cap {
    */
   --app-tab-bar-offset: calc(3.5rem + env(safe-area-inset-bottom, 0px));
 
+  /*
+   * The four insets on their own, as plain lengths, for the code that cannot
+   * be written in CSS at all: a Radix popover is positioned by Floating UI,
+   * which measures collisions against the layout viewport — and under
+   * `viewport-fit=cover` that viewport runs under the Dynamic Island. There
+   * is no CSS override for it (the popper wrapper carries an inline
+   * `transform`, so nothing here can clamp where it lands), so
+   * lib/safe-area.ts reads these four values and ui/popover.tsx feeds them to
+   * `collisionPadding`. `env()` inside a custom property is substituted at
+   * computed-value time exactly like `var()`, so `getPropertyValue` hands
+   * back a resolved `59px`, not the literal `env(…)`.
+   *
+   * On web these are never defined, `readSafeAreaInsets()` reads "" from
+   * every one of them, and the popover's collision padding is returned
+   * unchanged — the same object identity it was passed.
+   */
+  --app-safe-area-top: env(safe-area-inset-top, 0px);
+  --app-safe-area-right: env(safe-area-inset-right, 0px);
+  --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --app-safe-area-left: env(safe-area-inset-left, 0px);
 
   /* A grey flash on every tap is a browser affordance, not an app one. */
   -webkit-tap-highlight-color: transparent;
@@ -121,6 +141,30 @@ html.cap [data-slot="dialog-content"] {
   max-height: calc(
     100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 2rem
   );
+}
+
+/*
+ * Popovers get the size half of the same treatment. Placement is not settable
+ * from here — a Radix popover is positioned by Floating UI through an inline
+ * `transform` on the popper wrapper, so ui/popover.tsx widens
+ * `collisionPadding` by the insets instead (lib/safe-area.ts explains why that
+ * is the only lever). What CSS can still do is stop a tall panel from running
+ * off both ends of a phone: bound it to the space between the insets and let
+ * it scroll, rather than putting its Delete button somewhere no finger
+ * reaches. The calendar's entry editor is the one that needs it — description,
+ * project, task, tags, two time fields, a switch and two buttons.
+ *
+ * `2rem` of breathing room for the same reason the dialog rule uses it, and
+ * the same number, so the two panels sit on the same grid.
+ */
+html.cap [data-slot="popover-content"] {
+  max-height: calc(
+    100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 2rem
+  );
+  max-width: calc(
+    100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 2rem
+  );
+  overflow-y: auto;
 }
 
 /* ── The software keyboard ──────────────────────────────────────────── */
